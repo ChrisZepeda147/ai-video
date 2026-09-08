@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=720, height=1280, initial-scale=1" />
+  <title>iMessage Story</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 720px;
+      height: 1280px;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      background: #fff;
+      color: #000;
+    }
+    .phone {
+      width: 720px;
+      height: 1280px;
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+    }
+    .status-bar {
+      height: 54px;
+      padding: 14px 28px 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 24px;
+      font-weight: 600;
+      letter-spacing: -0.3px;
+    }
+    .status-icons { display: flex; gap: 8px; align-items: center; font-size: 20px; }
+    .header {
+      height: 88px;
+      border-bottom: 1px solid #d7d7db;
+      display: grid;
+      grid-template-columns: 80px 1fr 80px;
+      align-items: center;
+      padding: 0 16px;
+      background: #f9f9f9;
+    }
+    .back { color: #007aff; font-size: 34px; line-height: 1; font-weight: 300; }
+    .contact {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+    .avatar {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: linear-gradient(145deg, #8e8e93, #636366);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      font-weight: 600;
+    }
+    .contact-name { font-size: 18px; font-weight: 600; }
+    .video-icon { text-align: right; color: #007aff; font-size: 28px; }
+    .thread-wrap {
+      flex: 1;
+      overflow: hidden;
+      background: #fff;
+      position: relative;
+    }
+    .thread {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      padding: 24px 18px 120px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .row {
+      display: flex;
+      width: 100%;
+    }
+    .row.me { justify-content: flex-end; }
+    .row.them { justify-content: flex-start; }
+    .bubble {
+      max-width: 78%;
+      padding: 14px 18px;
+      border-radius: 22px;
+      font-size: 28px;
+      line-height: 1.25;
+      word-wrap: break-word;
+      white-space: pre-wrap;
+      opacity: 0;
+      transform: translateY(12px) scale(0.98);
+      animation: popIn 0.28s ease forwards;
+    }
+    .bubble.me {
+      background: #007aff;
+      color: #fff;
+      border-bottom-right-radius: 6px;
+    }
+    .bubble.them {
+      background: #e9e9eb;
+      color: #000;
+      border-bottom-left-radius: 6px;
+    }
+    .typing {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #e9e9eb;
+      border-radius: 22px;
+      border-bottom-left-radius: 6px;
+      padding: 18px 20px;
+      opacity: 0;
+      animation: popIn 0.2s ease forwards;
+    }
+    .dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #8e8e93;
+      animation: bounce 1.1s infinite ease-in-out;
+    }
+    .dot:nth-child(2) { animation-delay: 0.15s; }
+    .dot:nth-child(3) { animation-delay: 0.3s; }
+    .input-bar {
+      height: 92px;
+      border-top: 1px solid #d7d7db;
+      background: #f9f9f9;
+      display: flex;
+      align-items: center;
+      padding: 0 18px;
+      gap: 14px;
+    }
+    .plus, .mic {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: #e5e5ea;
+      color: #8e8e93;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 26px;
+      font-weight: 300;
+    }
+    .input-fake {
+      flex: 1;
+      height: 44px;
+      border-radius: 22px;
+      border: 1px solid #d1d1d6;
+      background: #fff;
+    }
+    @keyframes popIn {
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @keyframes bounce {
+      0%, 80%, 100% { transform: translateY(0); opacity: 0.45; }
+      40% { transform: translateY(-5px); opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <div class="phone">
+    <div class="status-bar">
+      <span id="clock">9:41</span>
+      <div class="status-icons"><span>●●●●</span><span>WiFi</span><span>🔋</span></div>
+    </div>
+    <div class="header">
+      <div class="back">‹</div>
+      <div class="contact">
+        <div class="avatar" id="avatar">J</div>
+        <div class="contact-name" id="contact-name">Contact</div>
+      </div>
+      <div class="video-icon">📹</div>
+    </div>
+    <div class="thread-wrap">
+      <div class="thread" id="thread"></div>
+    </div>
+    <div class="input-bar">
+      <div class="plus">+</div>
+      <div class="input-fake"></div>
+      <div class="mic">🎙</div>
+    </div>
+  </div>
+  <script>
+    const STORY = __STORY_JSON__;
+    window.storyComplete = false;
+
+    document.getElementById("contact-name").textContent = STORY.contact.name;
+    document.getElementById("avatar").textContent = STORY.contact.initials || STORY.contact.name.slice(0, 1).toUpperCase();
+    if (STORY.status_time) document.getElementById("clock").textContent = STORY.status_time;
+
+    const thread = document.getElementById("thread");
+
+    function sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    function appendBubble(side, text) {
+      const row = document.createElement("div");
+      row.className = `row ${side}`;
+      const bubble = document.createElement("div");
+      bubble.className = `bubble ${side}`;
+      bubble.textContent = text;
+      row.appendChild(bubble);
+      thread.appendChild(row);
+      row.scrollIntoView({ block: "end", behavior: "smooth" });
+    }
+
+    function showTyping(side) {
+      const row = document.createElement("div");
+      row.className = `row ${side}`;
+      row.id = "typing-row";
+      const typing = document.createElement("div");
+      typing.className = "typing";
+      typing.innerHTML = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
+      row.appendChild(typing);
+      thread.appendChild(row);
+    }
+
+    function hideTyping() {
+      const row = document.getElementById("typing-row");
+      if (row) row.remove();
+    }
+
+    async function playStory() {
+      await sleep(STORY.intro_delay_ms || 600);
+      for (const item of STORY.messages) {
+        if (item.typing) {
+          const side = item.typing === "me" ? "me" : "them";
+          showTyping(side);
+          await sleep(item.duration_ms || 1400);
+          hideTyping();
+          continue;
+        }
+        await sleep(item.delay_ms || 900);
+        const side = item.from === "me" ? "me" : "them";
+        appendBubble(side, item.text);
+      }
+      await sleep(STORY.post_roll_ms || 2500);
+      window.storyComplete = true;
+    }
+
+    playStory();
+  </script>
+</body>
+</html>

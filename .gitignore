@@ -1,0 +1,13 @@
+.env
+scripts/.env
+scripts/.tiktok_tokens.json
+downloads/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Kinocut is cloned locally from github.com/KyaniteLabs/kinocut (see README)
+tools/kinocut/

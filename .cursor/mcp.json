@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "kinocut": {
+      "command": "C:\\Users\\Zev\\Desktop\\Ai-Video\\tools\\kinocut\\.venv\\Scripts\\kino.exe",
+      "args": ["--mcp"]
+    }
+  }
+}
