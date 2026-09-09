@@ -51,7 +51,7 @@ STORY_OVERLAP_MIN_SHARED = 8
 PHOTO_TOKEN_THRESHOLD = 0.82
 
 PHOTO_EXCLUDE_NAMES = {"reference.png"}
-PHOTO_EXCLUDE_DIRS = {"references"}
+PHOTO_EXCLUDE_DIRS = {"references", "captioned"}
 
 
 @dataclass
@@ -284,12 +284,17 @@ def scan_photos(root: Path) -> list[dict[str, Any]]:
     if not folder.is_dir():
         return []
     rows: list[dict[str, Any]] = []
-    for path in sorted(folder.iterdir()):
-        if not path.is_file() or path.suffix.lower() not in PHOTO_EXTS:
-            continue
-        if path.name.lower() in PHOTO_EXCLUDE_NAMES:
-            continue
-        rows.append(photo_record(path, root))
+    search_dirs = [folder]
+    for child in sorted(folder.iterdir()):
+        if child.is_dir() and child.name.lower() not in PHOTO_EXCLUDE_DIRS:
+            search_dirs.append(child)
+    for directory in search_dirs:
+        for path in sorted(directory.iterdir()):
+            if not path.is_file() or path.suffix.lower() not in PHOTO_EXTS:
+                continue
+            if path.name.lower() in PHOTO_EXCLUDE_NAMES:
+                continue
+            rows.append(photo_record(path, root))
     return rows
 
 

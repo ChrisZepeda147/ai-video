@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-09-08T04:32:26+00:00",
+  "updated_at": "2026-09-09T20:39:12+00:00",
   "photos": [
     {
       "id": "photo:purple-gt3rs-forest-mansion",
@@ -54,6 +54,114 @@
         "yacht"
       ],
       "sha256": "2518d7fb8f689034d93425f66425fc2316fe7d46df4d890b1208075a57f4bb8a"
+    },
+    {
+      "id": "photo:nyc-penthouse-bath-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/nyc-penthouse/nyc-penthouse-bath-dusk.png",
+      "slug": "nyc-penthouse-bath-dusk",
+      "title": "nyc penthouse bath dusk",
+      "tokens": [
+        "bath",
+        "dusk",
+        "nyc",
+        "penthouse"
+      ],
+      "sha256": "57f4a9b68763b819749f488e5ff490cd42b42b24d264a642ae5f58dd19f44d60"
+    },
+    {
+      "id": "photo:nyc-penthouse-bedroom-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/nyc-penthouse/nyc-penthouse-bedroom-dusk.png",
+      "slug": "nyc-penthouse-bedroom-dusk",
+      "title": "nyc penthouse bedroom dusk",
+      "tokens": [
+        "bedroom",
+        "dusk",
+        "nyc",
+        "penthouse"
+      ],
+      "sha256": "625177732df7c2785693171c50bf27455f069a657872eb330e913c65def49e42"
+    },
+    {
+      "id": "photo:nyc-penthouse-dining-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/nyc-penthouse/nyc-penthouse-dining-dusk.png",
+      "slug": "nyc-penthouse-dining-dusk",
+      "title": "nyc penthouse dining dusk",
+      "tokens": [
+        "dining",
+        "dusk",
+        "nyc",
+        "penthouse"
+      ],
+      "sha256": "16578bb1a009615c50ef6638e422d80d344f5ede2da1aa429d375c9f58376330"
+    },
+    {
+      "id": "photo:nyc-penthouse-kitchen-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/nyc-penthouse/nyc-penthouse-kitchen-dusk.png",
+      "slug": "nyc-penthouse-kitchen-dusk",
+      "title": "nyc penthouse kitchen dusk",
+      "tokens": [
+        "dusk",
+        "kitchen",
+        "nyc",
+        "penthouse"
+      ],
+      "sha256": "549b49f612ac109debc06c1a059513337ea74a401f847e9b6e1aea132b78c6bf"
+    },
+    {
+      "id": "photo:nyc-penthouse-living-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/nyc-penthouse/nyc-penthouse-living-dusk.png",
+      "slug": "nyc-penthouse-living-dusk",
+      "title": "nyc penthouse living dusk",
+      "tokens": [
+        "dusk",
+        "living",
+        "nyc",
+        "penthouse"
+      ],
+      "sha256": "ed5d385b535f2b124ba63782ec99c9d3bddec38a60cd1c39603a56365a4227f0"
+    },
+    {
+      "id": "photo:nyc-penthouse-terrace-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/nyc-penthouse/nyc-penthouse-terrace-dusk.png",
+      "slug": "nyc-penthouse-terrace-dusk",
+      "title": "nyc penthouse terrace dusk",
+      "tokens": [
+        "dusk",
+        "nyc",
+        "penthouse",
+        "terrace"
+      ],
+      "sha256": "78893ff72c6de1cfeadd72f932c9605187e3d4cf32124cb13ce2e0cde5f17372"
+    },
+    {
+      "id": "photo:nounusedtime-avatar",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/nounusedtime-avatar.png",
+      "slug": "nounusedtime-avatar",
+      "title": "nounusedtime avatar",
+      "tokens": [
+        "avatar",
+        "nounusedtime"
+      ],
+      "sha256": "741709fca0756f73e66f1b89b881ac51f9b22bd8cd8488c8626a9d007f9046fd"
+    },
+    {
+      "id": "photo:nounusedtime-mark",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/nounusedtime-mark.png",
+      "slug": "nounusedtime-mark",
+      "title": "nounusedtime mark",
+      "tokens": [
+        "mark",
+        "nounusedtime"
+      ],
+      "sha256": "48120704af7b16b3fa42cfffb2368378f9a2e92d74251ceffd7afb9b1fee5ede"
     }
   ],
   "videos": [
