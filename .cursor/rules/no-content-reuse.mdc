@@ -5,13 +5,14 @@ alwaysApply: true
 
 # No content reuse
 
-Before creating a still, story, or picking a background video, check what is already used.
+Before creating a still, story, or picking a background video, check what is already used. Do **not** read `content/used.json` into chat — it is huge. Prefer `python scripts/content_reuse.py check-*` or let the job script handle it.
 
-1. Run `python scripts/content_reuse.py list` or read `content/used.json`.
+1. Still / story jobs: run `python scripts/content_reuse.py check-photo` / `check-story`. Montage jobs (`build_motivation_job.py`): skip the catalog. Script already skips used YouTube IDs and rebuilds after.
 2. Stories: new title, hook, and plot. Do not rewrite Don't Go Inside, 4C, the roommate camera story, or anything else in the catalog.
 3. Photos: new subject/setting slug. Do not regenerate or overwrite an existing still in `prompts/dark-luxury-still/`.
-4. Videos: do not re-download or re-cut a YouTube id already in the catalog.
-5. After creating something new, run `python scripts/content_reuse.py rebuild`.
+4. Houses and locations: be unique. Run `python scripts/content_reuse.py check-photo --slug "..." --subject "..."`. Do not repeat the same house type, city, or estate (e.g. another LA minimalist mansion if one exists). Change city, architecture, and setting every time — not just the car or time of day.
+5. Videos: do not re-download or re-cut a YouTube id already in the catalog. Speech tracks count. Montage jobs: `build_motivation_job.py` picks a new unused speech. Do not copy another job's MP3/subs.
+6. After a still or story, run `python scripts/content_reuse.py rebuild`. Skip if the job script already rebuilt.
 
 ```
 python scripts/content_reuse.py check-story --title "..." --hook "..." --text "..."

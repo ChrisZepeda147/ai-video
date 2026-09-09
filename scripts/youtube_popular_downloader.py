@@ -607,8 +607,9 @@ def download_videos(
         "format": format_selector,
         "merge_output_format": "mp4",
         "noplaylist": True,
-        "quiet": False,
-        "no_warnings": False,
+        "quiet": True,
+        "noprogress": True,
+        "no_warnings": True,
         "writethumbnail": not audio_only,
         "writeinfojson": True,
         "postprocessors": postprocessors,
@@ -814,6 +815,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Allow downloading a YouTube video you already used",
     )
+    common.add_argument(
+        "--any-topic",
+        action="store_true",
+        help="Skip background-gameplay title filter (car B-roll, nature, etc.)",
+    )
 
     trending = sub.add_parser(
         "trending",
@@ -826,11 +832,6 @@ def build_parser() -> argparse.ArgumentParser:
         choices=sorted(CATEGORY_IDS),
         default="gaming",
         help="Optional API category supplement (default: gaming)",
-    )
-    trending.add_argument(
-        "--any-topic",
-        action="store_true",
-        help="Skip background-gameplay title scoring (not recommended)",
     )
     trending.add_argument(
         "--api-key",
@@ -925,7 +926,7 @@ def main() -> int:
     include_music = args.include_music or (
         args.mode == "trending" and getattr(args, "category", None) == "music"
     )
-    background_only = args.mode != "urls" and not getattr(args, "any_topic", False)
+    background_only = args.mode != "urls" and not args.any_topic
     if args.mode != "urls":
         candidates = filter_unwanted(
             candidates,

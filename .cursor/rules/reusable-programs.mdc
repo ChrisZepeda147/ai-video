@@ -1,0 +1,27 @@
+---
+description: Prefer reusable, parameterized programs over one-off hardcoded scripts
+alwaysApply: true
+---
+
+# Reusable programs
+
+Scripts and tools in this project should be dynamic enough to reuse on the next video, still set, or story. Do not bake one job into the code.
+
+- Take inputs as CLI flags, config, or env — not hardcoded paths, titles, slugs, YouTube IDs, or durations.
+- Parameterize the things that change: input/output dirs, audio, captions, resolution, timing, count, style slug.
+- Keep job-specific values in `downloads/`, `prompts/`, or a small config next to the job. The program stays generic.
+- Prefer one script with flags over a copy (`build_tate_slideshow.py`) for the next piece.
+- Sensible defaults are fine. Required paths should still be arguments.
+- Share helpers instead of duplicating FFmpeg, caption, or download logic.
+
+```
+# ❌ BAD — one video only
+stills = Path("downloads/motivational/tate-luxury/stills")
+audio = Path("downloads/motivational/tate-luxury/audio/speech.mp3")
+output = Path("downloads/motivational/tate-luxury/output/tate.mp4")
+
+# ✅ GOOD — same tool, any job
+python scripts/build_stills_slideshow.py --stills ... --audio ... --output ...
+```
+
+A one-off is OK only if the user asked for a throwaway. Otherwise write it so the next job can call it with new args.

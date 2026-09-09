@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-09-09T23:09:32+00:00",
+  "updated_at": "2026-09-08T04:32:26+00:00",
   "photos": [
     {
       "id": "photo:purple-gt3rs-forest-mansion",
@@ -54,6 +54,266 @@
         "yacht"
       ],
       "sha256": "2518d7fb8f689034d93425f66425fc2316fe7d46df4d890b1208075a57f4bb8a"
+    },
+    {
+      "id": "photo:nyc-penthouse-bath-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/nyc-penthouse/nyc-penthouse-bath-dusk.png",
+      "slug": "nyc-penthouse-bath-dusk",
+      "title": "nyc penthouse bath dusk",
+      "tokens": [
+        "bath",
+        "dusk",
+        "nyc",
+        "penthouse"
+      ],
+      "sha256": "57f4a9b68763b819749f488e5ff490cd42b42b24d264a642ae5f58dd19f44d60"
+    },
+    {
+      "id": "photo:nyc-penthouse-bedroom-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/nyc-penthouse/nyc-penthouse-bedroom-dusk.png",
+      "slug": "nyc-penthouse-bedroom-dusk",
+      "title": "nyc penthouse bedroom dusk",
+      "tokens": [
+        "bedroom",
+        "dusk",
+        "nyc",
+        "penthouse"
+      ],
+      "sha256": "625177732df7c2785693171c50bf27455f069a657872eb330e913c65def49e42"
+    },
+    {
+      "id": "photo:nyc-penthouse-dining-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/nyc-penthouse/nyc-penthouse-dining-dusk.png",
+      "slug": "nyc-penthouse-dining-dusk",
+      "title": "nyc penthouse dining dusk",
+      "tokens": [
+        "dining",
+        "dusk",
+        "nyc",
+        "penthouse"
+      ],
+      "sha256": "16578bb1a009615c50ef6638e422d80d344f5ede2da1aa429d375c9f58376330"
+    },
+    {
+      "id": "photo:nyc-penthouse-kitchen-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/nyc-penthouse/nyc-penthouse-kitchen-dusk.png",
+      "slug": "nyc-penthouse-kitchen-dusk",
+      "title": "nyc penthouse kitchen dusk",
+      "tokens": [
+        "dusk",
+        "kitchen",
+        "nyc",
+        "penthouse"
+      ],
+      "sha256": "549b49f612ac109debc06c1a059513337ea74a401f847e9b6e1aea132b78c6bf"
+    },
+    {
+      "id": "photo:nyc-penthouse-living-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/nyc-penthouse/nyc-penthouse-living-dusk.png",
+      "slug": "nyc-penthouse-living-dusk",
+      "title": "nyc penthouse living dusk",
+      "tokens": [
+        "dusk",
+        "living",
+        "nyc",
+        "penthouse"
+      ],
+      "sha256": "ed5d385b535f2b124ba63782ec99c9d3bddec38a60cd1c39603a56365a4227f0"
+    },
+    {
+      "id": "photo:nyc-penthouse-terrace-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/nyc-penthouse/nyc-penthouse-terrace-dusk.png",
+      "slug": "nyc-penthouse-terrace-dusk",
+      "title": "nyc penthouse terrace dusk",
+      "tokens": [
+        "dusk",
+        "nyc",
+        "penthouse",
+        "terrace"
+      ],
+      "sha256": "78893ff72c6de1cfeadd72f932c9605187e3d4cf32124cb13ce2e0cde5f17372"
+    },
+    {
+      "id": "photo:nounusedtime-avatar",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/nounusedtime-avatar.png",
+      "slug": "nounusedtime-avatar",
+      "title": "nounusedtime avatar",
+      "tokens": [
+        "avatar",
+        "nounusedtime"
+      ],
+      "sha256": "741709fca0756f73e66f1b89b881ac51f9b22bd8cd8488c8626a9d007f9046fd"
+    },
+    {
+      "id": "photo:nounusedtime-mark",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/nounusedtime-mark.png",
+      "slug": "nounusedtime-mark",
+      "title": "nounusedtime mark",
+      "tokens": [
+        "mark",
+        "nounusedtime"
+      ],
+      "sha256": "48120704af7b16b3fa42cfffb2368378f9a2e92d74251ceffd7afb9b1fee5ede"
+    },
+    {
+      "id": "photo:ap-rm-watch-detail-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/tate-motivation/ap-rm-watch-detail-dusk.png",
+      "slug": "ap-rm-watch-detail-dusk",
+      "title": "ap rm watch detail dusk",
+      "tokens": [
+        "detail",
+        "dusk",
+        "watch"
+      ],
+      "sha256": "0dd2ae27a17bb968b5e9fc91aff1d6d737563b91b45eec0526fc816d14cfe837"
+    },
+    {
+      "id": "photo:dubai-skyline-terrace-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/tate-motivation/dubai-skyline-terrace-dusk.png",
+      "slug": "dubai-skyline-terrace-dusk",
+      "title": "dubai skyline terrace dusk",
+      "tokens": [
+        "dubai",
+        "dusk",
+        "skyline",
+        "terrace"
+      ],
+      "sha256": "6600ac815dce3a9f7b01de080c5fd06e3fba5169e65bc3d8858725be113fc684"
+    },
+    {
+      "id": "photo:ferrari-pista-garage-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/tate-motivation/ferrari-pista-garage-dusk.png",
+      "slug": "ferrari-pista-garage-dusk",
+      "title": "ferrari pista garage dusk",
+      "tokens": [
+        "dusk",
+        "ferrari",
+        "garage",
+        "pista"
+      ],
+      "sha256": "713fcfc611b9b84668cca89df8a88b4cd5c13979c1e7d9cce83865946e018c3d"
+    },
+    {
+      "id": "photo:lambo-aventador-driveway-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/tate-motivation/lambo-aventador-driveway-dusk.png",
+      "slug": "lambo-aventador-driveway-dusk",
+      "title": "lambo aventador driveway dusk",
+      "tokens": [
+        "aventador",
+        "driveway",
+        "dusk",
+        "lambo"
+      ],
+      "sha256": "7a0bd142c1e0899e6e374768e0e1dcf7eda0ba2efe53fb9b04e3a34ae7a46025"
+    },
+    {
+      "id": "photo:malibu-cliff-house-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/tate-motivation/malibu-cliff-house-dusk.png",
+      "slug": "malibu-cliff-house-dusk",
+      "title": "malibu cliff house dusk",
+      "tokens": [
+        "cliff",
+        "dusk",
+        "house",
+        "malibu"
+      ],
+      "sha256": "bb502c803ec38452e81cc890442359cc470cab8c0e26a0394af233266759c6de"
+    },
+    {
+      "id": "photo:miami-waterfront-villa-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/tate-motivation/miami-waterfront-villa-dusk.png",
+      "slug": "miami-waterfront-villa-dusk",
+      "title": "miami waterfront villa dusk",
+      "tokens": [
+        "dusk",
+        "miami",
+        "villa",
+        "waterfront"
+      ],
+      "sha256": "61356ee9a466c4ab3bf3bc9f9ebe439c04ec039da686fc2b5ad2079480d7269a"
+    },
+    {
+      "id": "photo:monaco-harbor-view-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/tate-motivation/monaco-harbor-view-dusk.png",
+      "slug": "monaco-harbor-view-dusk",
+      "title": "monaco harbor view dusk",
+      "tokens": [
+        "dusk",
+        "harbor",
+        "monaco",
+        "view"
+      ],
+      "sha256": "6ed9fbfe18c28b969817797988e4e1ad639fbaaf58151f7de70b53192bb99556"
+    },
+    {
+      "id": "photo:patek-complications-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/tate-motivation/patek-complications-dusk.png",
+      "slug": "patek-complications-dusk",
+      "title": "patek complications dusk",
+      "tokens": [
+        "complications",
+        "dusk",
+        "patek"
+      ],
+      "sha256": "f90ee114ffa9ca7fb246561182db07c192c81dd6e1da11192a21a0f965bbe6dd"
+    },
+    {
+      "id": "photo:rolls-phantom-mansion-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/tate-motivation/rolls-phantom-mansion-dusk.png",
+      "slug": "rolls-phantom-mansion-dusk",
+      "title": "rolls phantom mansion dusk",
+      "tokens": [
+        "dusk",
+        "mansion",
+        "phantom",
+        "rolls"
+      ],
+      "sha256": "254b7b968c01518f3b4be3f76b8f74db2f89f7b4c999eaa51421681615885e79"
+    },
+    {
+      "id": "photo:swiss-alps-penthouse-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/tate-motivation/swiss-alps-penthouse-dusk.png",
+      "slug": "swiss-alps-penthouse-dusk",
+      "title": "swiss alps penthouse dusk",
+      "tokens": [
+        "alps",
+        "dusk",
+        "penthouse",
+        "swiss"
+      ],
+      "sha256": "a647523b27e0988b74dfa4862a8a08fc8971aa73ed0c6d862cb91b61ee8ff4e8"
+    },
+    {
+      "id": "photo:amalfi-coast-villa-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/tate-motivation/amalfi-coast-villa-dusk.png",
+      "slug": "amalfi-coast-villa-dusk",
+      "title": "amalfi coast villa dusk",
+      "tokens": [
+        "amalfi",
+        "coast",
+        "dusk",
+        "villa"
+      ],
+      "sha256": "ef707bb628cb050a5df930ff4fab62aafe79751264987e37a5ac34a5fa71a78d"
     }
   ],
   "videos": [
@@ -107,126 +367,6 @@
       "title": "svj-pair-la-mansion-move",
       "youtube_id": null,
       "sha256": "e5842d55aeff7012fbdbbea0ed378ed20df26233a0e5828ecbabd2cc6ae5f0c6"
-    },
-    {
-      "id": "video:short0000001",
-      "kind": "video",
-      "path": "C:/Users/chris/AppData/Local/Temp/tmppb_mnx6e/final.mp4",
-      "paths": [
-        "C:/Users/chris/AppData/Local/Temp/tmppb_mnx6e/final.mp4"
-      ],
-      "slug": "short0000001",
-      "title": "Approved Short",
-      "youtube_id": "short0000001",
-      "sha256": "b5d54c39e66671c9731b9f471e585d8262cd4f54963f0c93082d8dcf334d4c78"
-    },
-    {
-      "id": "video:final",
-      "kind": "video",
-      "path": "downloads/production/test-render/final.mp4",
-      "paths": [
-        "downloads/production/test-render/final.mp4"
-      ],
-      "slug": "final",
-      "title": "final",
-      "youtube_id": null,
-      "sha256": "c9b936a163cb84ee9137fa239ae9050c5831a36156f4e61ab291e13454b3b9ce"
-    },
-    {
-      "id": "video:captioned",
-      "kind": "video",
-      "path": "downloads/production/test-render/work/captioned.mp4",
-      "paths": [
-        "downloads/production/test-render/work/captioned.mp4"
-      ],
-      "slug": "captioned",
-      "title": "captioned",
-      "youtube_id": null,
-      "sha256": "c9b936a163cb84ee9137fa239ae9050c5831a36156f4e61ab291e13454b3b9ce"
-    },
-    {
-      "id": "video:concat",
-      "kind": "video",
-      "path": "downloads/production/test-render/work/concat.mp4",
-      "paths": [
-        "downloads/production/test-render/work/concat.mp4"
-      ],
-      "slug": "concat",
-      "title": "concat",
-      "youtube_id": null,
-      "sha256": "c9b936a163cb84ee9137fa239ae9050c5831a36156f4e61ab291e13454b3b9ce"
-    },
-    {
-      "id": "video:seg-000",
-      "kind": "video",
-      "path": "downloads/production/test-render/work/seg_000.mp4",
-      "paths": [
-        "downloads/production/test-render/work/seg_000.mp4"
-      ],
-      "slug": "seg-000",
-      "title": "seg 000",
-      "youtube_id": null,
-      "sha256": "c9b936a163cb84ee9137fa239ae9050c5831a36156f4e61ab291e13454b3b9ce"
-    },
-    {
-      "id": "video:with-audio",
-      "kind": "video",
-      "path": "downloads/production/test-render/work/with_audio.mp4",
-      "paths": [
-        "downloads/production/test-render/work/with_audio.mp4"
-      ],
-      "slug": "with-audio",
-      "title": "with audio",
-      "youtube_id": null,
-      "sha256": "c9b936a163cb84ee9137fa239ae9050c5831a36156f4e61ab291e13454b3b9ce"
-    },
-    {
-      "id": "video:pub00000001",
-      "kind": "video",
-      "path": "C:/Users/chris/AppData/Local/Temp/tmp5vqin1wx/final.mp4",
-      "paths": [
-        "C:/Users/chris/AppData/Local/Temp/tmp5vqin1wx/final.mp4"
-      ],
-      "slug": "pub00000001",
-      "title": "Approved Short",
-      "youtube_id": "pub00000001",
-      "sha256": "c9b936a163cb84ee9137fa239ae9050c5831a36156f4e61ab291e13454b3b9ce"
-    },
-    {
-      "id": "video:anlux000001",
-      "kind": "video",
-      "path": "C:/Users/chris/AppData/Local/Temp/tmpo719hmpy/final.mp4",
-      "paths": [
-        "C:/Users/chris/AppData/Local/Temp/tmpo719hmpy/final.mp4"
-      ],
-      "slug": "anlux000001",
-      "title": "Luxury Short",
-      "youtube_id": "anlux000001",
-      "sha256": "c9b936a163cb84ee9137fa239ae9050c5831a36156f4e61ab291e13454b3b9ce"
-    },
-    {
-      "id": "video:pub00000003",
-      "kind": "video",
-      "path": "C:/Users/chris/AppData/Local/Temp/tmphmh6y6c6/final2.mp4",
-      "paths": [
-        "C:/Users/chris/AppData/Local/Temp/tmphmh6y6c6/final2.mp4"
-      ],
-      "slug": "pub00000003",
-      "title": "Test Short 2",
-      "youtube_id": "pub00000003",
-      "sha256": "b5d54c39e66671c9731b9f471e585d8262cd4f54963f0c93082d8dcf334d4c78"
-    },
-    {
-      "id": "video:pub00000002",
-      "kind": "video",
-      "path": "C:/Users/chris/AppData/Local/Temp/tmpyrcwppc5/final.mp4",
-      "paths": [
-        "C:/Users/chris/AppData/Local/Temp/tmpyrcwppc5/final.mp4"
-      ],
-      "slug": "pub00000002",
-      "title": "Test Short",
-      "youtube_id": "pub00000002",
-      "sha256": "b5d54c39e66671c9731b9f471e585d8262cd4f54963f0c93082d8dcf334d4c78"
     }
   ],
   "stories": [

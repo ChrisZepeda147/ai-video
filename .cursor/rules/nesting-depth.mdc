@@ -1,0 +1,62 @@
+---
+description: >-
+  Nesting depth limits for control flow. Use when writing or editing functions,
+  handlers, components, loops, try/catch, or deeply nested if/else — prefer
+  guards and helpers over 4+ levels.
+alwaysApply: false
+---
+
+# Nesting Depth
+
+Count nested control-flow blocks (`if`/`else`, loops, `try`/`catch`, switch, callbacks). Prefer shallow structure.
+
+## Depth Thresholds
+
+| Depth | Verdict |
+|-------|---------|
+| 1–2 levels | Optimal. Logic stays readable. |
+| 3 levels | Upper limit. Proceed cautiously. |
+| 4+ levels | Too deep. Refactor before shipping. |
+
+## When Approaching Or Past Limit
+
+Flatten with one of these (prefer first that fits):
+
+1. **Guard clauses / early return** — peel happy path out of nested `if`
+2. **Extract helper** — move inner block into named `Subject_Action` function
+3. **Invert condition** — replace nested else-chains with positive checks
+4. **Split by concern** — separate validation, fetch, and mutate steps
+
+## Examples
+
+```typescript
+// ❌ BAD — 4 levels
+async function Orders_Process(orderId: string) {
+  if (orderId) {
+    const order = await Orders_Fetch(orderId);
+    if (order) {
+      if (order.status === "open") {
+        for (const line of order.lines) {
+          await Lines_Fulfill(line);
+        }
+      }
+    }
+  }
+}
+
+// ✅ GOOD — 1–2 levels via guards + extract
+async function Orders_Process(orderId: string) {
+  if (!orderId) return;
+
+  const order = await Orders_Fetch(orderId);
+  if (!order || order.status !== "open") return;
+
+  await OrderLines_Fulfill(order.lines);
+}
+```
+
+## Scope
+
+- Apply when writing or editing functions, handlers, and components.
+- Do not invent deep nesting to "match" nearby code.
+- Existing deep nests are not precedent — flatten when you touch that block.
