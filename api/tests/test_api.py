@@ -482,6 +482,24 @@ class PilotApiTests(unittest.TestCase):
         self.assertEqual(len(response.json()["items"]), 2)
 
 
+    def test_video_library_includes_legacy_catalog(self) -> None:
+        response = self.client.get("/api/videos/library")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("items", payload)
+        self.assertIn("summary", payload)
+        self.assertGreaterEqual(payload["summary"]["legacy"], 1)
+        slugs = {item["slug"] for item in payload["items"]}
+        self.assertIn("dont-go-inside", slugs)
+
+    def test_import_videos_endpoint(self) -> None:
+        response = self.client.post("/api/videos/import", json={"rebuild_catalog": True})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("imported_count", payload)
+        self.assertIn("results", payload)
+
+
 class AnalyticsApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()

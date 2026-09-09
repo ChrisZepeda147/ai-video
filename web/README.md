@@ -26,6 +26,21 @@ Open [http://localhost:3000](http://localhost:3000). Discover and dashboard stat
 
 API docs: [http://localhost:8000/docs](http://localhost:8000/docs)
 
+## Add a Cursor render to the site
+
+After any legacy script finishes (iMessage story, stills slideshow, voiceover, etc.):
+
+1. Open [http://localhost:3000/videos](http://localhost:3000/videos)
+2. Click **Add ready to site** (or **Add to site** on one video)
+
+Or from the repo root:
+
+```powershell
+python scripts/register_site_video.py
+```
+
+Story/voiceover/stills pipelines auto-register when the discovery DB exists.
+
 ## Scripts
 
 | Command | Description |
@@ -49,7 +64,7 @@ API docs: [http://localhost:8000/docs](http://localhost:8000/docs)
 | `/` | Dashboard overview (demo data) |
 | `/discover` | Viral references and benchmark channels |
 | `/create` | Creative DNA, concepts, visual briefs |
-| `/videos` | Generated visuals and rendered videos |
+| `/videos` | All finished Shorts — site pipeline + legacy Cursor renders |
 | `/review` | Approval queues |
 | `/accounts` | Publishing accounts |
 | `/analytics` | Performance metrics |

@@ -278,6 +278,61 @@ export type ProductionProjectsResponse = {
   count: number;
 };
 
+export type VideoLibraryItem = {
+  key: string;
+  source: "production" | "legacy";
+  project_id?: number | null;
+  legacy_id?: string | null;
+  slug: string;
+  title: string;
+  format_profile: string;
+  origin_type?: string | null;
+  status: string;
+  niche?: string | null;
+  output_path?: string | null;
+  output_paths: string[];
+  preview_available: boolean;
+  missing_paths: string[];
+  duration_sec?: number | null;
+  created_at?: string | null;
+  rendered_at?: string | null;
+  youtube_id?: string | null;
+  monetization_confidence?: number | null;
+  rights_confidence?: number | null;
+  reuse_confidence?: number | null;
+  error_message?: string | null;
+};
+
+export type VideoLibraryResponse = {
+  items: VideoLibraryItem[];
+  count: number;
+  summary: {
+    total: number;
+    production: number;
+    legacy: number;
+    preview_ready: number;
+    missing_files: number;
+  };
+};
+
+export type VideoImportResponse = {
+  results: Array<{
+    slug: string;
+    status: string;
+    reason?: string;
+    project_id?: number;
+    output_path?: string;
+    title?: string;
+    missing_paths?: string[];
+  }>;
+  count: number;
+  imported_count: number;
+  ready_count: number;
+  skipped_count: number;
+  imported: VideoImportResponse["results"];
+  skipped: VideoImportResponse["results"];
+};
+
 export type PublishingAccountItem = {
   id: number;
   platform: string;

@@ -859,6 +859,12 @@ def main() -> int:
                 title=series_title,
             )
         print(f"Recorded in {content_reuse.catalog_path()}")
+        try:
+            from discovery.site_videos import sync_legacy_renders_to_site
+
+            sync_legacy_renders_to_site(slugs=[output_dir.name])
+        except ImportError:
+            pass
         return 0
     return 1
 

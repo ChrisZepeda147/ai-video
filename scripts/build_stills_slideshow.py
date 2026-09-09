@@ -317,6 +317,18 @@ def main() -> int:
         print(exc, file=sys.stderr)
         return 1
     print(f"Saved: {args.output}")
+    try:
+        scripts = Path(__file__).resolve().parent
+        if str(scripts) not in sys.path:
+            sys.path.insert(0, str(scripts))
+        import content_reuse
+
+        content_reuse.register_video(file_path=args.output, title=args.output.stem)
+        from discovery.site_videos import sync_legacy_renders_to_site
+
+        sync_legacy_renders_to_site(slugs=[args.output.stem])
+    except Exception:
+        pass
     return 0
 
 

@@ -16,6 +16,8 @@ import type {
   WorkbenchFindResponse,
   ProductionProjectsResponse,
   ProductionProjectItem,
+  VideoLibraryResponse,
+  VideoImportResponse,
   PublishingAccountsResponse,
   PublishingJobsResponse,
   AnalyticsOverview,
@@ -315,6 +317,22 @@ export async function fetchProductionProjects(params?: { status?: string; limit?
   return fetchJson<ProductionProjectsResponse>(buildUrl("/api/production/projects", params));
 }
 
+export async function fetchVideoLibrary(params?: { include_missing?: boolean; limit?: number }) {
+  return fetchJson<VideoLibraryResponse>(buildUrl("/api/videos/library", params));
+}
+
+export async function postImportVideos(body?: {
+  slug?: string;
+  slugs?: string[];
+  rebuild_catalog?: boolean;
+  copy_files?: boolean;
+}) {
+  return fetchJson<VideoImportResponse>(buildUrl("/api/videos/import"), {
+    method: "POST",
+    body: JSON.stringify(body ?? { rebuild_catalog: true }),
+  });
+}
+
 export async function postCreateProject(body: Record<string, unknown>) {
   return fetchJson<ProductionProjectItem>(buildUrl("/api/production/projects"), {
     method: "POST",
@@ -413,7 +431,12 @@ export function productionMediaUrl(outputPath: string | null | undefined): strin
 export function getMediaUrl(path: string | null | undefined): string | null {
   if (!path) return null;
   if (path.startsWith("http")) return path;
-  return `${getApiBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
+  const normalized = path.replace(/\\/g, "/");
+  if (normalized.startsWith("/media/")) {
+    return `${getApiBaseUrl()}${normalized}`;
+  }
+  const rel = normalized.startsWith("/") ? normalized.slice(1) : normalized;
+  return `${getApiBaseUrl()}/media/${rel}`;
 }
 
 export async function fetchAnalyticsOverview(params?: {

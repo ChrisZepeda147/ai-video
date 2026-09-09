@@ -95,6 +95,8 @@ from discovery.production_projects import (
     render_project,
     send_project_to_review,
 )
+from discovery.site_videos import import_videos_to_site
+from discovery.video_library import build_video_library, library_summary
 from discovery.publishing.accounts import (
     complete_account_connect,
     disconnect_account,
@@ -762,6 +764,45 @@ def list_projects_endpoint(
 ):
     projects = store.list_production_projects(status=status, limit=limit)
     return {"items": [p.__dict__ for p in projects], "count": len(projects)}
+
+
+@app.get("/api/videos/library")
+def list_video_library_endpoint(
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    include_missing: bool = Query(True),
+    limit: int = Query(100, ge=1, le=200),
+):
+    items = build_video_library(
+        store,
+        root=project_root(),
+        include_missing_legacy=include_missing,
+        limit=limit,
+    )
+    return {
+        "items": [item.to_dict() for item in items],
+        "count": len(items),
+        "summary": library_summary(items),
+    }
+
+
+@app.post("/api/videos/import")
+def import_videos_endpoint(
+    body: dict,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+):
+    slug = body.get("slug")
+    slugs = [slug] if slug else body.get("slugs")
+    try:
+        payload = import_videos_to_site(
+            store,
+            root=project_root(),
+            slugs=slugs,
+            rebuild_catalog=bool(body.get("rebuild_catalog", True)),
+            copy_files=bool(body.get("copy_files", False)),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return payload
 
 
 @app.get("/api/production/projects/{project_id}")

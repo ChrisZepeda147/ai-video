@@ -1021,6 +1021,12 @@ def main() -> int:
             if final.is_file():
                 content_reuse.register_video(file_path=final, title=str(to_save.get("title") or final.stem))
         print(f"Recorded in {content_reuse.catalog_path()}")
+        try:
+            from discovery.site_videos import sync_legacy_renders_to_site
+
+            sync_legacy_renders_to_site(slugs=[story_path.parent.name])
+        except ImportError:
+            pass
         return 0
     return 1
 
