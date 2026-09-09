@@ -1,0 +1,120 @@
+{
+  "horror": {
+    "enabled": true,
+    "search_terms": [
+      "scary story",
+      "creepy storytime",
+      "horror POV",
+      "true scary story shorts"
+    ],
+    "keywords": [
+      "scary",
+      "creepy",
+      "horror",
+      "ghost",
+      "haunted",
+      "nightmare"
+    ],
+    "negative_keywords": [
+      "minecraft",
+      "gameplay"
+    ],
+    "maximum_searches_per_discovery_run": 4
+  },
+  "thriller": {
+    "enabled": true,
+    "search_terms": [
+      "thriller storytime",
+      "suspense story shorts",
+      "stalker story POV"
+    ],
+    "keywords": [
+      "thriller",
+      "suspense",
+      "stalker",
+      "chase",
+      "escape"
+    ],
+    "negative_keywords": [
+      "minecraft",
+      "gameplay"
+    ],
+    "maximum_searches_per_discovery_run": 3
+  },
+  "mystery": {
+    "enabled": true,
+    "search_terms": [
+      "mystery story shorts",
+      "unsolved mystery storytime",
+      "what happened story"
+    ],
+    "keywords": [
+      "mystery",
+      "unsolved",
+      "strange",
+      "disappeared",
+      "clue"
+    ],
+    "negative_keywords": [],
+    "maximum_searches_per_discovery_run": 3
+  },
+  "relationship": {
+    "enabled": true,
+    "search_terms": [
+      "relationship storytime",
+      "dating horror story",
+      "toxic relationship story shorts"
+    ],
+    "keywords": [
+      "relationship",
+      "boyfriend",
+      "girlfriend",
+      "dating",
+      "cheating",
+      "breakup"
+    ],
+    "negative_keywords": [],
+    "maximum_searches_per_discovery_run": 3
+  },
+  "crime": {
+    "enabled": true,
+    "search_terms": [
+      "true crime story shorts",
+      "crime storytime",
+      "serial killer story POV"
+    ],
+    "keywords": [
+      "crime",
+      "murder",
+      "killer",
+      "police",
+      "investigation",
+      "robbery"
+    ],
+    "negative_keywords": [
+      "minecraft"
+    ],
+    "maximum_searches_per_discovery_run": 3
+  },
+  "luxury": {
+    "enabled": true,
+    "search_terms": [
+      "luxury lifestyle shorts",
+      "dark luxury aesthetic",
+      "rich lifestyle story"
+    ],
+    "keywords": [
+      "luxury",
+      "mansion",
+      "supercar",
+      "yacht",
+      "wealthy",
+      "rich"
+    ],
+    "negative_keywords": [
+      "minecraft",
+      "gameplay"
+    ],
+    "maximum_searches_per_discovery_run": 3
+  }
+}

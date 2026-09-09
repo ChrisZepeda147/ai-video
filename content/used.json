@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-09-08T04:32:26+00:00",
+  "updated_at": "2026-09-09T23:09:32+00:00",
   "photos": [
     {
       "id": "photo:purple-gt3rs-forest-mansion",
@@ -107,6 +107,126 @@
       "title": "svj-pair-la-mansion-move",
       "youtube_id": null,
       "sha256": "e5842d55aeff7012fbdbbea0ed378ed20df26233a0e5828ecbabd2cc6ae5f0c6"
+    },
+    {
+      "id": "video:short0000001",
+      "kind": "video",
+      "path": "C:/Users/chris/AppData/Local/Temp/tmppb_mnx6e/final.mp4",
+      "paths": [
+        "C:/Users/chris/AppData/Local/Temp/tmppb_mnx6e/final.mp4"
+      ],
+      "slug": "short0000001",
+      "title": "Approved Short",
+      "youtube_id": "short0000001",
+      "sha256": "b5d54c39e66671c9731b9f471e585d8262cd4f54963f0c93082d8dcf334d4c78"
+    },
+    {
+      "id": "video:final",
+      "kind": "video",
+      "path": "downloads/production/test-render/final.mp4",
+      "paths": [
+        "downloads/production/test-render/final.mp4"
+      ],
+      "slug": "final",
+      "title": "final",
+      "youtube_id": null,
+      "sha256": "c9b936a163cb84ee9137fa239ae9050c5831a36156f4e61ab291e13454b3b9ce"
+    },
+    {
+      "id": "video:captioned",
+      "kind": "video",
+      "path": "downloads/production/test-render/work/captioned.mp4",
+      "paths": [
+        "downloads/production/test-render/work/captioned.mp4"
+      ],
+      "slug": "captioned",
+      "title": "captioned",
+      "youtube_id": null,
+      "sha256": "c9b936a163cb84ee9137fa239ae9050c5831a36156f4e61ab291e13454b3b9ce"
+    },
+    {
+      "id": "video:concat",
+      "kind": "video",
+      "path": "downloads/production/test-render/work/concat.mp4",
+      "paths": [
+        "downloads/production/test-render/work/concat.mp4"
+      ],
+      "slug": "concat",
+      "title": "concat",
+      "youtube_id": null,
+      "sha256": "c9b936a163cb84ee9137fa239ae9050c5831a36156f4e61ab291e13454b3b9ce"
+    },
+    {
+      "id": "video:seg-000",
+      "kind": "video",
+      "path": "downloads/production/test-render/work/seg_000.mp4",
+      "paths": [
+        "downloads/production/test-render/work/seg_000.mp4"
+      ],
+      "slug": "seg-000",
+      "title": "seg 000",
+      "youtube_id": null,
+      "sha256": "c9b936a163cb84ee9137fa239ae9050c5831a36156f4e61ab291e13454b3b9ce"
+    },
+    {
+      "id": "video:with-audio",
+      "kind": "video",
+      "path": "downloads/production/test-render/work/with_audio.mp4",
+      "paths": [
+        "downloads/production/test-render/work/with_audio.mp4"
+      ],
+      "slug": "with-audio",
+      "title": "with audio",
+      "youtube_id": null,
+      "sha256": "c9b936a163cb84ee9137fa239ae9050c5831a36156f4e61ab291e13454b3b9ce"
+    },
+    {
+      "id": "video:pub00000001",
+      "kind": "video",
+      "path": "C:/Users/chris/AppData/Local/Temp/tmp5vqin1wx/final.mp4",
+      "paths": [
+        "C:/Users/chris/AppData/Local/Temp/tmp5vqin1wx/final.mp4"
+      ],
+      "slug": "pub00000001",
+      "title": "Approved Short",
+      "youtube_id": "pub00000001",
+      "sha256": "c9b936a163cb84ee9137fa239ae9050c5831a36156f4e61ab291e13454b3b9ce"
+    },
+    {
+      "id": "video:anlux000001",
+      "kind": "video",
+      "path": "C:/Users/chris/AppData/Local/Temp/tmpo719hmpy/final.mp4",
+      "paths": [
+        "C:/Users/chris/AppData/Local/Temp/tmpo719hmpy/final.mp4"
+      ],
+      "slug": "anlux000001",
+      "title": "Luxury Short",
+      "youtube_id": "anlux000001",
+      "sha256": "c9b936a163cb84ee9137fa239ae9050c5831a36156f4e61ab291e13454b3b9ce"
+    },
+    {
+      "id": "video:pub00000003",
+      "kind": "video",
+      "path": "C:/Users/chris/AppData/Local/Temp/tmphmh6y6c6/final2.mp4",
+      "paths": [
+        "C:/Users/chris/AppData/Local/Temp/tmphmh6y6c6/final2.mp4"
+      ],
+      "slug": "pub00000003",
+      "title": "Test Short 2",
+      "youtube_id": "pub00000003",
+      "sha256": "b5d54c39e66671c9731b9f471e585d8262cd4f54963f0c93082d8dcf334d4c78"
+    },
+    {
+      "id": "video:pub00000002",
+      "kind": "video",
+      "path": "C:/Users/chris/AppData/Local/Temp/tmpyrcwppc5/final.mp4",
+      "paths": [
+        "C:/Users/chris/AppData/Local/Temp/tmpyrcwppc5/final.mp4"
+      ],
+      "slug": "pub00000002",
+      "title": "Test Short",
+      "youtube_id": "pub00000002",
+      "sha256": "b5d54c39e66671c9731b9f471e585d8262cd4f54963f0c93082d8dcf334d4c78"
     }
   ],
   "stories": [

@@ -1,0 +1,31 @@
+{
+  "job_key": "job_000001",
+  "origin_type": "freeform",
+  "reference_id": null,
+  "concept_id": null,
+  "source_media_id": null,
+  "image_count": 2,
+  "video_count": 0,
+  "style": null,
+  "aspect_ratio": "9:16",
+  "niche": null,
+  "prompt_summary": "Luxury supercar night images",
+  "width": 720,
+  "height": 1280,
+  "outputs": [
+    {
+      "filename": "image_01.png",
+      "asset_type": "image",
+      "prompt": "Luxury supercar night images. Style: cinematic. Mood: cinematic. Genre: general. Vertical 9:16 cinematic still. Original production asset \u2014 not scraped footage. Variant 1.",
+      "variant_index": 1,
+      "expected_path": "C:\\Users\\chris\\Youtube AI\\ai-video\\data\\generation_jobs\\job_000001\\output\\images\\image_01.png"
+    },
+    {
+      "filename": "image_02.png",
+      "asset_type": "image",
+      "prompt": "Luxury supercar night images. Style: cinematic. Mood: cinematic. Genre: general. Vertical 9:16 cinematic still. Original production asset \u2014 not scraped footage. Variant 2.",
+      "variant_index": 2,
+      "expected_path": "C:\\Users\\chris\\Youtube AI\\ai-video\\data\\generation_jobs\\job_000001\\output\\images\\image_02.png"
+    }
+  ]
+}

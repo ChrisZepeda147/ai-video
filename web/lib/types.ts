@@ -1,0 +1,443 @@
+export type NicheTag = {
+  niche: string;
+  relevance_score: number;
+  assignment_source: string;
+};
+
+export type ReferenceMetrics = {
+  virality_score?: number | null;
+  age_hours?: number | null;
+  age_days?: number | null;
+  views_per_day?: number | null;
+  views_per_hour?: number | null;
+  like_ratio?: number | null;
+  comment_ratio?: number | null;
+};
+
+export type ReferenceItem = {
+  id: number;
+  platform: string;
+  external_id: string;
+  title: string;
+  channel?: string | null;
+  url: string;
+  thumbnail_url?: string | null;
+  published_at?: string | null;
+  age_label?: string | null;
+  view_count?: number | null;
+  like_count?: number | null;
+  comment_count?: number | null;
+  virality_score?: number | null;
+  internal_fit_score?: number | null;
+  internal_fit_note?: string | null;
+  niches: NicheTag[];
+  production_asset: boolean;
+  has_analysis: boolean;
+  analysis_count: number;
+  concepts_generated: number;
+  concepts_approved: number;
+  exhausted: boolean;
+  metrics?: ReferenceMetrics | null;
+};
+
+export type ReferencesResponse = {
+  items: ReferenceItem[];
+  count: number;
+};
+
+export type NicheCoverageItem = {
+  niche: string;
+  reference_count: number;
+  enabled: boolean;
+};
+
+export type DiscoveryStats = {
+  total_references: number;
+  references_added_today: number;
+  high_virality_references: number;
+  searches_today: number;
+  detail_requests_today: number;
+  discovery_runs: number;
+  production_assets: number;
+  concepts_ready: number;
+  visuals_waiting_review: number;
+  niche_coverage: NicheCoverageItem[];
+};
+
+export type NichesResponse = {
+  items: NicheCoverageItem[];
+};
+
+export type ScanResponse = {
+  query: string;
+  ids_found: number;
+  ids_new: number;
+  ids_updated: number;
+  ids_existing: number;
+  ids_skipped_refresh: number;
+  detail_requests: number;
+  searches_executed: number;
+  searches_skipped: number;
+  skipped_cooldown: boolean;
+};
+
+export type DiscoverRunResponse = {
+  searches_executed: number;
+  searches_skipped_cooldown: number;
+  searches_skipped_limit: number;
+  searches_skipped_niche_cap: number;
+  ids_new: number;
+  ids_updated: number;
+  ids_existing: number;
+  detail_requests: number;
+  skipped_terms: string[];
+};
+
+export type AnalysisItem = {
+  id: number;
+  reference_id: number;
+  analyzed_at: string;
+  provider: string;
+  model?: string | null;
+  analysis_version: string;
+  observed: Record<string, unknown>;
+  inferred: Record<string, unknown>;
+  hook_type?: string | null;
+  emotional_trigger?: string | null;
+  pacing_style?: string | null;
+  story_structure?: string | null;
+  visual_mood?: string | null;
+  transferable_patterns: string;
+  avoid_copying: string;
+  analysis_json: Record<string, unknown>;
+  cached?: boolean;
+};
+
+export type AnalysisResponse = {
+  item: AnalysisItem | null;
+  items: AnalysisItem[];
+};
+
+export type ConceptItem = {
+  id: number;
+  reference_id: number;
+  reference_title?: string | null;
+  reference_virality_score?: number | null;
+  analysis_id: number;
+  niche?: string | null;
+  title: string;
+  hook_idea?: string | null;
+  visual_premise?: string | null;
+  setting?: string | null;
+  subject?: string | null;
+  camera_movement?: string | null;
+  mood?: string | null;
+  story_premise?: string | null;
+  variation_family?: string | null;
+  originality_notes?: string | null;
+  status: string;
+  production_asset: boolean;
+  created_at: string;
+};
+
+export type ConceptsResponse = {
+  items: ConceptItem[];
+  count: number;
+};
+
+export type GenerateConceptsResponse = {
+  reference_id: number;
+  requested: number;
+  stored: number;
+  rejected_similar: number;
+  skipped_exhaustion: number;
+  concepts: ConceptItem[];
+};
+
+export type ConceptStatusResponse = {
+  updated: number[];
+  count: number;
+};
+
+export type ApiResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; error: "offline" | "malformed"; message: string };
+
+export type RiskScoresItem = {
+  monetization_confidence: number;
+  rights_confidence: number;
+  reuse_confidence: number;
+  monetization_level: string;
+  rights_level: string;
+  reuse_level: string;
+  explanations: Record<string, string[]>;
+};
+
+export type SourceMediaItem = {
+  id: number;
+  title: string;
+  source_mode: string;
+  media_type: string;
+  reference_id?: number | null;
+  download_status?: string | null;
+  download_path?: string | null;
+  local_path?: string | null;
+  transcript?: string | null;
+  reuse_confidence?: number | null;
+  rights_confidence?: number | null;
+  monetization_confidence?: number | null;
+  risk_scores?: RiskScoresItem | null;
+};
+
+export type SourceMediaResponse = {
+  item: SourceMediaItem;
+  reuse_report: Record<string, unknown>;
+  risk_scores: RiskScoresItem;
+};
+
+export type GenerationJobItem = {
+  id: number;
+  job_key: string;
+  origin_type: string;
+  status: string;
+  image_count: number;
+  video_count: number;
+  style?: string | null;
+  aspect_ratio: string;
+  prompt_summary?: string | null;
+  reference_id?: number | null;
+  concept_id?: number | null;
+  source_media_id?: number | null;
+  output_dir?: string | null;
+  cursor_prompt_path?: string | null;
+  created_at: string;
+};
+
+export type GenerationJobsResponse = {
+  items: GenerationJobItem[];
+  count: number;
+};
+
+export type VisualAssetItem = {
+  id: number;
+  asset_type: string;
+  status: string;
+  prompt: string;
+  niche?: string | null;
+  media_url?: string | null;
+  production_asset: boolean;
+  reject_reason?: string | null;
+};
+
+export type VisualsReviewResponse = {
+  items: VisualAssetItem[];
+  count: number;
+};
+
+export type WorkbenchCandidateItem = {
+  reference_id?: number | null;
+  title: string;
+  url: string;
+  transcript_snippet: string;
+  virality_score?: number | null;
+  reuse_confidence: number;
+  rights_confidence: number;
+  monetization_confidence: number;
+  explanations: string[];
+};
+
+export type WorkbenchFindResponse = {
+  items: WorkbenchCandidateItem[];
+  count: number;
+};
+
+export type ProductionProjectItem = {
+  id: number;
+  slug: string;
+  title: string;
+  format_profile: string;
+  origin_type?: string | null;
+  status: string;
+  niche?: string | null;
+  source_media_id?: number | null;
+  duration_sec?: number | null;
+  output_path?: string | null;
+  timeline_json?: string | null;
+  hook_text?: string | null;
+  caption_preset?: string | null;
+  monetization_confidence?: number | null;
+  rights_confidence?: number | null;
+  reuse_confidence?: number | null;
+  created_at: string;
+  rendered_at?: string | null;
+  error_message?: string | null;
+};
+
+export type ProductionProjectsResponse = {
+  items: ProductionProjectItem[];
+  count: number;
+};
+
+export type PublishingAccountItem = {
+  id: number;
+  platform: string;
+  display_name: string;
+  platform_account_id?: string | null;
+  username?: string | null;
+  niche?: string | null;
+  enabled: boolean;
+  auth_status: string;
+  posting_available: boolean;
+  audit_note?: string | null;
+  token_expires_at?: string | null;
+  created_at: string;
+  last_verified_at?: string | null;
+};
+
+export type PublishingAccountsResponse = {
+  items: PublishingAccountItem[];
+  count: number;
+};
+
+export type PublishingJobItem = {
+  id: number;
+  production_project_id: number;
+  account_id: number;
+  platform: string;
+  title?: string | null;
+  caption?: string | null;
+  hashtags?: string | null;
+  scheduled_at?: string | null;
+  timezone?: string | null;
+  status: string;
+  platform_post_id?: string | null;
+  platform_url?: string | null;
+  error_message?: string | null;
+  attempts: number;
+  created_at: string;
+  published_at?: string | null;
+  account_display_name?: string | null;
+};
+
+export type PublishingJobsResponse = {
+  items: PublishingJobItem[];
+  count: number;
+};
+
+export type AnalyticsOverview = {
+  total_published_posts: number;
+  total_views: number;
+  views_last_7_days: number;
+  views_last_30_days: number;
+  average_performance_score: number | null;
+  breakout_count: number;
+  underperforming_count: number;
+  posts_with_metrics: number;
+};
+
+export type AnalyticsPostItem = {
+  publishing_job_id: number;
+  production_project_id: number;
+  account_id: number;
+  platform: string;
+  title?: string | null;
+  platform_url?: string | null;
+  published_at?: string | null;
+  views?: number | null;
+  likes?: number | null;
+  comments?: number | null;
+  performance_score?: number | null;
+  performance_tier?: string | null;
+  velocity_views_per_day?: number | null;
+  views_vs_account_median?: number | null;
+  hook_formula?: string | null;
+  niche?: string | null;
+  snapshot_at?: string | null;
+};
+
+export type AnalyticsPostsResponse = {
+  items: AnalyticsPostItem[];
+  count: number;
+};
+
+export type AnalyticsPatternItem = {
+  label: string;
+  post_count: number;
+  avg_performance_score: number;
+  avg_views: number;
+  breakout_count: number;
+};
+
+export type AnalyticsPatternsResponse = {
+  items: AnalyticsPatternItem[];
+  count: number;
+};
+
+export type PreflightCheckItem = {
+  label: string;
+  status: string;
+  detail: string;
+  fix_hint?: string | null;
+};
+
+export type PreflightResponse = {
+  summary: {
+    ready: number;
+    warning: number;
+    not_configured: number;
+    pilot_ready: boolean;
+  };
+  groups: Record<string, PreflightCheckItem[]>;
+  project_root: string;
+};
+
+export type PilotStageItem = {
+  status: string;
+  message: string;
+  entity_id?: number | null;
+};
+
+export type PilotBatchItemResponse = {
+  id: number;
+  batch_id: number;
+  sort_order: number;
+  slot_label?: string | null;
+  strategy: string;
+  format_profile?: string | null;
+  status: string;
+  stages: Record<string, PilotStageItem>;
+  error_stage?: string | null;
+  error_message?: string | null;
+  notes?: string | null;
+  reference_id?: number | null;
+  source_media_id?: number | null;
+  generation_job_id?: number | null;
+  production_project_id?: number | null;
+  publishing_job_id?: number | null;
+};
+
+export type PilotBatchResponse = {
+  id: number;
+  slug: string;
+  name: string;
+  niche?: string | null;
+  account_id?: number | null;
+  batch_size: number;
+  status: string;
+  created_at: string;
+  items: PilotBatchItemResponse[];
+};
+
+export type PilotBatchesResponse = {
+  items: PilotBatchResponse[];
+  count: number;
+};
+
+export type ProjectAnalyticsResponse = {
+  production_project_id: number;
+  features: Record<string, unknown>;
+  latest_metrics: Record<string, unknown> | null;
+  snapshots: Record<string, unknown>[];
+  performance_signals: string[];
+  publishing_jobs: PublishingJobItem[];
+};

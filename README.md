@@ -2,6 +2,24 @@
 
 Short-form video pipeline: iMessage story renders, dark-luxury stills, voiceover, YouTube sourcing, and TikTok upload scripts.
 
+## Dashboard (Next.js)
+
+Visual production dashboard in `web/` — reads live discovery data via FastAPI. Python scripts remain the backend engine.
+
+```powershell
+# Terminal 1 — API (repo root)
+pip install -r requirements-api.txt
+python -m uvicorn api.main:app --reload --port 8000
+
+# Terminal 2 — dashboard
+cd web
+copy .env.example .env.local
+npm install
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000). See [web/README.md](web/README.md) for details.
+
 ## Setup
 
 ```powershell

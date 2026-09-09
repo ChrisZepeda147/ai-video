@@ -2,6 +2,12 @@
 scripts/.env
 scripts/.tiktok_tokens.json
 downloads/
+assets/generated/
+data/discovery/*
+!data/discovery/.gitkeep
+data/publishing/credentials/
+data/publishing/oauth_states/
+data/discovery/prompts/
 
 # Python
 __pycache__/

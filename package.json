@@ -1,0 +1,12 @@
+{
+  "name": "ai-video",
+  "private": true,
+  "description": "Root scripts proxy to the Next.js dashboard in web/",
+  "scripts": {
+    "dev": "npm run dev --prefix web",
+    "build": "npm run build --prefix web",
+    "start": "npm run start --prefix web",
+    "lint": "npm run lint --prefix web",
+    "install:web": "npm install --prefix web"
+  }
+}
