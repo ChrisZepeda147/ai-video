@@ -1,0 +1,99 @@
+---
+description: >-
+  Subject_Action naming for variables, functions, type/object properties, query
+  keys, routes, form fields, and storage keys. Use whenever creating or renaming
+  identifiers in this workspace (TypeScript/JS/React).
+alwaysApply: false
+---
+
+# Naming Rule: Subject_Action
+
+Enforce `Subject_Action` scheme on created or modified identifiers.
+
+## Required Pattern & Regex
+
+- Format: `Subject_Action` or `Subject_Action_Target`
+- Separator: Underscore (`_`)
+- Segment casing: PascalCase
+- Validation Regex: `^[A-Z][a-zA-Z0-9]*_[A-Z][a-zA-Z0-9]*(_[A-Z][a-zA-Z0-9]*)?$`
+- Primary keys / IDs: `Subject_ID`
+
+## Target Scope
+
+Apply naming scheme to:
+- Variable names
+- Function names
+- Utility identifiers
+- **Type / interface / object property keys** (including nested fields)
+- URL query keys (`?Deal_Add=1`)
+- Route parameters
+- Form field `name` attributes (non-autofill)
+- Storage keys (`localStorage`, `sessionStorage`)
+
+Property keys are identifiers too. Do not leave camelCase fields under a `Subject_Action` type.
+
+```typescript
+// ❌ BAD — type renamed, fields still camelCase
+type Portal_Project_Money = {
+  dealId: string;
+  dealValue: number;
+  paid: number;
+  owed: number;
+};
+
+// ✅ GOOD
+type Portal_Project_Money = {
+  Deal_ID: string;
+  Deal_Value: number;
+  Money_Paid: number;
+  Money_Owed: number;
+};
+```
+
+## API / wire-format boundary
+
+External JSON (DB rows, third-party APIs, browser `FormData` autofill) may stay camelCase or snake_case **at the edge only**. Map to `Subject_Action` in app types and UI code:
+
+```typescript
+const Money_Row: Portal_Project_Money = {
+  Deal_ID: String(Raw_Value.deal_id),
+  Deal_Value: Number(Raw_Value.deal_value),
+  Money_Paid: Number(Raw_Value.paid),
+  Money_Owed: Number(Raw_Value.owed),
+};
+```
+
+Do not rename public HTTP response keys without an explicit migrate — prefer mapping in the route/loader instead.
+
+## Anti-Patterns (Banned)
+
+- camelCase: `usersCreate`, `addDeal`, `dealId`
+- snake_case: `users_create`, `add_deal`, `deal_id` (except raw DB/API edge)
+- PascalCase without underscore: `UsersCreate`, `AddDeal`, `DealId`
+- Vague actions: `Users_DoThing`, `Data_Process`
+- One-word properties: `paid`, `owed`, `name` → use `Money_Paid`, `Money_Owed`, `Contact_Name` (or clear Subject_Action pair)
+
+## Code Examples
+
+INVALID:
+```typescript
+const addDeal = (orderid: string) => {
+  const usersData = fetchUser();
+  window.location.href = `/deals?addDeal=1&orderId=${orderid}`;
+};
+```
+
+VALID:
+```typescript
+const Deal_Add = (Order_ID: string) => {
+  const Users_Data = User_Fetch();
+  window.location.href = `/deals?Deal_Add=1&Order_ID=${Order_ID}`;
+};
+```
+
+## Refactoring Scope Rules
+
+- Edit active scope only. Rename noncompliant symbols inside touched block — **including object/type properties in that block**.
+- Preserve program behavior completely (update all reads/writes of renamed keys in scope).
+- Leave untouched code alone. Do not refactor whole file.
+- Ask user before renaming exported or public API symbols / wire JSON keys.

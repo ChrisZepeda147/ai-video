@@ -38,16 +38,20 @@ Generate one still. Match the reference mood more than the exact objects.
 
 Fill `SUBJECT`, `SETTING`, `TIME`, and `ATMOSPHERE`.
 
+**Uniqueness:** Check `content/used.json` first. Every still needs a new city, estate, and architecture — do not reuse the same house photo or location already in the catalog. Vary the place even when the mood and grade stay locked.
+
+When generating a batch, plan distinct locations up front. Do not prompt `same house` across shots.
+
 - `SUBJECT: black G-Wagon + Porsche 911 GT3, rear 3/4 of the Porsche in front`
   `SETTING: stone patio of a minimalist house`
   `TIME: dusk`
   `ATMOSPHERE: light fog`
 - `SUBJECT: one black Range Rover, empty passenger door open`
-  `SETTING: same house`
+  `SETTING: stone driveway of a Scottsdale desert modern villa`
   `TIME: night`
   `ATMOSPHERE: no fog`
 - `SUBJECT: empty driveway, no cars`
-  `SETTING: same house, even darker`
+  `SETTING: Lake Como terraced villa, even darker`
   `TIME: midnight`
   `ATMOSPHERE: no fog`
 

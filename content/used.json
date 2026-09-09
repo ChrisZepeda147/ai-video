@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-09-09T20:39:12+00:00",
+  "updated_at": "2026-09-09T23:29:56+00:00",
   "photos": [
     {
       "id": "photo:purple-gt3rs-forest-mansion",
@@ -162,6 +162,158 @@
         "nounusedtime"
       ],
       "sha256": "48120704af7b16b3fa42cfffb2368378f9a2e92d74251ceffd7afb9b1fee5ede"
+    },
+    {
+      "id": "photo:ap-rm-watch-detail-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/tate-motivation/ap-rm-watch-detail-dusk.png",
+      "slug": "ap-rm-watch-detail-dusk",
+      "title": "ap rm watch detail dusk",
+      "tokens": [
+        "detail",
+        "dusk",
+        "watch"
+      ],
+      "sha256": "0dd2ae27a17bb968b5e9fc91aff1d6d737563b91b45eec0526fc816d14cfe837"
+    },
+    {
+      "id": "photo:dubai-skyline-terrace-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/tate-motivation/dubai-skyline-terrace-dusk.png",
+      "slug": "dubai-skyline-terrace-dusk",
+      "title": "dubai skyline terrace dusk",
+      "tokens": [
+        "dubai",
+        "dusk",
+        "skyline",
+        "terrace"
+      ],
+      "sha256": "6600ac815dce3a9f7b01de080c5fd06e3fba5169e65bc3d8858725be113fc684"
+    },
+    {
+      "id": "photo:ferrari-pista-garage-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/tate-motivation/ferrari-pista-garage-dusk.png",
+      "slug": "ferrari-pista-garage-dusk",
+      "title": "ferrari pista garage dusk",
+      "tokens": [
+        "dusk",
+        "ferrari",
+        "garage",
+        "pista"
+      ],
+      "sha256": "713fcfc611b9b84668cca89df8a88b4cd5c13979c1e7d9cce83865946e018c3d"
+    },
+    {
+      "id": "photo:lambo-aventador-driveway-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/tate-motivation/lambo-aventador-driveway-dusk.png",
+      "slug": "lambo-aventador-driveway-dusk",
+      "title": "lambo aventador driveway dusk",
+      "tokens": [
+        "aventador",
+        "driveway",
+        "dusk",
+        "lambo"
+      ],
+      "sha256": "7a0bd142c1e0899e6e374768e0e1dcf7eda0ba2efe53fb9b04e3a34ae7a46025"
+    },
+    {
+      "id": "photo:malibu-cliff-house-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/tate-motivation/malibu-cliff-house-dusk.png",
+      "slug": "malibu-cliff-house-dusk",
+      "title": "malibu cliff house dusk",
+      "tokens": [
+        "cliff",
+        "dusk",
+        "house",
+        "malibu"
+      ],
+      "sha256": "bb502c803ec38452e81cc890442359cc470cab8c0e26a0394af233266759c6de"
+    },
+    {
+      "id": "photo:miami-waterfront-villa-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/tate-motivation/miami-waterfront-villa-dusk.png",
+      "slug": "miami-waterfront-villa-dusk",
+      "title": "miami waterfront villa dusk",
+      "tokens": [
+        "dusk",
+        "miami",
+        "villa",
+        "waterfront"
+      ],
+      "sha256": "61356ee9a466c4ab3bf3bc9f9ebe439c04ec039da686fc2b5ad2079480d7269a"
+    },
+    {
+      "id": "photo:monaco-harbor-view-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/tate-motivation/monaco-harbor-view-dusk.png",
+      "slug": "monaco-harbor-view-dusk",
+      "title": "monaco harbor view dusk",
+      "tokens": [
+        "dusk",
+        "harbor",
+        "monaco",
+        "view"
+      ],
+      "sha256": "6ed9fbfe18c28b969817797988e4e1ad639fbaaf58151f7de70b53192bb99556"
+    },
+    {
+      "id": "photo:patek-complications-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/tate-motivation/patek-complications-dusk.png",
+      "slug": "patek-complications-dusk",
+      "title": "patek complications dusk",
+      "tokens": [
+        "complications",
+        "dusk",
+        "patek"
+      ],
+      "sha256": "f90ee114ffa9ca7fb246561182db07c192c81dd6e1da11192a21a0f965bbe6dd"
+    },
+    {
+      "id": "photo:rolls-phantom-mansion-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/tate-motivation/rolls-phantom-mansion-dusk.png",
+      "slug": "rolls-phantom-mansion-dusk",
+      "title": "rolls phantom mansion dusk",
+      "tokens": [
+        "dusk",
+        "mansion",
+        "phantom",
+        "rolls"
+      ],
+      "sha256": "254b7b968c01518f3b4be3f76b8f74db2f89f7b4c999eaa51421681615885e79"
+    },
+    {
+      "id": "photo:swiss-alps-penthouse-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/tate-motivation/swiss-alps-penthouse-dusk.png",
+      "slug": "swiss-alps-penthouse-dusk",
+      "title": "swiss alps penthouse dusk",
+      "tokens": [
+        "alps",
+        "dusk",
+        "penthouse",
+        "swiss"
+      ],
+      "sha256": "a647523b27e0988b74dfa4862a8a08fc8971aa73ed0c6d862cb91b61ee8ff4e8"
+    },
+    {
+      "id": "photo:amalfi-coast-villa-dusk",
+      "kind": "photo",
+      "path": "prompts/dark-luxury-still/tate-motivation/amalfi-coast-villa-dusk.png",
+      "slug": "amalfi-coast-villa-dusk",
+      "title": "amalfi coast villa dusk",
+      "tokens": [
+        "amalfi",
+        "coast",
+        "dusk",
+        "villa"
+      ],
+      "sha256": "ef707bb628cb050a5df930ff4fab62aafe79751264987e37a5ac34a5fa71a78d"
     }
   ],
   "videos": [
@@ -215,6 +367,382 @@
       "title": "svj-pair-la-mansion-move",
       "youtube_id": null,
       "sha256": "e5842d55aeff7012fbdbbea0ed378ed20df26233a0e5828ecbabd2cc6ae5f0c6"
+    },
+    {
+      "id": "video:dWfBwZv-bvQ",
+      "kind": "video",
+      "path": "",
+      "paths": [],
+      "slug": "dWfBwZv-bvQ",
+      "title": "Suffer or Perish | Andrew Tate Motivational Speech",
+      "youtube_id": "dWfBwZv-bvQ",
+      "sha256": ""
+    },
+    {
+      "id": "video:tate-luxury-motivation",
+      "kind": "video",
+      "path": "downloads/motivational/tate-luxury/output/tate-luxury-motivation.mp4",
+      "paths": [
+        "downloads/motivational/tate-luxury/output/tate-luxury-motivation.mp4"
+      ],
+      "slug": "tate-luxury-motivation",
+      "title": "tate-luxury-motivation",
+      "youtube_id": null,
+      "sha256": "81e0c4088675efc54da9b6077a95787f4a3441b587b37f48726cddc16bfcd22e"
+    },
+    {
+      "id": "video:g-MX2u-DiMo",
+      "kind": "video",
+      "path": "downloads/motivational/car-luxury/clips/g-MX2u-DiMo_part01.mp4",
+      "paths": [
+        "downloads/motivational/car-luxury/clips/g-MX2u-DiMo_part01.mp4",
+        "downloads/motivational/car-luxury/clips/g-MX2u-DiMo_part02.mp4",
+        "downloads/motivational/car-luxury/clips/g-MX2u-DiMo_part03.mp4"
+      ],
+      "slug": "g-MX2u-DiMo",
+      "title": "g-MX2u-DiMo",
+      "youtube_id": "g-MX2u-DiMo",
+      "sha256": "32b666cfdbb21f4161a1c6cb9a3c0ed3f6f5cc033c456ca3d8340b9074cbd180"
+    },
+    {
+      "id": "video:MktCSJmpTI4",
+      "kind": "video",
+      "path": "downloads/motivational/car-luxury/clips/MktCSJmpTI4_part01.mp4",
+      "paths": [
+        "downloads/motivational/car-luxury/clips/MktCSJmpTI4_part01.mp4",
+        "downloads/motivational/car-luxury/clips/MktCSJmpTI4_part02.mp4",
+        "downloads/motivational/car-luxury/clips/MktCSJmpTI4_part03.mp4"
+      ],
+      "slug": "MktCSJmpTI4",
+      "title": "MktCSJmpTI4",
+      "youtube_id": "MktCSJmpTI4",
+      "sha256": "68ba8fcefafbb1a940fd1b04912ebfeb07d1e3a66888b21f4d87b5f67073afe7"
+    },
+    {
+      "id": "video:t9-cMiEDNyk",
+      "kind": "video",
+      "path": "downloads/motivational/car-luxury/clips/t9-cMiEDNyk_part01.mp4",
+      "paths": [
+        "downloads/motivational/car-luxury/clips/t9-cMiEDNyk_part01.mp4",
+        "downloads/motivational/car-luxury/clips/t9-cMiEDNyk_part02.mp4",
+        "downloads/motivational/car-luxury/clips/t9-cMiEDNyk_part03.mp4"
+      ],
+      "slug": "t9-cMiEDNyk",
+      "title": "t9-cMiEDNyk",
+      "youtube_id": "t9-cMiEDNyk",
+      "sha256": "5501fdf537794d79dcf5d6212e0b0f1fa7b01f95d6b5564d88644cf67ea5953c"
+    },
+    {
+      "id": "video:YAFUyPp_238",
+      "kind": "video",
+      "path": "downloads/motivational/car-luxury/clips/YAFUyPp_238_part01.mp4",
+      "paths": [
+        "downloads/motivational/car-luxury/clips/YAFUyPp_238_part01.mp4",
+        "downloads/motivational/car-luxury/clips/YAFUyPp_238_part02.mp4",
+        "downloads/motivational/car-luxury/clips/YAFUyPp_238_part03.mp4"
+      ],
+      "slug": "YAFUyPp_238",
+      "title": "YAFUyPp_238",
+      "youtube_id": "YAFUyPp_238",
+      "sha256": "850185a2bc478e0f6bea03d6c84df1a7e7252500207541ab4ed00748405f0552"
+    },
+    {
+      "id": "video:car-luxury-motivation",
+      "kind": "video",
+      "path": "downloads/motivational/car-luxury/output/car-luxury-motivation.mp4",
+      "paths": [
+        "downloads/motivational/car-luxury/output/car-luxury-motivation.mp4"
+      ],
+      "slug": "car-luxury-motivation",
+      "title": "car-luxury-motivation",
+      "youtube_id": null,
+      "sha256": "2bda874edeab0ba7615ccd4c5daf402ad366a0419de78ccb5d73f24e8336bf28"
+    },
+    {
+      "id": "video:5CVzOqvqI38",
+      "kind": "video",
+      "path": "downloads/motivational/yacht-motivation/clips/5CVzOqvqI38_part01.mp4",
+      "paths": [
+        "downloads/motivational/yacht-motivation/clips/5CVzOqvqI38_part01.mp4",
+        "downloads/motivational/yacht-motivation/clips/5CVzOqvqI38_part02.mp4",
+        "downloads/motivational/yacht-motivation/clips/5CVzOqvqI38_part03.mp4"
+      ],
+      "slug": "5CVzOqvqI38",
+      "title": "5CVzOqvqI38",
+      "youtube_id": "5CVzOqvqI38",
+      "sha256": "c6e2f8a7bd402bfade66b7cbaf98ce59c5fe51df7414af195775b115cecc4139"
+    },
+    {
+      "id": "video:B9ME9IdHnGM",
+      "kind": "video",
+      "path": "downloads/motivational/yacht-motivation/clips/B9ME9IdHnGM_part01.mp4",
+      "paths": [
+        "downloads/motivational/yacht-motivation/clips/B9ME9IdHnGM_part01.mp4",
+        "downloads/motivational/yacht-motivation/clips/B9ME9IdHnGM_part02.mp4",
+        "downloads/motivational/yacht-motivation/clips/B9ME9IdHnGM_part03.mp4"
+      ],
+      "slug": "B9ME9IdHnGM",
+      "title": "B9ME9IdHnGM",
+      "youtube_id": "B9ME9IdHnGM",
+      "sha256": "42ccb8b7ed6530588ece7736af322bcc61d66fec763c02742e92169db420d218"
+    },
+    {
+      "id": "video:bF-01uyDXUc",
+      "kind": "video",
+      "path": "downloads/motivational/yacht-motivation/clips/bF-01uyDXUc_part01.mp4",
+      "paths": [
+        "downloads/motivational/yacht-motivation/clips/bF-01uyDXUc_part01.mp4",
+        "downloads/motivational/yacht-motivation/clips/bF-01uyDXUc_part02.mp4",
+        "downloads/motivational/yacht-motivation/clips/bF-01uyDXUc_part03.mp4"
+      ],
+      "slug": "bF-01uyDXUc",
+      "title": "bF-01uyDXUc",
+      "youtube_id": "bF-01uyDXUc",
+      "sha256": "5f47999459fecc10251d6fa4d61b3162282981995150845dda598f46308e3902"
+    },
+    {
+      "id": "video:MFrwT9gU7II",
+      "kind": "video",
+      "path": "downloads/motivational/yacht-motivation/clips/MFrwT9gU7II_part01.mp4",
+      "paths": [
+        "downloads/motivational/yacht-motivation/clips/MFrwT9gU7II_part01.mp4",
+        "downloads/motivational/yacht-motivation/clips/MFrwT9gU7II_part02.mp4",
+        "downloads/motivational/yacht-motivation/clips/MFrwT9gU7II_part03.mp4"
+      ],
+      "slug": "MFrwT9gU7II",
+      "title": "MFrwT9gU7II",
+      "youtube_id": "MFrwT9gU7II",
+      "sha256": "075ab641eab1edbd856b6dd749b0c6756b01321d2aca78bea0fa931917f241bf"
+    },
+    {
+      "id": "video:obh17-oIMqo",
+      "kind": "video",
+      "path": "downloads/motivational/yacht-motivation/clips/obh17-oIMqo_part01.mp4",
+      "paths": [
+        "downloads/motivational/yacht-motivation/clips/obh17-oIMqo_part01.mp4",
+        "downloads/motivational/yacht-motivation/clips/obh17-oIMqo_part02.mp4",
+        "downloads/motivational/yacht-motivation/clips/obh17-oIMqo_part03.mp4"
+      ],
+      "slug": "obh17-oIMqo",
+      "title": "obh17-oIMqo",
+      "youtube_id": "obh17-oIMqo",
+      "sha256": "de0df55ab6c57471db5e4adc2105b01dfe98c1c2aae44059244514e373c823fe"
+    },
+    {
+      "id": "video:yacht-motivation",
+      "kind": "video",
+      "path": "downloads/motivational/yacht-motivation/output/yacht-motivation.mp4",
+      "paths": [
+        "downloads/motivational/yacht-motivation/output/yacht-motivation.mp4"
+      ],
+      "slug": "yacht-motivation",
+      "title": "yacht-motivation",
+      "youtube_id": null,
+      "sha256": "6858364f2edcab858901af3ec23d8133797c84b89320fb24d5d37dcd50fb36f5"
+    },
+    {
+      "id": "video:BZn7rS4Vkt4",
+      "kind": "video",
+      "path": "",
+      "paths": [],
+      "slug": "BZn7rS4Vkt4",
+      "title": "GET UP AND FIGHT! Jocko Willink (Most Epic Motivational Video)",
+      "youtube_id": "BZn7rS4Vkt4",
+      "sha256": ""
+    },
+    {
+      "id": "video:DJuQu8X2s_I",
+      "kind": "video",
+      "path": "",
+      "paths": [],
+      "slug": "DJuQu8X2s_I",
+      "title": "30 Minutes of Andrew Tate That Will FIX Your Life. (NO MUSIC)",
+      "youtube_id": "DJuQu8X2s_I",
+      "sha256": ""
+    },
+    {
+      "id": "video:4degEyoCkXU",
+      "kind": "video",
+      "path": "",
+      "paths": [],
+      "slug": "4degEyoCkXU",
+      "title": "The ONLY 30 Minutes of Andrew Tate Mindset You'll EVER Need (NO MUSIC)",
+      "youtube_id": "4degEyoCkXU",
+      "sha256": ""
+    },
+    {
+      "id": "video:ba7JNTI17uo",
+      "kind": "video",
+      "path": "downloads/motivational/lambo-motivation/clips/ba7JNTI17uo_part01.mp4",
+      "paths": [
+        "downloads/motivational/lambo-motivation/clips/ba7JNTI17uo_part01.mp4",
+        "downloads/motivational/lambo-motivation/clips/ba7JNTI17uo_part02.mp4",
+        "downloads/motivational/lambo-motivation/clips/ba7JNTI17uo_part03.mp4"
+      ],
+      "slug": "ba7JNTI17uo",
+      "title": "ba7JNTI17uo",
+      "youtube_id": "ba7JNTI17uo",
+      "sha256": "394f871285f494abe77ee05e1afb71181d97618360555fa7d37ce21844ac4037"
+    },
+    {
+      "id": "video:Eg3zhzWzlck",
+      "kind": "video",
+      "path": "downloads/motivational/lambo-motivation/clips/Eg3zhzWzlck_part01.mp4",
+      "paths": [
+        "downloads/motivational/lambo-motivation/clips/Eg3zhzWzlck_part01.mp4",
+        "downloads/motivational/lambo-motivation/clips/Eg3zhzWzlck_part02.mp4",
+        "downloads/motivational/lambo-motivation/clips/Eg3zhzWzlck_part03.mp4"
+      ],
+      "slug": "Eg3zhzWzlck",
+      "title": "Eg3zhzWzlck",
+      "youtube_id": "Eg3zhzWzlck",
+      "sha256": "4dd77703363b6a8910e9da38c8fe964e167c581682de2bf5c73e9334746ce4be"
+    },
+    {
+      "id": "video:fdS1ZQ7WJMk",
+      "kind": "video",
+      "path": "downloads/motivational/lambo-motivation/clips/fdS1ZQ7WJMk_part01.mp4",
+      "paths": [
+        "downloads/motivational/lambo-motivation/clips/fdS1ZQ7WJMk_part01.mp4",
+        "downloads/motivational/lambo-motivation/clips/fdS1ZQ7WJMk_part02.mp4",
+        "downloads/motivational/lambo-motivation/clips/fdS1ZQ7WJMk_part03.mp4"
+      ],
+      "slug": "fdS1ZQ7WJMk",
+      "title": "fdS1ZQ7WJMk",
+      "youtube_id": "fdS1ZQ7WJMk",
+      "sha256": "0c35127a1f366d5aca3b7f0e937fea89ff7470b833a2ba3ef9cd36bbdc182ba5"
+    },
+    {
+      "id": "video:sitXeGjm4Mc",
+      "kind": "video",
+      "path": "downloads/motivational/lambo-motivation/clips/sitXeGjm4Mc_part01.mp4",
+      "paths": [
+        "downloads/motivational/lambo-motivation/clips/sitXeGjm4Mc_part01.mp4",
+        "downloads/motivational/lambo-motivation/clips/sitXeGjm4Mc_part02.mp4",
+        "downloads/motivational/lambo-motivation/clips/sitXeGjm4Mc_part03.mp4"
+      ],
+      "slug": "sitXeGjm4Mc",
+      "title": "sitXeGjm4Mc",
+      "youtube_id": "sitXeGjm4Mc",
+      "sha256": "e35e1bd86d40fcc29768688a27b88848031b6ee4f38ac4ef04dab175924d02fd"
+    },
+    {
+      "id": "video:viW44cUfxCE",
+      "kind": "video",
+      "path": "downloads/motivational/lambo-motivation/clips/viW44cUfxCE_part01.mp4",
+      "paths": [
+        "downloads/motivational/lambo-motivation/clips/viW44cUfxCE_part01.mp4",
+        "downloads/motivational/lambo-motivation/clips/viW44cUfxCE_part02.mp4",
+        "downloads/motivational/lambo-motivation/clips/viW44cUfxCE_part03.mp4"
+      ],
+      "slug": "viW44cUfxCE",
+      "title": "viW44cUfxCE",
+      "youtube_id": "viW44cUfxCE",
+      "sha256": "63da47c60d153db978c0aa16b0ae773ca29cd359f5f2db74417e264534b38767"
+    },
+    {
+      "id": "video:lambo-motivation-motivation",
+      "kind": "video",
+      "path": "downloads/motivational/lambo-motivation/output/lambo-motivation-motivation.mp4",
+      "paths": [
+        "downloads/motivational/lambo-motivation/output/lambo-motivation-motivation.mp4"
+      ],
+      "slug": "lambo-motivation-motivation",
+      "title": "lambo-motivation-motivation",
+      "youtube_id": null,
+      "sha256": "d2a989ecf85bdf12fa61cb2510becb5e11d0e08e41b75d502f208fea13323f49"
+    },
+    {
+      "id": "video:-kBnCqwSO98",
+      "kind": "video",
+      "path": "",
+      "paths": [],
+      "slug": "-kBnCqwSO98",
+      "title": "LET HER LEAVE - Motivational Speech (Andrew Tate)",
+      "youtube_id": "-kBnCqwSO98",
+      "sha256": ""
+    },
+    {
+      "id": "video:4Uoiqlm_C2Q",
+      "kind": "video",
+      "path": "downloads/motivational/mansion-motivation/clips/4Uoiqlm_C2Q_part01.mp4",
+      "paths": [
+        "downloads/motivational/mansion-motivation/clips/4Uoiqlm_C2Q_part01.mp4",
+        "downloads/motivational/mansion-motivation/clips/4Uoiqlm_C2Q_part02.mp4",
+        "downloads/motivational/mansion-motivation/clips/4Uoiqlm_C2Q_part03.mp4"
+      ],
+      "slug": "4Uoiqlm_C2Q",
+      "title": "4Uoiqlm_C2Q",
+      "youtube_id": "4Uoiqlm_C2Q",
+      "sha256": "99dfe77c613a1a5b88e533b3df80a9bcb00f64d418f6970123fd2a0c279f4a91"
+    },
+    {
+      "id": "video:E7pCceDrKmg",
+      "kind": "video",
+      "path": "downloads/motivational/mansion-motivation/clips/E7pCceDrKmg_part01.mp4",
+      "paths": [
+        "downloads/motivational/mansion-motivation/clips/E7pCceDrKmg_part01.mp4",
+        "downloads/motivational/mansion-motivation/clips/E7pCceDrKmg_part02.mp4",
+        "downloads/motivational/mansion-motivation/clips/E7pCceDrKmg_part03.mp4"
+      ],
+      "slug": "E7pCceDrKmg",
+      "title": "E7pCceDrKmg",
+      "youtube_id": "E7pCceDrKmg",
+      "sha256": "5f14c9d35f9132c93994ed0ab8810a1a9007c97a4e049f05f252d40514ac1f2c"
+    },
+    {
+      "id": "video:haZegPp6gck",
+      "kind": "video",
+      "path": "downloads/motivational/mansion-motivation/clips/haZegPp6gck_part01.mp4",
+      "paths": [
+        "downloads/motivational/mansion-motivation/clips/haZegPp6gck_part01.mp4",
+        "downloads/motivational/mansion-motivation/clips/haZegPp6gck_part02.mp4",
+        "downloads/motivational/mansion-motivation/clips/haZegPp6gck_part03.mp4"
+      ],
+      "slug": "haZegPp6gck",
+      "title": "haZegPp6gck",
+      "youtube_id": "haZegPp6gck",
+      "sha256": "c2604b7544dbc545e19d3adcdbefd69ad5873ef4d17662ad2802546160852068"
+    },
+    {
+      "id": "video:SR__amDl1c8",
+      "kind": "video",
+      "path": "downloads/motivational/mansion-motivation/clips/SR__amDl1c8_part01.mp4",
+      "paths": [
+        "downloads/motivational/mansion-motivation/clips/SR__amDl1c8_part01.mp4",
+        "downloads/motivational/mansion-motivation/clips/SR__amDl1c8_part02.mp4",
+        "downloads/motivational/mansion-motivation/clips/SR__amDl1c8_part03.mp4"
+      ],
+      "slug": "SR__amDl1c8",
+      "title": "SR__amDl1c8",
+      "youtube_id": "SR__amDl1c8",
+      "sha256": "d0cf37be8cd1a62874cc398f56fe1503b95eba5439c3cf90386a8a17f50404da"
+    },
+    {
+      "id": "video:y9j-BL5ocW8",
+      "kind": "video",
+      "path": "downloads/motivational/mansion-motivation/clips/y9j-BL5ocW8_part01.mp4",
+      "paths": [
+        "downloads/motivational/mansion-motivation/clips/y9j-BL5ocW8_part01.mp4",
+        "downloads/motivational/mansion-motivation/clips/y9j-BL5ocW8_part02.mp4",
+        "downloads/motivational/mansion-motivation/clips/y9j-BL5ocW8_part03.mp4"
+      ],
+      "slug": "y9j-BL5ocW8",
+      "title": "y9j-BL5ocW8",
+      "youtube_id": "y9j-BL5ocW8",
+      "sha256": "09e498a259ea4fd8b74f65d9689decdbabb72f8e50a3f694b37dcae109a61886"
+    },
+    {
+      "id": "video:mansion-motivation-motivation",
+      "kind": "video",
+      "path": "downloads/motivational/mansion-motivation/output/mansion-motivation-motivation.mp4",
+      "paths": [
+        "downloads/motivational/mansion-motivation/output/mansion-motivation-motivation.mp4"
+      ],
+      "slug": "mansion-motivation-motivation",
+      "title": "mansion-motivation-motivation",
+      "youtube_id": null,
+      "sha256": "de021464d70d924417d50f7c689f4236f42e19cc1c3b7ae8bc3d1374cb548524"
     }
   ],
   "stories": [
