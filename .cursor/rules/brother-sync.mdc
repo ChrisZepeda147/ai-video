@@ -1,0 +1,40 @@
+---
+description: Keep Stephen and Chris GitHub copies plus shared_library in sync on every session
+alwaysApply: true
+---
+
+# Brother sync
+
+Two people. Two GitHub copies. One shared video library (Stephen → Chris).
+
+**Remotes**
+- `origin` / `stephen` = `https://github.com/StephenZepeda/ai-video.git`
+- `chris` = `https://github.com/ChrisZepeda147/ai-video.git`
+
+**Which machine**
+- `SHARED_LIBRARY_EXPORT_OWNER=stephen` in `scripts/.env` → Stephen. After a new video, export + `push-stephen`, then push both remotes.
+- No that env → Chris. After `git pull`, run `pull-import`. Do not set the env to stephen. Do not `push-stephen`.
+
+**After any commit that should be shared**
+```powershell
+git push origin
+git push chris
+```
+Do not leave one remote behind.
+
+**After a finished motivational video (Stephen)**
+```powershell
+python scripts/shared_library_sync.py push-stephen
+git push chris
+```
+`push-stephen` exports `downloads/motivational/<slug>/output/*.mp4` into `shared_library/stephen/<slug>/`, commits **only** that tree + `.gitattributes`, pushes `origin`. Dirty unrelated files → stash first, then run it.
+
+**After Stephen pushes (Chris)**
+```powershell
+python scripts/shared_library_sync.py pull-import
+```
+Or Sync Stephen library on `/library`.
+
+**Media** uses Git LFS (`git lfs install` once per machine).
+
+Full command list: `.cursor/skills/brother-sync/SKILL.md`.
