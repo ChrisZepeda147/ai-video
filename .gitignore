@@ -18,3 +18,4 @@ venv/
 
 # Kinocut is cloned locally from github.com/KyaniteLabs/kinocut (see README)
 tools/kinocut/
+content/used.json

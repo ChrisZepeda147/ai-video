@@ -79,12 +79,6 @@ LIVE_TITLE_RE = re.compile(
     r"(🔴|\blive\b|\blivestream\b|\b24/?7\b|\bstate of play\b|\bdirect\b|\bshowcase\b)",
     re.IGNORECASE,
 )
-GAMEPLAY_TITLE_RE = re.compile(
-    r"\b(gameplay|let'?s play|playthrough|walkthrough|no commentary|"
-    r"full game|ranked|clutch|highlights?|speedrun|boss fight|"
-    r"playing|i beat|i won)\b",
-    re.IGNORECASE,
-)
 BACKGROUND_GAMEPLAY_TITLE_RE = re.compile(
     r"\b(no commentary|without commentary|background gameplay|satisfying|"
     r"parkour|subway surfers|mobile gameplay|asmr gameplay|screen record|"
@@ -97,6 +91,14 @@ COMMENTARY_HEAVY_RE = re.compile(
     r"\b(i beat|i won|react(s|ion)?|vs every|every rank|playing every|"
     r"funny moments|stream highlights|facecam|just chatting|podcast|"
     r"interview|tier list|rage|roast|how to fish|caseoh|jynxzi|xqc)\b",
+    re.IGNORECASE,
+)
+REALESTATE_TOUR_RE = re.compile(
+    r"\b(house tour|home tour|property tour|mansion tour|estate tour|"
+    r"luxury house tour|mega mansion tour|full tour|room tour|walkthrough|"
+    r"inside a \$|inside the \$|inside this \$|touring a \$|"
+    r"must see.{0,12}inside|realtor|open house|real estate|dream home|"
+    r"mega mansion|hour tour|travel video|night cities|capital of)\b",
     re.IGNORECASE,
 )
 
@@ -224,11 +226,6 @@ def _iso8601_duration_to_seconds(duration: str | None) -> float | None:
     return float(hours * 3600 + minutes * 60 + seconds)
 
 
-def discover_trending_ytdlp(*, limit: int) -> list[VideoCandidate]:
-    """Search for popular background gameplay when API results are thin."""
-    return discover_background_gameplay(limit=max(limit * 4, 30))
-
-
 def discover_background_gameplay(*, limit: int) -> list[VideoCandidate]:
     per_query = max(limit // 2, 12)
     seen: set[str] = set()
@@ -287,16 +284,16 @@ def is_live_or_event(video: VideoCandidate) -> bool:
     return bool(LIVE_TITLE_RE.search(video.title))
 
 
-def looks_like_gameplay(video: VideoCandidate) -> bool:
-    return bool(GAMEPLAY_TITLE_RE.search(video.title))
-
-
 def looks_like_background_gameplay(video: VideoCandidate) -> bool:
     return bool(BACKGROUND_GAMEPLAY_TITLE_RE.search(video.title))
 
 
 def is_commentary_heavy(video: VideoCandidate) -> bool:
     return bool(COMMENTARY_HEAVY_RE.search(video.title))
+
+
+def is_realestate_tour(video: VideoCandidate) -> bool:
+    return bool(REALESTATE_TOUR_RE.search(video.title))
 
 
 def background_gameplay_score(video: VideoCandidate) -> int:
@@ -475,16 +472,18 @@ def split_into_parts(
     keep_source: bool,
     aspect_ratio: str,
     max_height: int,
+    start_offset: float = 0.0,
 ) -> list[dict[str, Any]]:
     duration = probe_duration(source)
-    part_count = estimate_part_count(duration, clip_length=clip_length, max_parts=max_parts)
+    usable = max(duration - start_offset, 0.0)
+    part_count = estimate_part_count(usable, clip_length=clip_length, max_parts=max_parts)
     size = aspect_output_size(aspect_ratio, max_height)
     if size:
         print(f"    Cropping/scaling parts to {aspect_ratio} ({size[0]}x{size[1]})")
 
     parts: list[dict[str, Any]] = []
     for part_num in range(1, part_count + 1):
-        start = (part_num - 1) * clip_length
+        start = start_offset + (part_num - 1) * clip_length
         segment_duration = min(float(clip_length), max(duration - start, 0))
         if segment_duration <= 0:
             break
@@ -523,6 +522,7 @@ def filter_unwanted(
     exclude_music: bool,
     exclude_trailers: bool,
     exclude_live: bool,
+    exclude_realestate_tours: bool = False,
     background_gameplay_only: bool,
     min_views: int,
     min_duration: float,
@@ -533,6 +533,7 @@ def filter_unwanted(
     skipped_trailers = 0
     skipped_live = 0
     skipped_commentary = 0
+    skipped_tours = 0
     skipped_views = 0
     skipped_duration = 0
     skipped_other = 0
@@ -545,6 +546,9 @@ def filter_unwanted(
             continue
         if exclude_live and is_live_or_event(video):
             skipped_live += 1
+            continue
+        if exclude_realestate_tours and is_realestate_tour(video):
+            skipped_tours += 1
             continue
         if is_commentary_heavy(video):
             skipped_commentary += 1
@@ -572,6 +576,8 @@ def filter_unwanted(
         parts.append(f"{skipped_live} livestream/event(s)")
     if skipped_commentary:
         parts.append(f"{skipped_commentary} commentary-heavy")
+    if skipped_tours:
+        parts.append(f"{skipped_tours} real-estate tour(s)")
     if skipped_views:
         parts.append(f"{skipped_views} low-view")
     if skipped_duration:
@@ -609,8 +615,12 @@ def download_videos(
     split_parts: bool,
     keep_source: bool,
     aspect_ratio: str,
+<<<<<<< HEAD
     quiet: bool = False,
     id_only_filenames: bool = False,
+=======
+    start_offset: float = 0.0,
+>>>>>>> 39f25b23957c4e3c83cef2963607e061909fa165
 ) -> list[dict[str, Any]]:
     _configure_stdout()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -708,6 +718,7 @@ def download_videos(
                         keep_source=keep_source,
                         aspect_ratio=aspect_ratio,
                         max_height=max_height,
+                        start_offset=start_offset,
                     )
                     record["parts"] = parts
                     record["status"] = "ok" if parts else "error"
