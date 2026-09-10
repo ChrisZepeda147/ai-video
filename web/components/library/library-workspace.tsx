@@ -3,26 +3,64 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { BackendOfflineBanner } from "@/components/backend-banner";
-import { fetchHealth, fetchProductionLibrary, postImportProductionVideo, productionMediaUrl } from "@/lib/api";
-import type { ProductionLibraryVideo } from "@/lib/types";
+import { formatDuration, formatTimecode } from "@/lib/format";
+import {
+  fetchProductionLibrary,
+  fetchSharedSyncStatus,
+  postImportProductionVideo,
+  postSharedSyncPullImport,
+  productionMediaUrl,
+} from "@/lib/api";
+import type { ProductionLibraryVideo, SharedSyncStatus } from "@/lib/types";
 
 export function LibraryWorkspace() {
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
   const [videos, setVideos] = useState<ProductionLibraryVideo[]>([]);
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<SharedSyncStatus | null>(null);
+  const [syncBusy, setSyncBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const health = await fetchHealth();
-    setBackendOnline(health.ok);
-    if (!health.ok) return;
+    setLoading(true);
     const result = await fetchProductionLibrary({ limit: 200 });
+    setLoading(false);
+    setBackendOnline(result.ok);
     if (result.ok) setVideos(result.data.items);
+    const sync = await fetchSharedSyncStatus();
+    if (sync.ok) setSyncStatus(sync.data);
   }, []);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  async function handleSyncStephen() {
+    setSyncBusy(true);
+    setMessage(null);
+    const result = await postSharedSyncPullImport();
+    setSyncBusy(false);
+    if (!result.ok) {
+      setMessage(typeof result.message === "string" ? result.message : "Stephen sync failed.");
+      return;
+    }
+    const imp = result.data.import;
+    setSyncStatus(result.data.status);
+    const pullNote = result.data.pull_warning ? ` Pull note: ${result.data.pull_warning}.` : "";
+    if (imp.found === 0) {
+      setMessage(
+        `No Stephen packages on disk yet.${pullNote} Stephen runs export-stephen-existing then push-stephen from downloads/motivational/*/output/.`,
+      );
+    } else {
+      setMessage(
+        `Stephen sync: ${imp.imported} imported, ${imp.skipped} already in library, ${imp.found} packages found` +
+          (imp.errors ? `, ${imp.errors} errors` : "") +
+          pullNote,
+      );
+    }
+    await load();
+  }
 
   async function handleUpload(file: File) {
     setBusy(true);
@@ -43,6 +81,28 @@ export function LibraryWorkspace() {
   return (
     <div className="space-y-6">
       {backendOnline === false ? <BackendOfflineBanner message="Start the API, then refresh." /> : null}
+
+      <section className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-zinc-100">Stephen shared library</h3>
+            <p className="text-xs text-zinc-500">
+              {syncStatus
+                ? `${syncStatus.packages_on_disk} packages on disk · ${syncStatus.imports_recorded} imported`
+                : "Pull Stephen packages from GitHub and import into this library."}
+              {syncStatus?.last_import_at ? ` · Last import ${new Date(syncStatus.last_import_at).toLocaleString()}` : ""}
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={syncBusy || backendOnline === false}
+            onClick={handleSyncStephen}
+            className="rounded-xl border border-violet-700 bg-violet-600/20 px-4 py-2 text-sm font-medium text-violet-100 hover:bg-violet-600/30 disabled:opacity-40"
+          >
+            {syncBusy ? "Syncing…" : "Sync Stephen library"}
+          </button>
+        </div>
+      </section>
 
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
@@ -77,7 +137,9 @@ export function LibraryWorkspace() {
       {message ? <p className="text-sm text-zinc-300">{message}</p> : null}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {videos.length === 0 ? (
+        {loading ? (
+          <p className="text-sm text-zinc-500">Loading library…</p>
+        ) : videos.length === 0 ? (
           <p className="text-sm text-zinc-500">No production videos yet. Run a command or import an MP4.</p>
         ) : (
           videos.map((video) => (
@@ -86,14 +148,21 @@ export function LibraryWorkspace() {
               href={`/library/${video.id}`}
               className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4 hover:border-zinc-700"
             >
-              {video.final_output_path ? (
-                <video
-                  src={productionMediaUrl(video.final_output_path) ?? undefined}
-                  className="mb-3 aspect-[9/16] w-full rounded-lg bg-zinc-950 object-cover"
-                  muted
-                  playsInline
-                  preload="metadata"
-                />
+              {video.final_output_path && productionMediaUrl(video.final_output_path) ? (
+                <div className="relative mb-3">
+                  <video
+                    src={productionMediaUrl(video.final_output_path)!}
+                    className="aspect-[9/16] w-full rounded-lg bg-zinc-950 object-cover"
+                    muted
+                    playsInline
+                    preload="metadata"
+                  />
+                  {video.duration_sec ? (
+                    <span className="absolute bottom-2 right-2 rounded bg-black/75 px-2 py-0.5 text-xs text-zinc-100">
+                      {formatTimecode(video.duration_sec)}
+                    </span>
+                  ) : null}
+                </div>
               ) : (
                 <div className="mb-3 flex aspect-[9/16] items-center justify-center rounded-lg bg-zinc-950 text-xs text-zinc-600">
                   No preview
@@ -106,6 +175,7 @@ export function LibraryWorkspace() {
               <p className="truncate text-sm text-zinc-400">{video.title}</p>
               <p className="mt-1 text-xs text-zinc-500">
                 {[
+                  video.duration_sec ? formatDuration(video.duration_sec) : null,
                   video.speaker,
                   video.topic,
                   (video.metadata as { visual_style?: string } | undefined)?.visual_style,

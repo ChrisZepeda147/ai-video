@@ -59,6 +59,26 @@ function buildUrl(path: string, params?: Record<string, QueryValue>): string {
   return url.toString();
 }
 
+function formatApiErrorDetail(detail: unknown): string {
+  if (typeof detail === "string") return detail;
+  if (detail && typeof detail === "object") {
+    const obj = detail as Record<string, unknown>;
+    if (typeof obj.message === "string") {
+      const unrelated = Array.isArray(obj.unrelated) ? obj.unrelated.filter(Boolean) : [];
+      if (unrelated.length) {
+        return `${obj.message} (${unrelated.join(", ")})`;
+      }
+      return obj.message;
+    }
+    try {
+      return JSON.stringify(detail);
+    } catch {
+      return "Request failed";
+    }
+  }
+  return "";
+}
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<ApiResult<T>> {
   try {
     const response = await fetch(url, {
@@ -74,8 +94,9 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<ApiResult<
     if (!response.ok) {
       let message = `Discovery backend returned ${response.status}`;
       try {
-        const err = (await response.json()) as { detail?: string };
-        if (err.detail) message = err.detail;
+        const err = (await response.json()) as { detail?: unknown };
+        const formatted = formatApiErrorDetail(err.detail);
+        if (formatted) message = formatted;
       } catch {
         /* ignore */
       }
@@ -649,6 +670,21 @@ export async function postCombinationRender(body: {
     {
       method: "POST",
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(600_000),
+    },
+  );
+}
+
+export async function fetchSharedSyncStatus() {
+  return fetchJson<import("@/lib/types").SharedSyncStatus>(buildUrl("/api/library/shared-sync/status"));
+}
+
+export async function postSharedSyncPullImport(body?: { skip_pull?: boolean; dry_run?: boolean }) {
+  return fetchJson<import("@/lib/types").SharedSyncPullImportResult>(
+    buildUrl("/api/library/shared-sync/pull-import"),
+    {
+      method: "POST",
+      body: JSON.stringify(body ?? {}),
       signal: AbortSignal.timeout(600_000),
     },
   );

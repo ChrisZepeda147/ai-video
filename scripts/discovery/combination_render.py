@@ -12,6 +12,7 @@ from typing import Any
 
 from discovery.auto_register import _components_from_job_dir, _read_json3_transcript
 from discovery.combinations import (
+    _resolve_speaker,
     get_audio_component,
     get_visual_pack,
     normalize_owner,
@@ -70,7 +71,7 @@ def render_combination(
     visual_pack_id: int,
     audio_start_sec: float | None = None,
     audio_end_sec: float | None = None,
-    segment_length: float = 8.0,
+    segment_length: float | None = None,
     grade: bool = True,
     version_label: str | None = None,
     change_summary: str | None = None,
@@ -116,12 +117,21 @@ def render_combination(
     captions = audio_dir / "subs.en.json3"
 
     _scripts_path()
-    from build_motivation_job import probe_duration, render_job, shift_json3, trim_audio
+    from build_clips_montage import probe_duration, segment_length_for_duration
+    from build_motivation_job import render_job, shift_json3, trim_audio
 
-    duration = float(audio.get("video_duration_sec") or probe_duration(audio_path))
-    start = float(audio_start_sec or audio.get("start_sec") or 0.0)
-    if audio_end_sec is not None and audio_end_sec > start:
+    start = float(audio_start_sec if audio_start_sec is not None else (audio.get("start_sec") or 0.0))
+    probed = float(probe_duration(audio_path))
+    if audio_end_sec is not None and float(audio_end_sec) > start:
         duration = float(audio_end_sec) - start
+    elif audio.get("end_sec") is not None and float(audio["end_sec"]) > start:
+        duration = float(audio["end_sec"]) - start
+    else:
+        duration = probed - start if start > 0 else probed
+    if duration <= 0:
+        duration = probed
+
+    beat_length = segment_length if segment_length is not None else segment_length_for_duration(duration)
 
     if audio_start_sec is not None or (audio.get("start_sec") and float(audio.get("start_sec") or 0) > 0):
         trim_audio(audio_path, speech_mp3, start=start, duration=duration)
@@ -148,13 +158,15 @@ def render_combination(
         captions=captions,
         output=output,
         duration=duration,
-        segment_length=segment_length,
+        segment_length=beat_length,
         seed=None,
         grade=grade,
     )
 
     rel_output = output.relative_to(root).as_posix()
-    speaker = str(audio.get("speaker") or "")
+    speaker = _resolve_speaker(audio, store)
+    if speaker == "Unknown":
+        speaker = ""
     pack_label = str(pack.get("label") or pack.get("category") or "visual pack")
     title = f"{speaker} × {pack_label}".strip(" ×")
     transcript = _read_json3_transcript(captions) or (audio.get("transcript_segment") or "")
@@ -220,6 +232,13 @@ def render_combination(
         from discovery.auto_register import sync_register_best_effort
 
         sync_register_best_effort(slug=slug, topic="motivation")
+    except Exception:
+        pass
+
+    try:
+        from discovery.shared_library import export_stephen_after_register
+
+        export_stephen_after_register(slug=slug, video=video, store=store)
     except Exception:
         pass
 

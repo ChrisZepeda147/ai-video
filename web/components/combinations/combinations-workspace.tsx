@@ -9,6 +9,7 @@ import {
   postCombinationRender,
   productionMediaUrl,
 } from "@/lib/api";
+import { formatDuration, formatTimecode } from "@/lib/format";
 import type {
   CombinationCatalog,
   CombinationStatusResponse,
@@ -40,8 +41,8 @@ export function CombinationsWorkspace() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [forceRender, setForceRender] = useState(false);
-  const [audioStart, setAudioStart] = useState("");
-  const [audioEnd, setAudioEnd] = useState("");
+  const [trimStart, setTrimStart] = useState("");
+  const [trimEnd, setTrimEnd] = useState("");
 
   const loadCatalog = useCallback(async () => {
     const result = await fetchCombinationCatalog(owner);
@@ -71,6 +72,26 @@ export function CombinationsWorkspace() {
   const selectedAudio = audioItems.find((a) => a.component_id === selectedAudioId) ?? null;
   const selectedPack = catalog?.visual_packs.find((p) => p.id === selectedPackId) ?? null;
   const selectedPairing = pairing?.visuals.find((v) => v.visual_pack_id === selectedPackId);
+  const audioDurationSec =
+    pairing?.audio.duration_sec ?? selectedAudio?.duration_sec ?? null;
+  const visualDurationSec =
+    selectedPairing?.duration_sec ?? selectedPack?.duration_sec ?? null;
+  const trimStartSec = trimStart ? parseFloat(trimStart) : 0;
+  const trimEndSec = trimEnd ? parseFloat(trimEnd) : audioDurationSec ?? 0;
+  const outputDurationSec =
+    audioDurationSec != null
+      ? Math.max(0, (trimEnd ? trimEndSec : audioDurationSec) - trimStartSec)
+      : null;
+
+  useEffect(() => {
+    if (!selectedAudio?.duration_sec) {
+      setTrimStart("");
+      setTrimEnd("");
+      return;
+    }
+    setTrimStart("0");
+    setTrimEnd(String(Math.round(selectedAudio.duration_sec * 100) / 100));
+  }, [selectedAudio?.component_id, selectedAudio?.duration_sec]);
 
   useEffect(() => {
     if (!selectedAudioId) {
@@ -95,13 +116,15 @@ export function CombinationsWorkspace() {
     }
     setBusy(true);
     setMessage(null);
+    const startSec = trimStart ? parseFloat(trimStart) : 0;
+    const endSec = trimEnd ? parseFloat(trimEnd) : audioDurationSec ?? undefined;
     const result = await postCombinationRender({
       owner,
       audio_component_id: selectedAudioId,
       visual_pack_id: selectedPackId,
       force: forceRender,
-      audio_start_sec: audioStart ? parseFloat(audioStart) : undefined,
-      audio_end_sec: audioEnd ? parseFloat(audioEnd) : undefined,
+      audio_start_sec: startSec,
+      audio_end_sec: endSec,
     });
     setBusy(false);
     if (!result.ok) {
@@ -188,18 +211,28 @@ export function CombinationsWorkspace() {
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-mono text-violet-300">{item.display_id}</span>
-                    <span className="text-xs text-zinc-500">{item.duration_sec ? `${item.duration_sec.toFixed(0)}s` : ""}</span>
+                    {item.duration_sec ? (
+                      <span className="text-xs text-zinc-400" title={formatTimecode(item.duration_sec)}>
+                        {formatDuration(item.duration_sec)}
+                      </span>
+                    ) : null}
                   </div>
                   <p className="mt-1 font-medium text-zinc-100">{item.speaker}</p>
                   <p className="line-clamp-2 text-xs text-zinc-500">{item.transcript_excerpt || item.video_title}</p>
                   {item.local_path ? (
-                    <audio
-                      controls
-                      preload="none"
-                      className="mt-2 h-8 w-full"
-                      src={productionMediaUrl(item.local_path) ?? undefined}
-                      onClick={(e) => e.stopPropagation()}
-                    />
+                    <div className="mt-2 space-y-1" onClick={(e) => e.stopPropagation()}>
+                      <audio
+                        controls
+                        preload="metadata"
+                        className="h-8 w-full"
+                        src={productionMediaUrl(item.local_path) ?? undefined}
+                      />
+                      {item.duration_sec ? (
+                        <p className="text-[11px] text-zinc-500">
+                          Length: {formatDuration(item.duration_sec)} ({formatTimecode(item.duration_sec)})
+                        </p>
+                      ) : null}
+                    </div>
                   ) : null}
                 </button>
               </li>
@@ -230,28 +263,38 @@ export function CombinationsWorkspace() {
                         selectedPackId === packId ? "ring-2 ring-violet-500" : ""
                       }`}
                     >
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between gap-2">
                         <span className="font-mono">{pack.display_id || pack.id}</span>
                         <span className="text-xs">{visual ? statusLabel(visual, owner) : pack.category}</span>
                       </div>
                       <p className="mt-1 font-medium">{pack.label}</p>
                       <p className="text-xs opacity-80">
                         {pack.category} · {pack.clip_count ?? 0} clips
+                        {(visual?.duration_sec ?? pack.duration_sec)
+                          ? ` · ${formatDuration(visual?.duration_sec ?? pack.duration_sec)}`
+                          : ""}
                       </p>
                       {pack.preview_clip_path ? (
-                        <video
-                          muted
-                          playsInline
-                          preload="metadata"
-                          className="mt-2 aspect-[9/16] w-24 rounded-lg bg-black object-cover"
-                          src={productionMediaUrl(pack.preview_clip_path) ?? undefined}
-                          onMouseEnter={(e) => e.currentTarget.play().catch(() => undefined)}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.pause();
-                            e.currentTarget.currentTime = 0;
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                        />
+                        <div className="relative mt-2 w-24">
+                          <video
+                            muted
+                            playsInline
+                            preload="metadata"
+                            className="aspect-[9/16] w-full rounded-lg bg-black object-cover"
+                            src={productionMediaUrl(pack.preview_clip_path) ?? undefined}
+                            onMouseEnter={(e) => e.currentTarget.play().catch(() => undefined)}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.pause();
+                              e.currentTarget.currentTime = 0;
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          {(visual?.duration_sec ?? pack.duration_sec) ? (
+                            <span className="absolute bottom-1 right-1 rounded bg-black/75 px-1.5 py-0.5 text-[10px] text-zinc-200">
+                              {formatTimecode(visual?.duration_sec ?? pack.duration_sec)}
+                            </span>
+                          ) : null}
+                        </div>
                       ) : null}
                     </button>
                   </li>
@@ -275,7 +318,13 @@ export function CombinationsWorkspace() {
               </p>
               <p>
                 <span className="text-zinc-500">Visual:</span> {selectedPack.display_id} — {selectedPack.label}
+                {visualDurationSec ? ` (${formatDuration(visualDurationSec)})` : ""}
               </p>
+              {outputDurationSec ? (
+                <p className="mt-2 font-medium text-violet-200">
+                  Output length: {formatDuration(outputDurationSec)} — visual montage matched to audio
+                </p>
+              ) : null}
               {selectedPairing?.used_by_other_owner ? (
                 <p className="mt-2 text-amber-300">Warning: used on {selectedPairing.other_owner}&apos;s channel.</p>
               ) : null}
@@ -284,22 +333,36 @@ export function CombinationsWorkspace() {
               ) : null}
             </div>
             <div className="space-y-2">
+              <p className="text-xs text-zinc-500">
+                Trim range (seconds). Default uses full audio — render cuts visuals to the same length.
+              </p>
               <label className="block text-xs text-zinc-500">
-                Audio start (sec)
+                Start
                 <input
-                  value={audioStart}
-                  onChange={(e) => setAudioStart(e.target.value)}
+                  type="number"
+                  min={0}
+                  step={0.1}
+                  value={trimStart}
+                  onChange={(e) => setTrimStart(e.target.value)}
                   className="mt-1 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-1"
                 />
               </label>
               <label className="block text-xs text-zinc-500">
-                Audio end (sec)
+                End{audioDurationSec ? ` (full clip: ${Math.round(audioDurationSec * 100) / 100})` : ""}
                 <input
-                  value={audioEnd}
-                  onChange={(e) => setAudioEnd(e.target.value)}
+                  type="number"
+                  min={0}
+                  step={0.1}
+                  value={trimEnd}
+                  onChange={(e) => setTrimEnd(e.target.value)}
                   className="mt-1 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-1"
                 />
               </label>
+              {outputDurationSec ? (
+                <p className="text-xs text-zinc-400">
+                  Selected span: {formatDuration(outputDurationSec)} ({formatTimecode(outputDurationSec)})
+                </p>
+              ) : null}
               <label className="flex items-center gap-2 text-xs text-zinc-400">
                 <input type="checkbox" checked={forceRender} onChange={(e) => setForceRender(e.target.checked)} />
                 Use anyway (same owner duplicate pairing)

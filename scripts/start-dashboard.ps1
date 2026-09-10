@@ -15,5 +15,6 @@ if (-not (Test-Path $EnvFile) -and (Test-Path $Example)) {
 }
 
 npm install
+
 Write-Host "Starting dashboard at http://localhost:$Port"
 npx next dev -p $Port

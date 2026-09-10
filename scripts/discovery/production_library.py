@@ -62,6 +62,69 @@ def _parse_youtube_id(url: str) -> str | None:
     return None
 
 
+MIN_PLAYABLE_BYTES = 100_000
+
+
+def _final_path_on_disk(rel_path: str | None, root: Path | None = None) -> Path | None:
+    if not rel_path:
+        return None
+    root = root or project_root()
+    path = Path(rel_path)
+    if not path.is_absolute():
+        path = root / path
+    return path if path.is_file() else None
+
+
+def _is_playable_final(path: Path | None, *, min_bytes: int = MIN_PLAYABLE_BYTES) -> bool:
+    return bool(path and path.is_file() and path.stat().st_size >= min_bytes)
+
+
+def _motivation_output_candidates(slug: str | None, root: Path) -> list[Path]:
+    if not slug:
+        return []
+    out_dir = root / "downloads" / "motivational" / slug / "output"
+    if not out_dir.is_dir():
+        return []
+    names = [
+        f"{slug}-motivation.mp4",
+        f"{slug}-motivation.nocap.mp4",
+    ]
+    return [out_dir / name for name in names if (out_dir / name).is_file()]
+
+
+def heal_final_output(store, video: dict[str, Any], *, root: Path | None = None) -> bool:
+    """Restore library final.mp4 from job output when the copy is missing or stub-sized."""
+    root = root or project_root()
+    rel = video.get("final_output_path")
+    if not rel:
+        return False
+    dest = _final_path_on_disk(str(rel), root)
+    if _is_playable_final(dest):
+        return True
+    slug = str(video.get("slug") or "")
+    for src in _motivation_output_candidates(slug, root):
+        if not _is_playable_final(src):
+            continue
+        if dest:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dest)
+        else:
+            key = video.get("video_key") or _video_key(int(video["id"]))
+            dest_dir = production_library_dir() / key
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest = dest_dir / "final.mp4"
+            shutil.copy2(src, dest)
+            rel = dest.relative_to(root).as_posix()
+            store._conn.execute(
+                "UPDATE production_library_videos SET final_output_path = ?, updated_at = ? WHERE id = ?",
+                (rel, now_iso(), int(video["id"])),
+            )
+            store._conn.commit()
+            video["final_output_path"] = rel
+        return True
+    return _is_playable_final(dest)
+
+
 def _row_to_video(row) -> dict[str, Any]:
     if row is None:
         return {}
@@ -76,6 +139,8 @@ def _row_to_video(row) -> dict[str, Any]:
         else:
             data[key.replace("_json", "")] = None
     data["posted"] = bool(data.get("posted"))
+    final_path = _final_path_on_disk(data.get("final_output_path"))
+    data["playable"] = _is_playable_final(final_path)
     return data
 
 
@@ -104,6 +169,8 @@ def list_videos(
     speaker: str | None = None,
     topic: str | None = None,
     status: str | None = None,
+    playable_only: bool = True,
+    heal: bool = True,
 ) -> list[dict[str, Any]]:
     clauses = ["1=1"]
     params: list[Any] = []
@@ -116,7 +183,8 @@ def list_videos(
     if status:
         clauses.append("status = ?")
         params.append(status)
-    params.append(limit)
+    fetch_limit = limit * 3 if playable_only else limit
+    params.append(fetch_limit)
     rows = store._conn.execute(
         f"""
         SELECT * FROM production_library_videos
@@ -126,7 +194,19 @@ def list_videos(
         """,
         params,
     ).fetchall()
-    return [_row_to_video(row) for row in rows]
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        video = _row_to_video(row)
+        if heal:
+            heal_final_output(store, video)
+            final_path = _final_path_on_disk(video.get("final_output_path"))
+            video["playable"] = _is_playable_final(final_path)
+        if playable_only and not video.get("playable"):
+            continue
+        items.append(video)
+        if len(items) >= limit:
+            break
+    return items
 
 
 def get_video(store, video_id: int) -> dict[str, Any] | None:

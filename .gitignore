@@ -5,6 +5,8 @@ downloads/
 assets/generated/
 data/discovery/*
 data/motivation_jobs/
+data/shared_library/*
+!data/shared_library/.gitkeep
 !data/discovery/.gitkeep
 data/publishing/credentials/
 data/publishing/oauth_states/

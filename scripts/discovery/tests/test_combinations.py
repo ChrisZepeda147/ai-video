@@ -114,6 +114,34 @@ class CombinationTests(unittest.TestCase):
         self.assertEqual(first["imported"], 1)
         self.assertEqual(second["skipped"], 1)
 
+    def test_duplicate_transcript_collapses_to_one_audio_slot(self) -> None:
+        shared = "Work hard every day."
+        second_slug = f"test-combo-dup-{uuid.uuid4().hex[:8]}"
+        second_dir = self.root / "downloads" / "motivational" / second_slug
+        audio_dir = second_dir / "audio"
+        audio_dir.mkdir(parents=True)
+        (audio_dir / "speech.mp3").write_bytes(b"different-mp3-bytes-for-same-words")
+        rel_audio = f"downloads/motivational/{second_slug}/audio/speech.mp3"
+        register_video(
+            self.store,
+            title="Tate duplicate transcript",
+            slug=second_slug,
+            speaker="Andrew Tate",
+            topic="motivation",
+            source_url="https://www.youtube.com/watch?v=dup12345678",
+            source_external_id="dup12345678",
+            transcript_segment=shared,
+            final_output_path=f"downloads/motivational/{second_slug}/output/final.mp4",
+            duration_sec=67.0,
+            metadata={"pipeline": "build_motivation_job"},
+            copy_final_to_library=False,
+            components=[{"component_type": "audio", "local_path": rel_audio}],
+        )
+        audio = list_audio_catalog(self.store)
+        tate = [item for item in audio if item["speaker"] == "Andrew Tate"]
+        self.assertEqual(len(tate), 1)
+        self.assertTrue(tate[0]["display_id"].endswith("A"))
+
     @patch("build_motivation_job.render_job")
     @patch("build_motivation_job.probe_duration", return_value=67.0)
     def test_render_reuses_renderer_and_records_usage(self, _probe, mock_render) -> None:

@@ -354,8 +354,19 @@ def sync_register_best_effort(**kwargs: Any) -> dict[str, Any] | None:
         try:
             slug = kwargs.get("slug")
             if slug:
-                return auto_register_motivation_job(store, slug=str(slug), **{k: v for k, v in kwargs.items() if k != "slug"})
-            return auto_register_final_output(store, **kwargs)
+                video = auto_register_motivation_job(
+                    store, slug=str(slug), **{k: v for k, v in kwargs.items() if k != "slug"}
+                )
+            else:
+                video = auto_register_final_output(store, **kwargs)
+            if video:
+                try:
+                    from discovery.shared_library import export_stephen_after_register
+
+                    export_stephen_after_register(slug=slug or video.get("slug"), video=video, store=store)
+                except Exception as export_exc:
+                    logger.warning("Shared library export skipped: %s", export_exc)
+            return video
         finally:
             store.close()
     except Exception as exc:

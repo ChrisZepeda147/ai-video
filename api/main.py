@@ -110,6 +110,8 @@ from discovery.combinations import (
     sync_visual_packs,
 )
 from discovery.production_library import check_reuse, get_video, import_uploaded_video, list_videos
+from discovery.shared_library import import_all_stephen_packages, sync_status
+from discovery.shared_library_git import pull_shared_library
 from discovery.site_videos import import_videos_to_site
 from discovery.video_library import build_video_library, library_summary
 from discovery.publishing.accounts import (
@@ -1032,7 +1034,7 @@ def combinations_render_endpoint(
             visual_pack_id=int(pack_id),
             audio_start_sec=body.get("audio_start_sec"),
             audio_end_sec=body.get("audio_end_sec"),
-            segment_length=float(body.get("segment_length") or 8.0),
+            segment_length=float(body["segment_length"]) if body.get("segment_length") is not None else None,
             grade=body.get("apply_grade", True) is not False,
             version_label=body.get("version_label"),
             change_summary=body.get("change_summary"),
@@ -1063,6 +1065,47 @@ def combinations_import_usage_endpoint(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/library/shared-sync/status")
+def shared_sync_status_endpoint():
+    return sync_status()
+
+
+@app.post("/api/library/shared-sync/pull-import")
+def shared_sync_pull_import_endpoint(
+    body: dict,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+):
+    skip_pull = bool(body.get("skip_pull"))
+    dry_run = bool(body.get("dry_run"))
+    pull_result = None
+    pull_warning = None
+    if not skip_pull:
+        try:
+            pull_result = pull_shared_library(dry_run=dry_run)
+            if not pull_result.get("ok"):
+                pull_warning = pull_result.get("message") or "Git pull did not complete"
+            elif pull_result.get("warnings"):
+                pull_warning = "; ".join(str(w) for w in pull_result["warnings"])
+            if not dry_run and pull_result and pull_result.get("ok"):
+                from discovery.shared_library import load_sync_state, now_iso, save_sync_state
+
+                state = load_sync_state()
+                state["last_pull_at"] = now_iso()
+                save_sync_state(state)
+        except RuntimeError as exc:
+            pull_warning = str(exc)
+    try:
+        import_result = import_all_stephen_packages(store, dry_run=dry_run)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {
+        "pull": pull_result,
+        "pull_warning": pull_warning,
+        "import": import_result,
+        "status": sync_status(),
+    }
 
 
 @app.get("/api/production/projects/{project_id}")

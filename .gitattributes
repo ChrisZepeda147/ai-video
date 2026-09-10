@@ -1,0 +1,7 @@
+# Git LFS — shared library media (Stephen → Chris sync)
+shared_library/**/*.mp4 filter=lfs diff=lfs merge=lfs -text
+shared_library/**/*.mov filter=lfs diff=lfs merge=lfs -text
+shared_library/**/*.mp3 filter=lfs diff=lfs merge=lfs -text
+shared_library/**/*.wav filter=lfs diff=lfs merge=lfs -text
+shared_library/**/*.m4a filter=lfs diff=lfs merge=lfs -text
+shared_library/**/*.webm filter=lfs diff=lfs merge=lfs -text

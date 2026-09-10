@@ -452,6 +452,8 @@ export type CombinationAudioItem = {
   speaker: string;
   label?: string;
   local_path?: string | null;
+  start_sec?: number | null;
+  end_sec?: number | null;
   duration_sec?: number | null;
   source_url?: string | null;
   transcript_excerpt?: string;
@@ -467,6 +469,7 @@ export type CombinationVisualPack = {
   clips_root_path?: string | null;
   preview_clip_path?: string | null;
   clip_count?: number;
+  duration_sec?: number | null;
   broll_ids?: string[];
 };
 
@@ -486,6 +489,7 @@ export type CombinationVisualStatus = {
   label?: string;
   preview_clip_path?: string | null;
   clip_count?: number;
+  duration_sec?: number | null;
   status: "available" | "used_by_selected_owner" | "used_by_other_owner";
   available: boolean;
   used_by_selected_owner: boolean;
@@ -503,6 +507,8 @@ export type CombinationStatusResponse = {
     local_path?: string | null;
     transcript_excerpt?: string;
     duration_sec?: number | null;
+    start_sec?: number | null;
+    end_sec?: number | null;
     source_url?: string | null;
   };
   visuals: CombinationVisualStatus[];
@@ -510,6 +516,30 @@ export type CombinationStatusResponse = {
     prior_usage_detected?: boolean;
     summary?: string;
   };
+};
+
+export type SharedSyncStatus = {
+  owner: string;
+  packages_on_disk: number;
+  imports_recorded: number;
+  exports_recorded: number;
+  last_import_at?: string | null;
+  last_pull_at?: string | null;
+  last_push_at?: string | null;
+  export_enabled: boolean;
+};
+
+export type SharedSyncPullImportResult = {
+  pull?: Record<string, unknown> | null;
+  pull_warning?: string | null;
+  import: {
+    found: number;
+    imported: number;
+    skipped: number;
+    errors: number;
+    items?: Array<Record<string, unknown>>;
+  };
+  status: SharedSyncStatus;
 };
 
 export type CombinationRenderResponse = {

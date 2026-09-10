@@ -11,6 +11,7 @@ from typing import Any
 
 from discovery.config import project_root
 from discovery.production_library import check_reuse, get_video, now_iso
+from discovery.reuse_detection import transcript_hash
 
 OWNERS = frozenset({"chris", "stephen"})
 CATEGORY_ORDER = (
@@ -23,6 +24,12 @@ CATEGORY_ORDER = (
     "Watches",
     "Horror",
     "Custom",
+)
+KNOWN_SPEAKERS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Andrew Tate", ("andrew tate", " tate", "top g")),
+    ("Joe Rogan", ("joe rogan", " rogan", "jre")),
+    ("Jordan Peterson", ("jordan peterson", " peterson")),
+    ("Jocko Willink", ("jocko", "willink")),
 )
 CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "Cars": ("car", "supercar", "lamborghini", "ferrari", "hypercar", "automotive"),
@@ -89,19 +96,179 @@ def _category_base(category: str) -> int:
         return 10 + len(CATEGORY_ORDER) - 1
 
 
+def _resolve_speaker(row: dict[str, Any], store) -> str:
+    for field in ("speaker", "podcast_source"):
+        value = str(row.get(field) or "").strip()
+        if value:
+            return value
+
+    meta = _parse_json(row.get("metadata_json") or row.get("video_metadata_json"))
+    parent_id = meta.get("parent_audio_video_id") or row.get("parent_video_id")
+    if parent_id:
+        parent = store._conn.execute(
+            "SELECT speaker, title FROM production_library_videos WHERE id = ?",
+            (int(parent_id),),
+        ).fetchone()
+        if parent and parent["speaker"]:
+            return str(parent["speaker"]).strip()
+
+    blob = " ".join(
+        part
+        for part in (
+            row.get("video_title"),
+            row.get("slug"),
+            row.get("transcript_segment"),
+            meta.get("visual_style"),
+            meta.get("broll_query"),
+        )
+        if part
+    ).lower()
+    for name, hints in KNOWN_SPEAKERS:
+        if any(hint in blob for hint in hints):
+            return name
+
+    local_path = str(row.get("local_path") or "")
+    if local_path:
+        job_json = project_root() / Path(local_path).parent.parent / "job.json"
+        if job_json.is_file():
+            try:
+                job = json.loads(job_json.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                job = {}
+            speaker = str(job.get("speaker") or "").strip()
+            if speaker:
+                return speaker
+        info_dir = project_root() / Path(local_path).parent
+        for info_path in sorted(info_dir.glob("*.info.json")):
+            try:
+                info = json.loads(info_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                continue
+            title = str(info.get("title") or "").lower()
+            channel = str(info.get("channel") or "").lower()
+            for name, hints in KNOWN_SPEAKERS:
+                if any(hint in title or hint in channel for hint in hints):
+                    return name
+
+    return "Unknown"
+
+
+def _audio_dedupe_key(data: dict[str, Any], speaker: str) -> str:
+    """One catalog slot per speaker + transcript (or file when no transcript)."""
+    th = str(data.get("transcript_hash") or "").strip()
+    if not th:
+        segment = str(data.get("transcript_segment") or "").strip()
+        if segment:
+            th = transcript_hash(segment)
+    if th:
+        return f"transcript:{speaker.lower()}:{th}"
+    file_key = (data.get("file_sha256") or str(data.get("local_path") or "")).strip().lower()
+    if not file_key:
+        return ""
+    return f"file:{file_key}"
+
+
+def _probe_media_duration(path: Path) -> float | None:
+    if not path.is_file():
+        return None
+    try:
+        from build_clips_montage import probe_duration
+
+        value = float(probe_duration(path))
+        return value if value > 0 else None
+    except Exception:
+        return None
+
+
+def _effective_audio_duration(data: dict[str, Any], root: Path | None = None) -> float | None:
+    start = data.get("start_sec")
+    end = data.get("end_sec")
+    if start is not None and end is not None and float(end) > float(start):
+        return float(end) - float(start)
+
+    root = root or project_root()
+    local_path = str(data.get("local_path") or "")
+    if local_path:
+        probed = _probe_media_duration(root / local_path)
+        if probed:
+            return probed
+
+    for field in ("duration_sec", "video_duration_sec"):
+        value = data.get(field)
+        if value is not None and float(value) > 0:
+            return float(value)
+    return None
+
+
+def _visual_pack_duration(store, pack: dict[str, Any], root: Path | None = None) -> float | None:
+    root = root or project_root()
+    preview = str(pack.get("preview_clip_path") or "")
+    if preview:
+        probed = _probe_media_duration(root / preview)
+        if probed:
+            return probed
+
+    source_video_id = pack.get("source_video_id")
+    if source_video_id:
+        row = store._conn.execute(
+            "SELECT duration_sec, final_output_path FROM production_library_videos WHERE id = ?",
+            (int(source_video_id),),
+        ).fetchone()
+        if row:
+            if row["duration_sec"] is not None and float(row["duration_sec"]) > 0:
+                return float(row["duration_sec"])
+            final_path = str(row["final_output_path"] or "")
+            if final_path:
+                probed = _probe_media_duration(root / final_path)
+                if probed:
+                    return probed
+    return None
+
+
+def _prefer_audio_row(candidate: dict[str, Any], existing: dict[str, Any]) -> bool:
+    """Keep the older production video when transcript/content duplicates."""
+    cand_vid = int(candidate.get("video_id") or 0)
+    exist_vid = int(existing.get("video_id") or 0)
+    if cand_vid != exist_vid:
+        return cand_vid < exist_vid
+    return int(candidate.get("id") or 0) < int(existing.get("id") or 0)
+
+
+def _is_catalog_audio_row(row: dict[str, Any], speaker: str) -> bool:
+    slug = str(row.get("slug") or "")
+    transcript = str(row.get("transcript_segment") or "").strip()
+    if slug.startswith("combo-") and speaker == "Unknown" and len(transcript) <= 8:
+        return False
+    local_path = str(row.get("local_path") or "")
+    if local_path:
+        audio_path = project_root() / local_path
+        if (
+            slug.startswith("combo-")
+            and audio_path.is_file()
+            and audio_path.stat().st_size < 4096
+            and len(transcript) <= 8
+        ):
+            return False
+    return True
+
+
 def get_audio_component(store, component_id: int) -> dict[str, Any] | None:
     row = store._conn.execute(
         """
-        SELECT c.*, v.speaker, v.title AS video_title, v.source_url, v.source_external_id,
-               v.transcript_segment, v.duration_sec AS video_duration_sec, v.slug AS video_slug,
-               v.metadata_json AS video_metadata_json
+        SELECT c.*, v.speaker, v.podcast_source, v.title AS video_title, v.source_url,
+               v.source_external_id, v.transcript_segment, v.duration_sec AS video_duration_sec,
+               v.slug AS video_slug, v.metadata_json AS video_metadata_json, v.parent_video_id
         FROM production_video_components c
         JOIN production_library_videos v ON v.id = c.video_id
         WHERE c.id = ? AND c.component_type = 'audio'
         """,
         (component_id,),
     ).fetchone()
-    return dict(row) if row else None
+    if not row:
+        return None
+    data = dict(row)
+    data["speaker"] = _resolve_speaker(data, store)
+    return data
 
 
 def get_visual_pack(store, pack_id: int) -> dict[str, Any] | None:
@@ -278,47 +445,71 @@ def _assign_visual_display_ids(store) -> None:
 def list_audio_catalog(store) -> list[dict[str, Any]]:
     rows = store._conn.execute(
         """
-        SELECT c.id, c.video_id, c.local_path, c.start_sec, c.end_sec, c.label,
-               v.speaker, v.title AS video_title, v.source_url, v.source_external_id,
-               v.transcript_segment, v.duration_sec, v.slug
+        SELECT c.id, c.video_id, c.local_path, c.start_sec, c.end_sec, c.label, c.file_sha256,
+               v.speaker, v.podcast_source, v.title AS video_title, v.source_url,
+               v.source_external_id, v.transcript_segment, v.transcript_hash,
+               v.duration_sec AS video_duration_sec, v.slug,
+               v.metadata_json, v.parent_video_id, v.final_output_path
         FROM production_video_components c
         JOIN production_library_videos v ON v.id = c.video_id
         WHERE c.component_type = 'audio' AND c.local_path IS NOT NULL
-        ORDER BY LOWER(COALESCE(v.speaker, '')), c.id
+        ORDER BY c.id
         """
     ).fetchall()
+
+    deduped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        data = dict(row)
+        speaker = _resolve_speaker(data, store)
+        if not _is_catalog_audio_row(data, speaker):
+            continue
+        key = _audio_dedupe_key(data, speaker)
+        if not key:
+            continue
+        existing = deduped.get(key)
+        row = {**data, "speaker": speaker}
+        if existing:
+            if existing["speaker"] == "Unknown" and speaker != "Unknown":
+                deduped[key] = row
+            elif _prefer_audio_row(row, existing):
+                deduped[key] = row
+            continue
+        deduped[key] = row
+
     speaker_order: dict[str, int] = {}
     per_speaker: dict[str, int] = {}
     items: list[dict[str, Any]] = []
-    for row in rows:
-        speaker = str(row["speaker"] or "Unknown").strip()
+    for data in sorted(deduped.values(), key=lambda item: (item["speaker"].lower(), int(item["id"]))):
+        speaker = str(data["speaker"])
         sp_num = _speaker_number(speaker, speaker_order)
         idx = per_speaker.get(speaker.lower(), 0)
         per_speaker[speaker.lower()] = idx + 1
         display_id = f"{sp_num}{_letter(idx)}"
-        excerpt = (row["transcript_segment"] or "")[:240]
+        excerpt = (data.get("transcript_segment") or "")[:240]
+        duration_sec = _effective_audio_duration(data)
         items.append(
             {
-                "component_id": int(row["id"]),
-                "video_id": int(row["video_id"]),
+                "component_id": int(data["id"]),
+                "video_id": int(data["video_id"]),
                 "display_id": display_id,
                 "speaker": speaker,
-                "label": row["label"] or "Speech audio",
-                "local_path": row["local_path"],
-                "start_sec": row["start_sec"],
-                "end_sec": row["end_sec"],
-                "duration_sec": row["duration_sec"],
-                "source_url": row["source_url"],
-                "source_external_id": row["source_external_id"],
+                "label": data.get("label") or "Speech audio",
+                "local_path": data.get("local_path"),
+                "start_sec": data.get("start_sec"),
+                "end_sec": data.get("end_sec"),
+                "duration_sec": duration_sec,
+                "source_url": data.get("source_url"),
+                "source_external_id": data.get("source_external_id"),
                 "transcript_excerpt": excerpt,
-                "video_title": row["video_title"],
-                "video_slug": row["slug"],
+                "video_title": data.get("video_title"),
+                "video_slug": data.get("slug"),
             }
         )
     return items
 
 
 def list_visual_packs(store) -> list[dict[str, Any]]:
+    root = project_root()
     rows = store._conn.execute(
         "SELECT * FROM production_visual_packs ORDER BY category, display_id, id"
     ).fetchall()
@@ -333,6 +524,7 @@ def list_visual_packs(store) -> list[dict[str, Any]]:
                 if path.is_dir():
                     clip_count = len(list(path.glob("*_part*.mp4")))
             pack["clip_count"] = clip_count
+            pack["duration_sec"] = _visual_pack_duration(store, pack, root)
             packs.append(pack)
     return packs
 
@@ -399,6 +591,7 @@ def combination_status(
                 "label": pack.get("label"),
                 "preview_clip_path": pack.get("preview_clip_path"),
                 "clip_count": pack.get("clip_count", 0),
+                "duration_sec": pack.get("duration_sec"),
                 "status": status,
                 "available": available,
                 "used_by_selected_owner": bool(own),
@@ -427,7 +620,9 @@ def combination_status(
             "speaker": audio.get("speaker"),
             "local_path": audio.get("local_path"),
             "transcript_excerpt": (audio.get("transcript_segment") or "")[:240],
-            "duration_sec": audio.get("video_duration_sec") or audio.get("duration_sec"),
+            "duration_sec": _effective_audio_duration(audio),
+            "start_sec": audio.get("start_sec"),
+            "end_sec": audio.get("end_sec"),
             "source_url": audio.get("source_url"),
         },
         "visuals": visual_items,
