@@ -48,7 +48,7 @@ export const navItems: NavItem[] = [
     href: "/create",
     label: "Make Short",
     icon: Sparkles,
-    description: "Build motivation Shorts (quick path)",
+    description: "Structured brief → Cursor Agent Short",
   },
   {
     href: "/videos",

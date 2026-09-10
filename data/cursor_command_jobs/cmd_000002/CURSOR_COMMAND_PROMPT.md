@@ -44,12 +44,12 @@ Before picking audio or visuals:
 - Check combinations catalog / existing transcripts — do not reuse the same excerpt unless instructions allow.
 - Use `--reuse-policy require_new` when instructions say do not reuse.
 
-Search for audio (any type — speech, podcast clip, interview, etc.): David Goggins motivational speech
-Visual / B-roll search: cinematic alpine scenery drone short
+Search for audio (any type — speech, podcast clip, interview, etc.): david goggins motivational speech
+Visual / B-roll search: cinematic alpine scenery
 Default target length: 60–90 seconds unless extra instructions override.
 
 Extra instructions:
-clips should be 20  seconds long. first image should be a beautiful view. good flow following the speach with the images / video
+first clip should be of a beautiful view. then make it only 30 seconds long of audio 30 seconds long of visuals that rotate accordingly. with captions in the center for the audio. we have not used goggins yet so it wont be a duplicate
 
 Before downloading audio, query the production library and check existing transcripts — avoid reusing the same excerpt unless instructions say otherwise.
 Register the finished video in the production library when done.

@@ -679,7 +679,12 @@ export async function fetchSharedSyncStatus() {
   return fetchJson<import("@/lib/types").SharedSyncStatus>(buildUrl("/api/library/shared-sync/status"));
 }
 
-export async function postSharedSyncPullImport(body?: { skip_pull?: boolean; dry_run?: boolean }) {
+export async function postSharedSyncPullImport(body?: {
+  skip_pull?: boolean;
+  dry_run?: boolean;
+  auto_only?: boolean;
+  force?: boolean;
+}) {
   return fetchJson<import("@/lib/types").SharedSyncPullImportResult>(
     buildUrl("/api/library/shared-sync/pull-import"),
     {
@@ -701,6 +706,21 @@ export async function fetchProductionLibrary(params?: {
 
 export async function fetchProductionVideo(videoId: number) {
   return fetchJson<ProductionLibraryVideo>(buildUrl(`/api/library/videos/${videoId}`));
+}
+
+export async function fetchLibrarySpeakers() {
+  return fetchJson<{ items: string[] }>(buildUrl("/api/library/speakers"));
+}
+
+export async function postUpdateVideoSpeaker(
+  videoId: number,
+  body: { speaker: string; remember_correction?: boolean },
+) {
+  return fetchJson<ProductionLibraryVideo>(buildUrl(`/api/library/videos/${videoId}/speaker`), {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: internalHeaders(),
+  });
 }
 
 export async function postImportProductionVideo(form: FormData) {

@@ -122,6 +122,34 @@ def commit_and_push(message: str, *, dry_run: bool = False) -> dict[str, Any]:
     }
 
 
+def git_repo_status(*, fetch: bool = False) -> dict[str, Any]:
+    """Local repo HEAD + how far behind/ahead of upstream (for code/search sync visibility)."""
+    if fetch:
+        _run_git(["fetch", "origin"], check=False)
+
+    head = _run_git(["rev-parse", "--short", "HEAD"], check=False)
+    branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], check=False)
+    ref = _resolve_remote_ref()
+
+    behind = _run_git(["rev-list", "--count", f"HEAD..{ref}"], check=False)
+    ahead = _run_git(["rev-list", "--count", f"{ref}..HEAD"], check=False)
+    remote_short = _run_git(["rev-parse", "--short", ref], check=False)
+
+    return {
+        "branch": branch.stdout.strip() if branch.returncode == 0 else None,
+        "commit": head.stdout.strip() if head.returncode == 0 else None,
+        "remote_ref": ref,
+        "remote_commit": remote_short.stdout.strip() if remote_short.returncode == 0 else None,
+        "commits_behind": int(behind.stdout.strip()) if behind.returncode == 0 and behind.stdout.strip().isdigit() else None,
+        "commits_ahead": int(ahead.stdout.strip()) if ahead.returncode == 0 and ahead.stdout.strip().isdigit() else None,
+        "code_sync_hint": (
+            "git pull in repo root for Stephen's latest search/script changes"
+            if behind.returncode == 0 and behind.stdout.strip() not in ("", "0")
+            else None
+        ),
+    }
+
+
 def pull_shared_library(*, dry_run: bool = False) -> dict[str, Any]:
     """Fetch remote and update ONLY shared_library + .gitattributes.
 

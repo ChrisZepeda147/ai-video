@@ -216,7 +216,7 @@ def auto_register_motivation_job(
     if fallback:
         payload = {**fallback, **payload}
 
-    speaker = payload.get("speaker") or ""
+    intended_speaker = payload.get("speaker") or ""
     speech_url = payload.get("speech_url") or ""
     speech_id = payload.get("speech_id") or ""
     broll_query = payload.get("broll_query") or payload.get("speech_query") or ""
@@ -225,6 +225,20 @@ def auto_register_motivation_job(
     caps = job_dir / "audio" / "subs.en.json3"
     transcript = _read_json3_transcript(caps)
     title = payload.get("speech_title") or slug.replace("-", " ").title()
+
+    from discovery.speaker_identity import resolve_registration_speaker
+
+    resolution_meta = dict(payload.get("speaker_resolution") or {})
+    resolved_speaker, inferred_meta = resolve_registration_speaker(
+        store,
+        intended=intended_speaker,
+        title=title,
+        channel=None,
+        transcript=transcript,
+        youtube_id=speech_id or None,
+    )
+    speaker = resolved_speaker or intended_speaker or None
+    resolution_meta = {**inferred_meta, **resolution_meta}
 
     components = _components_from_job_dir(job_dir, root)
     if speech_url:
@@ -242,6 +256,10 @@ def auto_register_motivation_job(
         metadata["visual_style"] = visual_style
     if broll_query:
         metadata["broll_query"] = broll_query
+    if resolution_meta:
+        metadata["speaker_resolution"] = resolution_meta
+    if resolution_meta.get("search_intent"):
+        metadata["search_intent"] = resolution_meta["search_intent"]
 
     video = register_video(
         store,

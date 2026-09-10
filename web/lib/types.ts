@@ -518,21 +518,39 @@ export type CombinationStatusResponse = {
   };
 };
 
+export type SharedSyncGitStatus = {
+  branch?: string | null;
+  commit?: string | null;
+  remote_ref?: string | null;
+  remote_commit?: string | null;
+  commits_behind?: number | null;
+  commits_ahead?: number | null;
+  code_sync_hint?: string | null;
+};
+
 export type SharedSyncStatus = {
   owner: string;
   packages_on_disk: number;
   imports_recorded: number;
+  pending_import?: number;
   exports_recorded: number;
   last_import_at?: string | null;
   last_pull_at?: string | null;
   last_push_at?: string | null;
+  last_auto_sync_at?: string | null;
+  auto_sync_enabled?: boolean;
+  auto_sync_interval_minutes?: number;
   export_enabled: boolean;
+  git?: SharedSyncGitStatus;
 };
 
 export type SharedSyncPullImportResult = {
+  skipped?: boolean;
+  reason?: string;
   pull?: Record<string, unknown> | null;
   pull_warning?: string | null;
-  import: {
+  git?: SharedSyncGitStatus;
+  import?: {
     found: number;
     imported: number;
     skipped: number;

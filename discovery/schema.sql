@@ -627,6 +627,22 @@ CREATE INDEX IF NOT EXISTS idx_combination_usage_owner_audio
 CREATE INDEX IF NOT EXISTS idx_combination_usage_pack
     ON production_combination_usage (visual_pack_id, owner);
 
+-- User corrections: YouTube source id -> canonical speaker (remembered across jobs).
+CREATE TABLE IF NOT EXISTS production_speaker_corrections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_external_id TEXT NOT NULL UNIQUE,
+    speaker TEXT NOT NULL,
+    source_url TEXT,
+    speech_title TEXT,
+    corrected_by TEXT,
+    notes TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_speaker_corrections_speaker
+    ON production_speaker_corrections (speaker);
+
 -- Website natural-language commands handed to Cursor Agent CLI.
 CREATE TABLE IF NOT EXISTS cursor_command_jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

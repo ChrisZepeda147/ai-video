@@ -110,8 +110,8 @@ from discovery.combinations import (
     sync_visual_packs,
 )
 from discovery.production_library import check_reuse, get_video, import_uploaded_video, list_videos
-from discovery.shared_library import import_all_stephen_packages, sync_status
-from discovery.shared_library_git import pull_shared_library
+from discovery.speaker_identity import KNOWN_SPEAKERS, update_video_speaker
+from discovery.shared_library import maybe_auto_pull_import, pull_and_import, sync_status
 from discovery.site_videos import import_videos_to_site
 from discovery.video_library import build_video_library, library_summary
 from discovery.publishing.accounts import (
@@ -184,6 +184,42 @@ def _configure_stdio_utf8() -> None:
                 reconfigure(encoding="utf-8", errors="replace")
             except Exception:
                 pass
+
+
+@app.on_event("startup")
+def _start_shared_library_auto_sync() -> None:
+    import logging
+    import threading
+    import time
+
+    from discovery.config import default_db_path
+    from discovery.shared_library import auto_sync_enabled, auto_sync_interval_minutes, maybe_auto_pull_import
+
+    if not auto_sync_enabled():
+        return
+
+    def _loop() -> None:
+        interval_sec = auto_sync_interval_minutes() * 60
+        time.sleep(min(15, interval_sec))
+        while True:
+            try:
+                db = default_db_path()
+                if Path(db).is_file():
+                    store = DiscoveryStore(db)
+                    try:
+                        result = maybe_auto_pull_import(store)
+                        if result and int(result.get("import", {}).get("imported", 0) or 0) > 0:
+                            logging.getLogger("uvicorn.error").info(
+                                "Stephen auto-sync: imported %s package(s)",
+                                result["import"]["imported"],
+                            )
+                    finally:
+                        store.close()
+            except Exception as exc:
+                logging.getLogger("uvicorn.error").warning("Stephen auto-sync failed: %s", exc)
+            time.sleep(interval_sec)
+
+    threading.Thread(target=_loop, name="shared-library-auto-sync", daemon=True).start()
 
 
 def _provider():
@@ -931,6 +967,35 @@ def library_video_detail_endpoint(
     return video
 
 
+@app.get("/api/library/speakers")
+def library_speakers_endpoint():
+    return {"items": [name for name, _hints in KNOWN_SPEAKERS]}
+
+
+@app.post("/api/library/videos/{video_id}/speaker")
+def library_update_speaker_endpoint(
+    video_id: int,
+    body: dict,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    _: Annotated[None, Depends(require_internal_key)],
+):
+    speaker = str(body.get("speaker") or "").strip()
+    if not speaker:
+        raise HTTPException(status_code=422, detail="speaker is required")
+    remember = bool(body.get("remember_correction", True))
+    try:
+        return update_video_speaker(
+            store,
+            video_id,
+            speaker,
+            remember=remember,
+            corrected_by=str(body.get("corrected_by") or "user"),
+            notes=body.get("notes"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @app.post("/api/library/check-reuse")
 def library_check_reuse_endpoint(
     body: dict,
@@ -1077,35 +1142,28 @@ def shared_sync_pull_import_endpoint(
     body: dict,
     store: Annotated[DiscoveryStore, Depends(get_store)],
 ):
-    skip_pull = bool(body.get("skip_pull"))
     dry_run = bool(body.get("dry_run"))
-    pull_result = None
-    pull_warning = None
-    if not skip_pull:
-        try:
-            pull_result = pull_shared_library(dry_run=dry_run)
-            if not pull_result.get("ok"):
-                pull_warning = pull_result.get("message") or "Git pull did not complete"
-            elif pull_result.get("warnings"):
-                pull_warning = "; ".join(str(w) for w in pull_result["warnings"])
-            if not dry_run and pull_result and pull_result.get("ok"):
-                from discovery.shared_library import load_sync_state, now_iso, save_sync_state
+    auto_only = bool(body.get("auto_only"))
+    force = bool(body.get("force"))
 
-                state = load_sync_state()
-                state["last_pull_at"] = now_iso()
-                save_sync_state(state)
-        except RuntimeError as exc:
-            pull_warning = str(exc)
+    if auto_only and not force:
+        try:
+            result = maybe_auto_pull_import(store, force=False)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        if result is None:
+            return {
+                "skipped": True,
+                "reason": "not_due",
+                "status": sync_status(),
+            }
+        return {**result, "skipped": False}
+
+    skip_pull = bool(body.get("skip_pull"))
     try:
-        import_result = import_all_stephen_packages(store, dry_run=dry_run)
+        return pull_and_import(store, skip_pull=skip_pull, dry_run=dry_run)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return {
-        "pull": pull_result,
-        "pull_warning": pull_warning,
-        "import": import_result,
-        "status": sync_status(),
-    }
 
 
 @app.get("/api/production/projects/{project_id}")

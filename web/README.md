@@ -80,7 +80,7 @@ Story/voiceover/stills pipelines auto-register when the discovery DB exists.
 | `/command` | **Natural-language commands** → Cursor Agent CLI |
 | `/library` | Production library (videos + reusable components) |
 | `/library/[id]` | Video detail + edit commands |
-| `/create` | **Make Short** — quick motivation montage path |
+| `/create` | **Make Short** — audio/visual search + instructions → Cursor Agent |
 | `/workbench` | Discovery find + Cursor generation handoff |
 | `/videos` | Rendered Shorts dashboard (site + legacy) |
 | `/discover` | Viral references (secondary) |

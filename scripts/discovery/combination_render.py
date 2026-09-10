@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import shutil
 import sys
 import uuid
@@ -50,17 +51,122 @@ def _resolve_caption_path(store, video_id: int, job_dir: Path) -> Path | None:
     return None
 
 
+def _parse_pack_meta(pack: dict[str, Any]) -> dict[str, Any]:
+    raw = pack.get("metadata_json")
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _clip_parts(root: Path) -> list[Path]:
+    if not root.is_dir():
+        return []
+    return sorted(root.glob("*_part*.mp4"))
+
+
+def _resolve_visual_clips_root(root: Path, pack: dict[str, Any], store) -> Path | None:
+    clips_rel = pack.get("clips_root_path")
+    if clips_rel:
+        candidate = root / str(clips_rel)
+        if _clip_parts(candidate):
+            return candidate
+
+    meta = _parse_pack_meta(pack)
+    slug = str(meta.get("source_slug") or "").strip()
+    if slug:
+        job_clips = root / "downloads" / "motivational" / slug / "clips"
+        if _clip_parts(job_clips):
+            return job_clips
+
+    source_video_id = pack.get("source_video_id")
+    if source_video_id:
+        rows = store._conn.execute(
+            """
+            SELECT local_path FROM production_video_components
+            WHERE video_id = ? AND component_type = 'visual' AND local_path LIKE '%_part%.mp4'
+            ORDER BY sort_order, id
+            """,
+            (int(source_video_id),),
+        ).fetchall()
+        if rows:
+            first = root / str(rows[0]["local_path"] or "")
+            if _clip_parts(first.parent):
+                return first.parent
+    return None
+
+
 def _ensure_clips(clips_root: Path, dest: Path) -> None:
     dest.mkdir(parents=True, exist_ok=True)
-    if not clips_root.is_dir():
-        raise FileNotFoundError(f"Visual clips folder missing: {clips_root}")
-    parts = sorted(clips_root.glob("*_part*.mp4"))
+    parts = _clip_parts(clips_root)
     if not parts:
         raise FileNotFoundError(f"No clip parts in {clips_root}")
     for clip in parts:
         target = dest / clip.name
         if not target.exists():
             shutil.copy2(clip, target)
+
+
+def _hydrate_visual_clips(
+    *,
+    root: Path,
+    pack: dict[str, Any],
+    clips_dir: Path,
+    duration: float,
+    beat_length: float,
+) -> None:
+    broll_ids = [str(item) for item in (pack.get("broll_ids") or []) if item]
+    if not broll_ids:
+        raise FileNotFoundError(
+            f"Visual pack {pack.get('id')} has no clips folder and no broll_ids to re-download."
+        )
+
+    meta = _parse_pack_meta(pack)
+    subject = str(
+        pack.get("label")
+        or pack.get("category")
+        or meta.get("visual_style")
+        or meta.get("broll_query")
+        or "broll"
+    )
+    query = str(meta.get("visual_style") or meta.get("broll_query") or subject)
+
+    _scripts_path()
+    from build_clips_montage import min_unique_clips_needed
+    from build_motivation_job import ensure_broll_clips
+
+    needed = min_unique_clips_needed(
+        duration=duration,
+        segment_length=beat_length,
+        layout="single",
+    )
+    clip_length = max(15, int(math.ceil(beat_length * 1.25)))
+    clips_dir.mkdir(parents=True, exist_ok=True)
+    ensure_broll_clips(
+        jobs_root=root / "downloads" / "motivational",
+        clips_dir=clips_dir,
+        subject=subject,
+        query=query,
+        needed_clips=needed,
+        clips_limit=max(6, len(broll_ids)),
+        clip_length=clip_length,
+        max_parts=2,
+        min_views=0,
+        min_duration=0,
+        start_offset=0.0,
+        use_vision=True,
+        broll_ids=broll_ids,
+        reuse_policy="allow",
+    )
+    if not _clip_parts(clips_dir):
+        raise FileNotFoundError(
+            f"Could not hydrate visual clips for pack {pack.get('id')} from broll_ids."
+        )
 
 
 def render_combination(
@@ -92,12 +198,6 @@ def render_combination(
     audio_path = root / str(audio["local_path"])
     if not audio_path.is_file():
         raise FileNotFoundError(f"Audio file missing: {audio_path}")
-
-    clips_root = root / str(pack["clips_root_path"]) if pack.get("clips_root_path") else None
-    if not clips_root or not clips_root.is_dir():
-        raise FileNotFoundError(
-            f"Visual pack clips missing for pack {visual_pack_id}. Sync catalog or keep job clips."
-        )
 
     parent_video_id = int(audio["video_id"])
     parent = get_video(store, parent_video_id)
@@ -149,10 +249,21 @@ def render_combination(
         else:
             captions.write_text('{"events":[]}', encoding="utf-8")
 
-    _ensure_clips(clips_root, clips_dir)
+    clips_root = _resolve_visual_clips_root(root, pack, store)
+    if clips_root:
+        _ensure_clips(clips_root, clips_dir)
+    else:
+        _hydrate_visual_clips(
+            root=root,
+            pack=pack,
+            clips_dir=clips_dir,
+            duration=duration,
+            beat_length=beat_length,
+        )
     output = output_dir / f"{slug}-motivation.mp4"
 
     render_job(
+        jobs_root=root / "downloads" / "motivational",
         clips_dir=clips_dir,
         audio=speech_mp3,
         captions=captions,
@@ -161,6 +272,7 @@ def render_combination(
         segment_length=beat_length,
         seed=None,
         grade=grade,
+        subject=str(pack.get("label") or pack.get("category") or ""),
     )
 
     rel_output = output.relative_to(root).as_posix()

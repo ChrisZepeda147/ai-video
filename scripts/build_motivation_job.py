@@ -261,60 +261,10 @@ def json3_word_times(path: Path) -> list[tuple[float, str]]:
     return [(start, text) for start, _end, text in words]
 
 
-<<<<<<< HEAD
 def _range_overlaps(a0: float, a1: float, b0: float, b1: float) -> bool:
     return max(a0, b0) < min(a1, b1)
 
 
-def pick_speech_excerpt(
-    captions: Path,
-    *,
-    min_seconds: float,
-    max_seconds: float,
-    avoid_ranges: list[tuple[float, float]] | None = None,
-) -> tuple[float, float]:
-    if captions.suffix.lower() != ".json3":
-        return 0.0, max_seconds
-    words = json3_word_times(captions)
-    if not words:
-        return 0.0, max_seconds
-
-    avoid = avoid_ranges or []
-    candidates: list[tuple[float, float, int]] = []
-    start_points = sorted({0.0, *(word[0] for word in words if word[0] >= 0.0)})
-    for start in start_points:
-        if any(_range_overlaps(start, start + min_seconds, lo, hi) for lo, hi in avoid):
-            continue
-        window_end = start + max_seconds
-        window_min = start + min_seconds
-        best: tuple[float, float] | None = None
-        score = 0
-        for i, (when, text) in enumerate(words):
-            if when < window_min or when > window_end:
-                continue
-            nxt = words[i + 1][0] if i + 1 < len(words) else when + 2.0
-            gap = nxt - when
-            ends_sentence = text.endswith((".", "?", "!"))
-            if gap < 0.65 and not ends_sentence:
-                continue
-            duration = min(when - start + 0.45, max_seconds)
-            if duration < min_seconds:
-                continue
-            local_score = 2 if ends_sentence else 1
-            best = (start, duration)
-            score = local_score
-            if ends_sentence and gap >= 0.65:
-                break
-        if best and not any(_range_overlaps(best[0], best[0] + best[1], lo, hi) for lo, hi in avoid):
-            candidates.append((best[0], best[1], score))
-
-    if candidates:
-        candidates.sort(key=lambda item: (-item[2], item[0]))
-        chosen = candidates[0]
-        return chosen[0], chosen[1]
-
-    start = words[0][0] if words[0][0] < 3.0 else 0.0
-=======
 def captions_text(path: Path, *, start: float = 0.0, duration: float = 1_000_000.0) -> str:
     if path.suffix.lower() != ".json3":
         return content_reuse.transcript_text_from_json3(path)
@@ -351,7 +301,6 @@ def _pick_window_from_words(
             return best
     if best:
         return best
->>>>>>> 39f25b23957c4e3c83cef2963607e061909fa165
     last = min(words[-1][0] - start + 0.4, max_seconds)
     if last < min_seconds:
         return None
@@ -363,12 +312,28 @@ def pick_speech_excerpt(
     *,
     min_seconds: float,
     max_seconds: float,
+    avoid_ranges: list[tuple[float, float]] | None = None,
 ) -> tuple[float, float]:
     if captions.suffix.lower() != ".json3":
         return 0.0, max_seconds
     words = json3_word_times(captions)
     if not words:
         return 0.0, max_seconds
+
+    avoid = avoid_ranges or []
+    start_points = sorted({0.0, *(word[0] for word in words if word[0] >= 0.0)})
+    for start in start_points:
+        if any(_range_overlaps(start, start + min_seconds, lo, hi) for lo, hi in avoid):
+            continue
+        picked = _pick_window_from_words(
+            words,
+            min_seconds=min_seconds,
+            max_seconds=max_seconds,
+            default_start=start,
+        )
+        if picked and not any(_range_overlaps(picked[0], picked[0] + picked[1], lo, hi) for lo, hi in avoid):
+            return picked
+
     start = words[0][0] if words[0][0] < 3.0 else 0.0
     picked = _pick_window_from_words(
         words,
@@ -444,15 +409,12 @@ def shift_json3(src: Path, dest: Path, *, start: float, duration: float) -> None
 
 
 def trim_audio(src: Path, dest: Path, *, start: float, duration: float) -> None:
-<<<<<<< HEAD
     ffmpeg = resolve_tool("ffmpeg") or "ffmpeg"
-=======
     out = dest
     tmp: Path | None = None
     if src.resolve() == dest.resolve():
         tmp = dest.with_name(f"{dest.stem}.trim{dest.suffix}")
         out = tmp
->>>>>>> 39f25b23957c4e3c83cef2963607e061909fa165
     cmd = [
         ffmpeg,
         "-y",
@@ -709,9 +671,11 @@ def prepare_speech(
     speech_url: str,
     min_seconds: float,
     max_seconds: float,
-<<<<<<< HEAD
     reuse_policy: str = "allow",
-) -> tuple[VideoCandidate, float]:
+    allow_reuse: bool | None = None,
+) -> tuple[VideoCandidate, float, float, str, str]:
+    if allow_reuse is None:
+        allow_reuse = reuse_policy != "require_new"
     toolchain = check_toolchain()
     if not toolchain["ffmpeg"]["found"] or not toolchain["ffprobe"]["found"]:
         raise MotivationJobError(
@@ -720,9 +684,6 @@ def prepare_speech(
             + "\nSet FFMPEG_DIR in scripts/.env or install FFmpeg and add it to PATH.",
         )
 
-=======
-    allow_reuse: bool = False,
-) -> tuple[VideoCandidate, float, float, str, str]:
     pooled = _take_pooled_speech(
         jobs_root=jobs_root,
         audio_dir=audio_dir,
@@ -733,22 +694,18 @@ def prepare_speech(
     )
     if pooled is not None:
         return pooled
->>>>>>> 39f25b23957c4e3c83cef2963607e061909fa165
+
     if speech_url:
         candidates = discover_urls([speech_url])
         print(f"Speech URL: {speech_url}")
     else:
-<<<<<<< HEAD
         candidates = search_speeches(
             query=speech_query,
             speaker=speaker,
             limit=8,
             reuse_policy=reuse_policy,
         )
-=======
-        candidates = search_unused_speeches(query=speech_query, speaker=speaker, limit=8)
-        print(f"Speech candidates: {len(candidates)} unused (search: {speech_query})")
->>>>>>> 39f25b23957c4e3c83cef2963607e061909fa165
+        print(f"Speech candidates: {len(candidates)} (search: {speech_query})")
     if not candidates:
         if reuse_policy == "require_new":
             raise MotivationJobError(
@@ -762,22 +719,16 @@ def prepare_speech(
 
     source_mp3: Path | None = None
     chosen: VideoCandidate | None = None
-<<<<<<< HEAD
-    last_code: str | None = None
-    skipped_reuse = 0
-    for candidate in candidates:
-        if reuse_policy == "require_new" and candidate.video_id in used_ids() and not speech_url:
-            skipped_reuse += 1
-=======
     excerpt_text = ""
     source_text = ""
     start = 0.0
     duration = max_seconds
     captions: Path | None = None
+    last_code: str | None = None
+    skipped_reuse = 0
     for candidate in candidates:
-        if candidate.video_id in used_ids() and not speech_url:
-            print(f"  skip used id: {candidate.video_id} — {candidate.title}")
->>>>>>> 39f25b23957c4e3c83cef2963607e061909fa165
+        if reuse_policy == "require_new" and candidate.video_id in used_ids() and not speech_url:
+            skipped_reuse += 1
             continue
         used_before = candidate.video_id in used_ids()
         prior_ranges = prior_source_ranges(candidate.video_id) if used_before else []
@@ -791,12 +742,9 @@ def prepare_speech(
         else:
             print(f"Trying speech: {candidate.title} ({candidate.video_id})")
         try:
-<<<<<<< HEAD
             source_mp3, error_code = download_one_audio(candidate, audio_dir)
-=======
-            source_mp3 = download_one_audio(candidate, audio_dir)
-            captions = download_subs(candidate.url, audio_dir)
->>>>>>> 39f25b23957c4e3c83cef2963607e061909fa165
+            if source_mp3:
+                captions = download_subs(candidate.url, audio_dir)
         except Exception as exc:  # noqa: BLE001 — next candidate on age-gate / download fail
             error_code = classify_download_error(exc)
             print(f"  skip ({error_code}): {exc}")
@@ -810,44 +758,15 @@ def prepare_speech(
             if error_code == "FFMPEG_NOT_FOUND":
                 break
             continue
-<<<<<<< HEAD
-        if source_mp3:
-            chosen = candidate
-            break
-
-    if last_code == "FFMPEG_NOT_FOUND":
-        raise MotivationJobError("FFMPEG_NOT_FOUND", format_toolchain_report())
-    if chosen is None or source_mp3 is None:
-        if skipped_reuse and skipped_reuse == len(candidates):
-            raise MotivationJobError(
-                "REUSE_RESTRICTION",
-                "All speech candidates were skipped by require_new reuse policy.",
-            )
-        if last_code:
-            raise MotivationJobError(last_code, f"Speech download failed ({last_code}).")
-        raise MotivationJobError("DOWNLOAD_FAILED", "Could not download speech from any candidate.")
-
-    url_file.write_text(f"{chosen.url}\n", encoding="utf-8")
-    captions = download_subs(chosen.url, audio_dir)
-    prior_ranges = prior_source_ranges(chosen.video_id)
-    avoid_ranges = prior_ranges if reuse_policy == "require_new" else None
-    if prior_ranges and reuse_policy != "require_new":
-        formatted = ", ".join(f"{lo:.0f}s–{hi:.0f}s" for lo, hi in prior_ranges[:8])
-        print(f"  prior production segments (advisory): {formatted}")
-    start, duration = pick_speech_excerpt(
-        captions,
-        min_seconds=min_seconds,
-        max_seconds=max_seconds,
-        avoid_ranges=avoid_ranges,
-    )
-=======
         if source_mp3 is None or captions is None:
             continue
         source_text = captions_text(captions)
+        avoid_ranges = prior_ranges if reuse_policy == "require_new" else None
         start, duration = pick_speech_excerpt(
             captions,
             min_seconds=min_seconds,
             max_seconds=max_seconds,
+            avoid_ranges=avoid_ranges,
         )
         excerpt_text = captions_text(captions, start=start, duration=duration)
         hits = content_reuse.find_speech_reuse(
@@ -863,12 +782,21 @@ def prepare_speech(
             continue
         chosen = candidate
         break
+
+    if last_code == "FFMPEG_NOT_FOUND":
+        raise MotivationJobError("FFMPEG_NOT_FOUND", format_toolchain_report())
     if chosen is None or source_mp3 is None or captions is None:
-        raise RuntimeError("Could not download an unused speech.")
+        if skipped_reuse and skipped_reuse == len(candidates):
+            raise MotivationJobError(
+                "REUSE_RESTRICTION",
+                "All speech candidates were skipped by require_new reuse policy.",
+            )
+        if last_code:
+            raise MotivationJobError(last_code, f"Speech download failed ({last_code}).")
+        raise MotivationJobError("DOWNLOAD_FAILED", "Could not download speech from any candidate.")
 
     url_file.write_text(f"{chosen.url}\n", encoding="utf-8")
     print(f"Speech picked: {chosen.title} ({chosen.video_id})")
->>>>>>> 39f25b23957c4e3c83cef2963607e061909fa165
     print(f"Excerpt: start={start:.2f}s duration={duration:.2f}s")
     print(f"  preview: {_preview(excerpt_text)}")
     if not allow_reuse:
@@ -950,7 +878,9 @@ def prepare_broll(
     max_parts: int,
     min_views: int,
     min_duration: int,
-<<<<<<< HEAD
+    start_offset: float = 0.0,
+    subject: str = "",
+    use_vision: bool = True,
     reuse_policy: str = "allow",
 ) -> list[str]:
     raw = discover_search(query=query, limit=max(limit * 4, 16))
@@ -959,22 +889,14 @@ def prepare_broll(
         pool = [item for item in raw if item.video_id not in used]
     else:
         pool = list(raw)
-=======
-    start_offset: float,
-    subject: str,
-    use_vision: bool = True,
-) -> list[str]:
-    raw = discover_search(query=query, limit=max(limit * 4, 16))
-    skip = used_ids()
-    unused = [item for item in raw if item.video_id not in skip]
     wanted = subject_tokens(query, subject)
-    titled = [item for item in unused if title_matches_subject(item.title, wanted)]
-    if titled:
-        print(f"Title-matched {len(titled)}/{len(unused)} B-roll hit(s) for: {', '.join(wanted)}")
-        unused = titled
-    elif wanted:
-        print(f"No B-roll title matched {wanted}; using unused search hits")
->>>>>>> 39f25b23957c4e3c83cef2963607e061909fa165
+    if wanted:
+        titled = [item for item in pool if title_matches_subject(item.title, wanted)]
+        if titled:
+            print(f"Title-matched {len(titled)}/{len(pool)} B-roll hit(s) for: {', '.join(wanted)}")
+            pool = titled
+        elif reuse_policy != "require_new":
+            print(f"No B-roll title matched {wanted}; using search hits")
     candidates = filter_unwanted(
         pool,
         limit=limit,
@@ -1148,6 +1070,7 @@ def ensure_broll_clips(
     start_offset: float,
     use_vision: bool,
     broll_ids: list[str] | None = None,
+    reuse_policy: str = "allow",
 ) -> list[str]:
     """Fill clips_dir from pool first, then download only what is still missing."""
     broll_pool.take_from_pool(jobs_root, subject=subject, clips_dir=clips_dir)
@@ -1183,6 +1106,7 @@ def ensure_broll_clips(
         start_offset=start_offset,
         subject=subject,
         use_vision=use_vision,
+        reuse_policy=reuse_policy,
     )
     if broll_ids:
         return list(dict.fromkeys([*broll_ids, *downloaded]))
@@ -1515,12 +1439,9 @@ def main() -> int:
     print(f"Output: {output.as_posix()}")
     print(f"Speaker: {speaker}  (edit {config_path.as_posix()})")
     print(f"Speech search: {speech_query}")
-<<<<<<< HEAD
+    print(f"B-roll query: {args.broll_query}")
     print(f"Reuse policy: {reuse_policy}")
     print(format_toolchain_report())
-=======
-    print(f"B-roll query: {args.broll_query}")
->>>>>>> 39f25b23957c4e3c83cef2963607e061909fa165
     try:
         speech, start, duration, excerpt_text, source_text = prepare_speech(
             jobs_root=jobs_root,
@@ -1533,6 +1454,31 @@ def main() -> int:
             max_seconds=args.max_seconds,
             reuse_policy=reuse_policy,
         )
+        speaker_resolution: dict[str, object] = {}
+        try:
+            from discovery.config import default_db_path, load_env
+            from discovery.speaker_identity import resolve_registration_speaker
+            from discovery.store import DiscoveryStore
+
+            load_env()
+            _speaker_store = DiscoveryStore(default_db_path())
+            try:
+                resolved_speaker, speaker_resolution = resolve_registration_speaker(
+                    _speaker_store,
+                    intended=speaker,
+                    title=speech.title,
+                    channel=speech.channel,
+                    transcript=excerpt_text or source_text,
+                    youtube_id=speech.video_id,
+                )
+            finally:
+                _speaker_store.close()
+            if resolved_speaker:
+                if resolved_speaker != speaker:
+                    print(f"Speaker resolved: {speaker} -> {resolved_speaker} (from clip metadata)")
+                speaker = resolved_speaker
+        except Exception as exc:  # noqa: BLE001 — registration still proceeds
+            print(f"Speaker resolution skipped: {exc}")
         segment_length = resolve_segment_length(duration, args.segment_length)
         clips_limit, clip_length, max_parts = broll_download_plan(
             duration=duration,
@@ -1557,12 +1503,9 @@ def main() -> int:
             max_parts=max_parts,
             min_views=args.min_views,
             min_duration=args.min_duration,
-<<<<<<< HEAD
-            reuse_policy=reuse_policy,
-=======
             start_offset=args.intro_skip,
             use_vision=not args.no_vision,
->>>>>>> 39f25b23957c4e3c83cef2963607e061909fa165
+            reuse_policy=reuse_policy,
         )
         render_job(
             jobs_root=jobs_root,
@@ -1605,6 +1548,8 @@ def main() -> int:
             "segment_length": segment_length,
             "playback_speed": args.playback_speed,
             "output": str(output.as_posix()),
+            "speaker_resolution": speaker_resolution,
+            "search_intent": speaker_resolution.get("search_intent"),
         },
     )
     content_reuse.rebuild()

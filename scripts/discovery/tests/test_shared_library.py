@@ -162,6 +162,22 @@ class SharedLibraryTests(unittest.TestCase):
         mid = manifest_id_for(owner="stephen", slug="demo", final_hash="abc123")
         self.assertTrue(mid.startswith("stephen:demo:"))
 
+    def test_sync_is_due_when_never_synced(self) -> None:
+        from discovery.shared_library import _sync_is_due
+
+        self.assertTrue(_sync_is_due({}))
+
+    @patch("discovery.shared_library.pull_and_import")
+    @patch("discovery.shared_library.auto_sync_enabled", return_value=True)
+    @patch("discovery.shared_library._sync_is_due", return_value=True)
+    def test_maybe_auto_pull_import_runs(self, _due, _enabled, mock_pull) -> None:
+        from discovery.shared_library import maybe_auto_pull_import
+
+        mock_pull.return_value = {"import": {"imported": 1}}
+        result = maybe_auto_pull_import(self.store, force=False)
+        self.assertIsNotNone(result)
+        mock_pull.assert_called_once()
+
     @patch("discovery.shared_library_git.unrelated_changes", return_value=["scripts/foo.py"])
     def test_git_refuses_unrelated_changes(self, _mock_unrelated) -> None:
         result = commit_and_push("test", dry_run=False)

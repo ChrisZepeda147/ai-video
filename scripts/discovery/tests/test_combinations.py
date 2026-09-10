@@ -143,7 +143,7 @@ class CombinationTests(unittest.TestCase):
         self.assertTrue(tate[0]["display_id"].endswith("A"))
 
     @patch("build_motivation_job.render_job")
-    @patch("build_motivation_job.probe_duration", return_value=67.0)
+    @patch("build_clips_montage.probe_duration", return_value=67.0)
     def test_render_reuses_renderer_and_records_usage(self, _probe, mock_render) -> None:
         def _fake_render(**kwargs):
             output = kwargs["output"]
@@ -168,8 +168,41 @@ class CombinationTests(unittest.TestCase):
         self.assertEqual(int(usage["audio_component_id"]), self.audio_id)
         self.assertEqual(int(usage["visual_pack_id"]), self.pack_id)
 
+    @patch("build_motivation_job.ensure_broll_clips")
     @patch("build_motivation_job.render_job")
-    @patch("build_motivation_job.probe_duration", return_value=67.0)
+    @patch("build_clips_montage.probe_duration", return_value=67.0)
+    def test_render_hydrates_missing_clip_folder(self, _probe, mock_render, mock_ensure) -> None:
+        def _fake_render(**kwargs):
+            kwargs["output"].parent.mkdir(parents=True, exist_ok=True)
+            kwargs["output"].write_bytes(b"\x00\x00\x00\x20ftypmp42")
+
+        def _fake_ensure(**kwargs):
+            clips_dir = kwargs["clips_dir"]
+            clips_dir.mkdir(parents=True, exist_ok=True)
+            (clips_dir / "hydrated_part01.mp4").write_bytes(b"\x00\x00\x00\x20ftypmp42")
+
+        mock_render.side_effect = _fake_render
+        mock_ensure.side_effect = _fake_ensure
+        shutil.rmtree(self.job_dir / "clips")
+        self.store._conn.execute(
+            "UPDATE production_visual_packs SET clips_root_path = NULL WHERE id = ?",
+            (self.pack_id,),
+        )
+        self.store._conn.commit()
+
+        result = render_combination(
+            self.store,
+            owner="chris",
+            audio_component_id=self.audio_id,
+            visual_pack_id=self.pack_id,
+            force_usage=True,
+        )
+        self.assertTrue(mock_ensure.called)
+        self.assertTrue(mock_render.called)
+        self.assertGreater(int(result["video"]["id"]), 0)
+
+    @patch("build_motivation_job.render_job")
+    @patch("build_clips_montage.probe_duration", return_value=67.0)
     def test_version_link_on_render(self, _probe, mock_render) -> None:
         def _fake_render(**kwargs):
             kwargs["output"].parent.mkdir(parents=True, exist_ok=True)

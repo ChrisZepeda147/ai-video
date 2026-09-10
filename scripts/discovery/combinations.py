@@ -12,6 +12,7 @@ from typing import Any
 from discovery.config import project_root
 from discovery.production_library import check_reuse, get_video, now_iso
 from discovery.reuse_detection import transcript_hash
+from discovery.speaker_identity import get_correction, infer_speaker
 
 OWNERS = frozenset({"chris", "stephen"})
 CATEGORY_ORDER = (
@@ -24,12 +25,6 @@ CATEGORY_ORDER = (
     "Watches",
     "Horror",
     "Custom",
-)
-KNOWN_SPEAKERS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Andrew Tate", ("andrew tate", " tate", "top g")),
-    ("Joe Rogan", ("joe rogan", " rogan", "jre")),
-    ("Jordan Peterson", ("jordan peterson", " peterson")),
-    ("Jocko Willink", ("jocko", "willink")),
 )
 CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "Cars": ("car", "supercar", "lamborghini", "ferrari", "hypercar", "automotive"),
@@ -97,6 +92,12 @@ def _category_base(category: str) -> int:
 
 
 def _resolve_speaker(row: dict[str, Any], store) -> str:
+    source_id = str(row.get("source_external_id") or "").strip()
+    if source_id:
+        corrected = get_correction(store, source_id)
+        if corrected:
+            return corrected
+
     for field in ("speaker", "podcast_source"):
         value = str(row.get(field) or "").strip()
         if value:
@@ -123,9 +124,9 @@ def _resolve_speaker(row: dict[str, Any], store) -> str:
         )
         if part
     ).lower()
-    for name, hints in KNOWN_SPEAKERS:
-        if any(hint in blob for hint in hints):
-            return name
+    inferred = infer_speaker(blob)
+    if inferred:
+        return inferred
 
     local_path = str(row.get("local_path") or "")
     if local_path:
@@ -144,11 +145,11 @@ def _resolve_speaker(row: dict[str, Any], store) -> str:
                 info = json.loads(info_path.read_text(encoding="utf-8"))
             except json.JSONDecodeError:
                 continue
-            title = str(info.get("title") or "").lower()
-            channel = str(info.get("channel") or "").lower()
-            for name, hints in KNOWN_SPEAKERS:
-                if any(hint in title or hint in channel for hint in hints):
-                    return name
+            title = str(info.get("title") or "")
+            channel = str(info.get("channel") or "")
+            inferred = infer_speaker(title, channel)
+            if inferred:
+                return inferred
 
     return "Unknown"
 

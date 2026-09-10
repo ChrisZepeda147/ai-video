@@ -615,12 +615,9 @@ def download_videos(
     split_parts: bool,
     keep_source: bool,
     aspect_ratio: str,
-<<<<<<< HEAD
     quiet: bool = False,
     id_only_filenames: bool = False,
-=======
     start_offset: float = 0.0,
->>>>>>> 39f25b23957c4e3c83cef2963607e061909fa165
 ) -> list[dict[str, Any]]:
     _configure_stdout()
     output_dir.mkdir(parents=True, exist_ok=True)

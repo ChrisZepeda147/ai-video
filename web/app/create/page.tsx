@@ -6,7 +6,7 @@ export default function CreatePage() {
     <>
       <PageHeader
         title="Make Short"
-        description="30-second motivational Short — inspirational speech over rotating luxury visuals."
+        description="Structured brief → Cursor Agent builds a 9:16 Short with your audio search, visuals, and custom instructions."
       />
       <MakeShortWorkspace />
     </>

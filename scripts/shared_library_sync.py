@@ -14,12 +14,12 @@ from discovery.config import default_db_path, load_env
 from discovery.shared_library import (
     export_stephen_after_register,
     export_stephen_existing,
-    import_all_stephen_packages,
     load_sync_state,
+    pull_and_import,
     save_sync_state,
     sync_status,
 )
-from discovery.shared_library_git import commit_and_push, pull_shared_library
+from discovery.shared_library_git import commit_and_push
 from discovery.store import DiscoveryStore
 
 
@@ -98,33 +98,9 @@ def cmd_pull_import(args: argparse.Namespace) -> int:
         print("Discovery database not found — import requires local catalog.", file=sys.stderr)
         return 1
     try:
-        pull_result = None
-        pull_warning = None
-        if not args.skip_pull:
-            try:
-                pull_result = pull_shared_library(dry_run=args.dry_run)
-                if not pull_result.get("ok"):
-                    pull_warning = pull_result.get("message")
-                elif pull_result.get("warnings"):
-                    pull_warning = "; ".join(str(w) for w in pull_result["warnings"])
-                if not args.dry_run and pull_result and pull_result.get("ok"):
-                    from discovery.shared_library import now_iso
-
-                    state = load_sync_state()
-                    state["last_pull_at"] = now_iso()
-                    save_sync_state(state)
-            except RuntimeError as exc:
-                pull_warning = str(exc)
-
-        import_result = import_all_stephen_packages(store, dry_run=args.dry_run)
-        payload = {
-            "pull_skipped": args.skip_pull,
-            "pull_warning": pull_warning,
-            "import": import_result,
-        }
-        if not args.skip_pull:
-            payload["pull"] = pull_result
+        payload = pull_and_import(store, skip_pull=args.skip_pull, dry_run=args.dry_run)
         print(json.dumps(payload, indent=2, default=str))
+        import_result = payload.get("import") or {}
         return 0 if import_result.get("errors", 0) == 0 else 1
     finally:
         store.close()

@@ -32,9 +32,32 @@ export function LibraryWorkspace() {
     if (sync.ok) setSyncStatus(sync.data);
   }, []);
 
+  const runAutoSync = useCallback(async () => {
+    if (backendOnline === false) return;
+    const result = await postSharedSyncPullImport({ auto_only: true });
+    if (!result.ok) return;
+    if (result.data.skipped) {
+      if (result.data.status) setSyncStatus(result.data.status);
+      return;
+    }
+    setSyncStatus(result.data.status);
+    const imp = result.data.import;
+    if (imp && imp.imported > 0) {
+      setMessage(
+        `Stephen auto-sync: ${imp.imported} new video(s) imported (${imp.skipped} already in library).`,
+      );
+      await load();
+    }
+  }, [backendOnline, load]);
+
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
+
+  useEffect(() => {
+    if (backendOnline !== true) return;
+    void runAutoSync();
+  }, [backendOnline, runAutoSync]);
 
   async function handleSyncStephen() {
     setSyncBusy(true);
@@ -46,6 +69,11 @@ export function LibraryWorkspace() {
       return;
     }
     const imp = result.data.import;
+    if (!imp) {
+      setMessage("Sync finished — no import details returned.");
+      await load();
+      return;
+    }
     setSyncStatus(result.data.status);
     const pullNote = result.data.pull_warning ? ` Pull note: ${result.data.pull_warning}.` : "";
     if (imp.found === 0) {
@@ -84,14 +112,30 @@ export function LibraryWorkspace() {
 
       <section className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
+          <div className="min-w-0 flex-1">
             <h3 className="text-sm font-semibold text-zinc-100">Stephen shared library</h3>
             <p className="text-xs text-zinc-500">
               {syncStatus
-                ? `${syncStatus.packages_on_disk} packages on disk · ${syncStatus.imports_recorded} imported`
+                ? `${syncStatus.packages_on_disk} packages on disk · ${syncStatus.imports_recorded} in library` +
+                  (syncStatus.pending_import ? ` · ${syncStatus.pending_import} pending import` : "")
                 : "Pull Stephen packages from GitHub and import into this library."}
-              {syncStatus?.last_import_at ? ` · Last import ${new Date(syncStatus.last_import_at).toLocaleString()}` : ""}
+              {syncStatus?.last_import_at
+                ? ` · Last import ${new Date(syncStatus.last_import_at).toLocaleString()}`
+                : ""}
             </p>
+            {syncStatus?.auto_sync_enabled ? (
+              <p className="mt-1 text-xs text-emerald-600/90">
+                Auto-sync every {syncStatus.auto_sync_interval_minutes ?? 10} min (API + this page when stale).
+              </p>
+            ) : null}
+            {syncStatus?.git?.commit ? (
+              <p className="mt-1 text-xs text-zinc-500">
+                Code: {syncStatus.git.branch ?? "branch"} @ {syncStatus.git.commit}
+                {syncStatus.git.commits_behind != null && syncStatus.git.commits_behind > 0
+                  ? ` · ${syncStatus.git.commits_behind} commit(s) behind remote — git pull for Stephen's search/script updates`
+                  : " · up to date with remote code"}
+              </p>
+            ) : null}
           </div>
           <button
             type="button"
@@ -99,7 +143,7 @@ export function LibraryWorkspace() {
             onClick={handleSyncStephen}
             className="rounded-xl border border-violet-700 bg-violet-600/20 px-4 py-2 text-sm font-medium text-violet-100 hover:bg-violet-600/30 disabled:opacity-40"
           >
-            {syncBusy ? "Syncing…" : "Sync Stephen library"}
+            {syncBusy ? "Syncing…" : "Sync now"}
           </button>
         </div>
       </section>

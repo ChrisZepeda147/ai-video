@@ -713,6 +713,14 @@ def import_all_stephen_packages(
         sync_visual_packs(store)
         new_ids = [item["video_id"] for item in items if item.get("status") == "imported" and item.get("video_id")]
         usage = import_usage_from_videos(store, owner=SHARED_OWNER, video_ids=new_ids)
+        new_slugs = [str(item["slug"]) for item in items if item.get("status") == "imported" and item.get("slug")]
+        if new_slugs:
+            try:
+                from discovery.site_videos import sync_legacy_renders_to_site
+
+                sync_legacy_renders_to_site(slugs=new_slugs, root=root, rebuild_catalog=False)
+            except Exception as exc:  # noqa: BLE001 — site dashboard is best-effort
+                logger.warning("Site sync after shared import failed: %s", exc)
     else:
         usage = {"imported": 0, "skipped": 0}
 
@@ -731,18 +739,111 @@ def import_all_stephen_packages(
     }
 
 
-def sync_status(root: Path | None = None) -> dict[str, Any]:
+def auto_sync_enabled() -> bool:
+    return os.environ.get("SHARED_LIBRARY_AUTO_SYNC", "1").strip().lower() not in ("0", "false", "no")
+
+
+def auto_sync_interval_minutes() -> int:
+    try:
+        return max(1, int(os.environ.get("SHARED_LIBRARY_AUTO_SYNC_MINUTES", "10")))
+    except ValueError:
+        return 10
+
+
+def _sync_is_due(state: dict[str, Any], *, interval_minutes: int | None = None) -> bool:
+    interval = interval_minutes if interval_minutes is not None else auto_sync_interval_minutes()
+    last = state.get("last_auto_sync_at") or state.get("last_pull_at") or state.get("last_import_at")
+    if not last:
+        return True
+    try:
+        last_dt = datetime.fromisoformat(str(last).replace("Z", "+00:00"))
+        if last_dt.tzinfo is None:
+            last_dt = last_dt.replace(tzinfo=timezone.utc)
+        elapsed = (datetime.now(timezone.utc) - last_dt).total_seconds()
+        return elapsed >= interval * 60
+    except ValueError:
+        return True
+
+
+def pull_and_import(
+    store,
+    *,
+    skip_pull: bool = False,
+    dry_run: bool = False,
+    fetch_git: bool = True,
+) -> dict[str, Any]:
+    """Pull Stephen packages from GitHub (scoped) and import into production library + site."""
+    from discovery.shared_library_git import git_repo_status, pull_shared_library
+
+    pull_result = None
+    pull_warning = None
+    if not skip_pull:
+        try:
+            pull_result = pull_shared_library(dry_run=dry_run)
+            if not pull_result.get("ok"):
+                pull_warning = pull_result.get("message") or "Git pull did not complete"
+            elif pull_result.get("warnings"):
+                pull_warning = "; ".join(str(w) for w in pull_result["warnings"])
+            if not dry_run and pull_result and pull_result.get("ok"):
+                state = load_sync_state()
+                state["last_pull_at"] = now_iso()
+                save_sync_state(state)
+        except RuntimeError as exc:
+            pull_warning = str(exc)
+
+    import_result = import_all_stephen_packages(store, dry_run=dry_run)
+    git_status = git_repo_status(fetch=fetch_git and not dry_run)
+
+    return {
+        "pull": pull_result,
+        "pull_warning": pull_warning,
+        "import": import_result,
+        "git": git_status,
+        "status": sync_status(git=git_status),
+    }
+
+
+def maybe_auto_pull_import(store, *, force: bool = False) -> dict[str, Any] | None:
+    """Run pull+import when auto-sync is enabled and interval elapsed."""
+    if not force and not auto_sync_enabled():
+        return None
+    state = load_sync_state()
+    if not force and not _sync_is_due(state):
+        return None
+    result = pull_and_import(store, fetch_git=not force)
+    state = load_sync_state()
+    state["last_auto_sync_at"] = now_iso()
+    save_sync_state(state)
+    result["auto_sync"] = True
+    result["skipped"] = False
+    return result
+
+
+def sync_status(root: Path | None = None, *, git: dict[str, Any] | None = None) -> dict[str, Any]:
     root = root or project_root()
     base = shared_library_root(root)
     manifests = list(base.glob("*/manifest.json")) if base.is_dir() else []
     state = load_sync_state(root)
+    pending_import = max(0, len(manifests) - len(state.get("imports", {})))
+    if git is None:
+        try:
+            from discovery.shared_library_git import git_repo_status
+
+            git = git_repo_status(fetch=False)
+        except Exception:
+            git = {}
     return {
         "owner": SHARED_OWNER,
         "packages_on_disk": len(manifests),
         "imports_recorded": len(state.get("imports", {})),
+        "pending_import": pending_import,
         "exports_recorded": len(state.get("exports", {})),
         "last_import_at": state.get("last_import_at"),
         "last_pull_at": state.get("last_pull_at"),
         "last_push_at": state.get("last_push_at"),
+        "last_auto_sync_at": state.get("last_auto_sync_at"),
+        "auto_sync_enabled": auto_sync_enabled(),
+        "auto_sync_interval_minutes": auto_sync_interval_minutes(),
         "export_enabled": export_enabled(),
+        "git": git,
     }
