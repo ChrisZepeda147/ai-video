@@ -8,9 +8,11 @@ persistent ledger at content/used.json so deleted downloads are still remembered
 Examples:
   python scripts/content_reuse.py rebuild
   python scripts/content_reuse.py list
+  python scripts/content_reuse.py reset-speeches
   python scripts/content_reuse.py check-story --file downloads/imessage/new/story.json
   python scripts/content_reuse.py check-photo --slug white-yacht-midnight
   python scripts/content_reuse.py check-video --youtube-id p0aHDT8wwrw
+  python scripts/content_reuse.py check-speech --file downloads/motivational/job/audio/subs.en.json3
 """
 
 from __future__ import annotations
@@ -49,6 +51,11 @@ STORY_TOKEN_THRESHOLD = 0.34
 STORY_OVERLAP_THRESHOLD = 0.55
 STORY_OVERLAP_MIN_SHARED = 8
 PHOTO_TOKEN_THRESHOLD = 0.82
+SPEECH_TOKEN_THRESHOLD = 0.52
+SPEECH_SHINGLE_THRESHOLD = 0.28
+SPEECH_SHINGLE_MIN_SHARED = 8
+SPEECH_SHINGLE_SIZE = 5
+SPEECH_SHINGLE_LIMIT = 160
 
 PHOTO_EXCLUDE_NAMES = {"reference.png"}
 PHOTO_EXCLUDE_DIRS = {"references", "captioned"}
@@ -125,6 +132,49 @@ def normalize_text(text: str) -> str:
 
 def tokens(text: str) -> set[str]:
     return {word for word in WORD_RE.findall((text or "").lower()) if word not in STOPWORDS and len(word) > 2}
+
+
+def transcript_text_from_json3(path: Path) -> str:
+    if not path.is_file():
+        return ""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    words: list[str] = []
+    for event in data.get("events") or []:
+        for seg in event.get("segs") or []:
+            text = str(seg.get("utf8") or "").strip()
+            if text and text != "\n":
+                words.append(text)
+    return normalize_text(" ".join(words))
+
+
+def speech_shingles(text: str, *, size: int = SPEECH_SHINGLE_SIZE, limit: int = SPEECH_SHINGLE_LIMIT) -> list[str]:
+    words = normalize_text(text).split()
+    if len(words) < size:
+        return [" ".join(words)] if words else []
+    raw = [" ".join(words[i : i + size]) for i in range(0, len(words) - size + 1)]
+    if len(raw) <= limit:
+        return raw
+    step = max(1, len(raw) / limit)
+    picked: list[str] = []
+    index = 0.0
+    while len(picked) < limit and int(index) < len(raw):
+        picked.append(raw[int(index)])
+        index += step
+    return picked
+
+
+def speech_fingerprint(text: str) -> dict[str, Any]:
+    normalized = normalize_text(text)
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest() if normalized else ""
+    return {
+        "transcript": normalized[:4000],
+        "transcript_hash": digest,
+        "transcript_tokens": sorted(tokens(normalized)),
+        "transcript_shingles": speech_shingles(normalized),
+    }
 
 
 def jaccard(left: Iterable[str], right: Iterable[str]) -> float:
@@ -348,12 +398,57 @@ def scan_videos(root: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def scan_speech_transcripts(root: Path) -> list[dict[str, Any]]:
+    jobs = root / "downloads" / "motivational"
+    if not jobs.is_dir():
+        return []
+    rows: list[dict[str, Any]] = []
+    for job_dir in sorted(jobs.iterdir()):
+        if not job_dir.is_dir():
+            continue
+        job_path = job_dir / "job.json"
+        captions = job_dir / "audio" / "subs.en.json3"
+        payload: dict[str, Any] = {}
+        if job_path.is_file():
+            try:
+                loaded = json.loads(job_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                loaded = {}
+            if isinstance(loaded, dict):
+                payload = loaded
+        text = str(payload.get("speech_excerpt") or "").strip()
+        if not text:
+            text = transcript_text_from_json3(captions)
+        speech_id = str(payload.get("speech_id") or "").strip()
+        title = str(payload.get("speech_title") or job_dir.name)
+        if not text and not speech_id:
+            continue
+        fingerprint = speech_fingerprint(text)
+        source_hash = str(payload.get("speech_source_hash") or "")
+        record = {
+            "id": f"video:{speech_id}" if speech_id else f"video:speech-{job_dir.name}",
+            "kind": "video",
+            "role": "speech",
+            "path": rel_path(captions if captions.is_file() else job_path, root),
+            "paths": [rel_path(item, root) for item in (captions, job_path) if item.is_file()],
+            "slug": speech_id or job_dir.name,
+            "title": title,
+            "youtube_id": speech_id or None,
+            "sha256": "",
+            **fingerprint,
+        }
+        if source_hash:
+            record["speech_source_hash"] = source_hash
+        rows.append(record)
+    return rows
+
+
 def scan_project(root: Path | None = None) -> Catalog:
     base = root or project_root()
     return Catalog(
         updated_at=now_iso(),
         photos=scan_photos(base),
-        videos=scan_videos(base),
+        videos=_merge_by_id(scan_videos(base), scan_speech_transcripts(base)),
         stories=scan_stories(base),
     )
 
@@ -484,6 +579,79 @@ def find_photo_reuse(
     return hits
 
 
+def _speech_row_fingerprint(row: dict[str, Any]) -> dict[str, Any]:
+    if row.get("transcript_hash") and row.get("transcript_shingles"):
+        return {
+            "transcript": str(row.get("transcript") or ""),
+            "transcript_hash": str(row.get("transcript_hash") or ""),
+            "transcript_tokens": list(row.get("transcript_tokens") or []),
+            "transcript_shingles": list(row.get("transcript_shingles") or []),
+        }
+    text = str(row.get("transcript") or row.get("speech_excerpt") or "")
+    if not text:
+        return speech_fingerprint("")
+    return speech_fingerprint(text)
+
+
+def find_speech_reuse(
+    text: str,
+    *,
+    youtube_id: str = "",
+    source_text: str = "",
+    catalog: Catalog | None = None,
+    ignore_ids: Iterable[str] | None = None,
+    root: Path | None = None,
+) -> list[ReuseHit]:
+    catalog = catalog or current_catalog(root)
+    skip = {str(item) for item in (ignore_ids or []) if item}
+    excerpt = speech_fingerprint(text)
+    source = speech_fingerprint(source_text) if source_text else excerpt
+    hits: list[ReuseHit] = []
+    if not excerpt["transcript"] and not youtube_id:
+        return hits
+
+    for row in catalog.videos:
+        row_id = str(row.get("youtube_id") or row.get("id") or "")
+        if row_id and row_id in skip:
+            continue
+        existing = _speech_row_fingerprint(row)
+        if not existing["transcript_hash"] and not row.get("youtube_id"):
+            continue
+        reasons: list[str] = []
+        score = 0.0
+        if youtube_id and youtube_id == row.get("youtube_id"):
+            reasons.append(f"already used YouTube id {youtube_id}")
+            score = 1.0
+        for label, fingerprint in (("excerpt", excerpt), ("source", source)):
+            if fingerprint["transcript_hash"] and fingerprint["transcript_hash"] == existing["transcript_hash"]:
+                reasons.append(f"same {label} transcript")
+                score = 1.0
+            if fingerprint["transcript_hash"] and fingerprint["transcript_hash"] == row.get("speech_source_hash"):
+                reasons.append("same source speech transcript")
+                score = 1.0
+            token_score = jaccard(fingerprint["transcript_tokens"], existing["transcript_tokens"])
+            if token_score >= SPEECH_TOKEN_THRESHOLD:
+                reasons.append(f"{label} token overlap {token_score:.2f}")
+                score = max(score, token_score)
+            overlap, shared = overlap_coef(fingerprint["transcript_shingles"], existing["transcript_shingles"])
+            if overlap >= SPEECH_SHINGLE_THRESHOLD and shared >= SPEECH_SHINGLE_MIN_SHARED:
+                reasons.append(f"{label} phrase overlap {overlap:.2f} ({shared} shared)")
+                score = max(score, overlap)
+        if reasons:
+            hits.append(
+                ReuseHit(
+                    kind="speech",
+                    id=str(row.get("id") or row_id or ""),
+                    title=str(row.get("title") or row.get("youtube_id") or "speech"),
+                    reason="; ".join(dict.fromkeys(reasons)),
+                    score=score,
+                    path=str(row.get("path") or ""),
+                )
+            )
+    hits.sort(key=lambda item: item.score, reverse=True)
+    return hits
+
+
 def find_video_reuse(
     *,
     youtube_id: str = "",
@@ -526,6 +694,79 @@ def used_youtube_ids(catalog: Catalog | None = None, root: Path | None = None) -
     return {str(row["youtube_id"]) for row in catalog.videos if row.get("youtube_id")}
 
 
+SPEECH_JOB_KEYS = (
+    "speech_id",
+    "speech_title",
+    "speech_url",
+    "speech_excerpt",
+    "speech_source_excerpt",
+    "speech_source_hash",
+)
+
+
+def is_speech_row(row: dict[str, Any]) -> bool:
+    if str(row.get("role") or "") == "speech":
+        return True
+    if row.get("transcript_hash") or row.get("speech_source_hash") or row.get("transcript_shingles"):
+        return True
+    path = str(row.get("path") or "").replace("\\", "/")
+    if path.endswith("/speech.mp3") or path.endswith("/subs.en.json3"):
+        return True
+    return bool(row.get("youtube_id") and not path)
+
+
+def _strip_job_speech_fields(jobs_root: Path) -> int:
+    if not jobs_root.is_dir():
+        return 0
+    cleared = 0
+    for job_dir in jobs_root.iterdir():
+        job_path = job_dir / "job.json"
+        if not job_path.is_file():
+            continue
+        try:
+            payload = json.loads(job_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if not any(key in payload for key in SPEECH_JOB_KEYS):
+            continue
+        for key in SPEECH_JOB_KEYS:
+            payload.pop(key, None)
+        job_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        cleared += 1
+    return cleared
+
+
+def _delete_job_speech_files(jobs_root: Path) -> list[Path]:
+    removed: list[Path] = []
+    if not jobs_root.is_dir():
+        return removed
+    for job_dir in jobs_root.iterdir():
+        audio = job_dir / "audio"
+        if not audio.is_dir():
+            continue
+        for name in ("speech.mp3", "subs.en.json3"):
+            path = audio / name
+            if path.is_file():
+                path.unlink()
+                removed.append(path)
+    return removed
+
+
+def reset_speeches(root: Path | None = None) -> tuple[Catalog, list[dict[str, Any]]]:
+    """Forget used speeches so the next job can pick them again. B-roll stays."""
+    base = root or project_root()
+    jobs_root = base / "downloads" / "motivational"
+    _strip_job_speech_fields(jobs_root)
+    _delete_job_speech_files(jobs_root)
+    persisted = load_persisted(base)
+    removed = [row for row in persisted.videos if is_speech_row(row)]
+    persisted.videos = [row for row in persisted.videos if not is_speech_row(row)]
+    save_catalog(persisted, base)
+    return persisted, removed
+
+
 def enforce_story_unused(
     story: dict[str, Any],
     *,
@@ -554,6 +795,9 @@ def register_video(
     youtube_id: str = "",
     file_path: Path | None = None,
     title: str = "",
+    transcript: str = "",
+    source_transcript: str = "",
+    role: str = "",
     root: Path | None = None,
 ) -> Catalog:
     base = root or project_root()
@@ -574,6 +818,15 @@ def register_video(
         }
     if title:
         record["title"] = title
+    if role:
+        record["role"] = role
+    if transcript:
+        record.update(speech_fingerprint(transcript))
+    if source_transcript:
+        source = speech_fingerprint(source_transcript)
+        record["speech_source_hash"] = source["transcript_hash"]
+        if not transcript:
+            record.update(source)
     catalog.videos = _merge_by_id(catalog.videos, [record])
     save_catalog(catalog, base)
     return catalog
@@ -687,6 +940,14 @@ def build_parser() -> argparse.ArgumentParser:
     video.add_argument("--file", type=Path, help="Local video file")
     video.add_argument("--allow-reuse", action="store_true")
 
+    speech = sub.add_parser("check-speech", help="Fail if a speech transcript is a repeat version")
+    speech.add_argument("--file", type=Path, help="Caption file (.json3) or job.json")
+    speech.add_argument("--text", default="", help="Excerpt or transcript text")
+    speech.add_argument("--youtube-id", default="", help="Speech YouTube id")
+    speech.add_argument("--allow-reuse", action="store_true")
+
+    sub.add_parser("reset-speeches", help="Remove used speech IDs/transcripts so they can be picked again")
+
     return parser
 
 
@@ -744,6 +1005,43 @@ def main() -> int:
         hits = find_video_reuse(youtube_id=args.youtube_id, file_path=args.file, root=root)
         return 0 if args.allow_reuse else _exit_hits(hits)
 
+    if args.command == "check-speech":
+        text = (args.text or "").strip()
+        source_text = ""
+        if args.file and args.file.is_file():
+            if args.file.suffix.lower() == ".json3":
+                text = text or transcript_text_from_json3(args.file)
+            elif args.file.name == "job.json":
+                payload = json.loads(args.file.read_text(encoding="utf-8"))
+                text = text or str(payload.get("speech_excerpt") or "")
+                source_text = str(payload.get("speech_source_excerpt") or "")
+                captions = args.file.parent / "audio" / "subs.en.json3"
+                if not text:
+                    text = transcript_text_from_json3(captions)
+            else:
+                text = text or args.file.read_text(encoding="utf-8")
+        if not text and not args.youtube_id:
+            print("check-speech needs --file, --text, or --youtube-id", file=sys.stderr)
+            return 2
+        hits = find_speech_reuse(
+            text,
+            youtube_id=args.youtube_id,
+            source_text=source_text,
+            root=root,
+        )
+        return 0 if args.allow_reuse else _exit_hits(hits)
+
+    if args.command == "reset-speeches":
+        catalog, removed = reset_speeches(root)
+        print(f"Reset {len(removed)} used speech(es).")
+        for row in removed:
+            yt = row.get("youtube_id") or "-"
+            title = row.get("title") or yt
+            print(f"  - {title}  yt:{yt}")
+        print(f"Wrote {catalog_path(root)}")
+        print_catalog(catalog)
+        return 0
+        
     return 1
 
 

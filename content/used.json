@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-09-08T04:32:26+00:00",
+  "updated_at": "2026-09-10T01:23:44+00:00",
   "photos": [
     {
       "id": "photo:purple-gt3rs-forest-mansion",
@@ -367,6 +367,756 @@
       "title": "svj-pair-la-mansion-move",
       "youtube_id": null,
       "sha256": "e5842d55aeff7012fbdbbea0ed378ed20df26233a0e5828ecbabd2cc6ae5f0c6"
+    },
+    {
+      "id": "video:car-luxury-motivation",
+      "kind": "video",
+      "path": "downloads/motivational/car-luxury/output/car-luxury-motivation.mp4",
+      "paths": [
+        "downloads/motivational/car-luxury/output/car-luxury-motivation.mp4"
+      ],
+      "slug": "car-luxury-motivation",
+      "title": "car-luxury-motivation",
+      "youtube_id": null,
+      "sha256": "2bda874edeab0ba7615ccd4c5daf402ad366a0419de78ccb5d73f24e8336bf28"
+    },
+    {
+      "id": "video:lambo-motivation-motivation",
+      "kind": "video",
+      "path": "downloads/motivational/lambo-motivation/output/lambo-motivation-motivation.mp4",
+      "paths": [
+        "downloads/motivational/lambo-motivation/output/lambo-motivation-motivation.mp4"
+      ],
+      "slug": "lambo-motivation-motivation",
+      "title": "lambo-motivation-motivation",
+      "youtube_id": null,
+      "sha256": "d2a989ecf85bdf12fa61cb2510becb5e11d0e08e41b75d502f208fea13323f49"
+    },
+    {
+      "id": "video:mansion-motivation-motivation",
+      "kind": "video",
+      "path": "downloads/motivational/mansion-motivation/output/mansion-motivation-motivation.mp4",
+      "paths": [
+        "downloads/motivational/mansion-motivation/output/mansion-motivation-motivation.mp4"
+      ],
+      "slug": "mansion-motivation-motivation",
+      "title": "mansion-motivation-motivation",
+      "youtube_id": null,
+      "sha256": "f397e25a91fad5bd71e887a7af4b08d46570ea9f1aad64df5e67772da8a6efa1"
+    },
+    {
+      "id": "video:yacht-motivation",
+      "kind": "video",
+      "path": "downloads/motivational/yacht-motivation/output/yacht-motivation.mp4",
+      "paths": [
+        "downloads/motivational/yacht-motivation/output/yacht-motivation.mp4"
+      ],
+      "slug": "yacht-motivation",
+      "title": "yacht-motivation",
+      "youtube_id": null,
+      "sha256": "6858364f2edcab858901af3ec23d8133797c84b89320fb24d5d37dcd50fb36f5"
+    },
+    {
+      "id": "video:3pkZO5MGQS8",
+      "kind": "video",
+      "path": "downloads/motivational/villa-motivation/clips/3pkZO5MGQS8_part01.mp4",
+      "paths": [
+        "downloads/motivational/villa-motivation/clips/3pkZO5MGQS8_part01.mp4",
+        "downloads/motivational/villa-motivation/clips/3pkZO5MGQS8_part02.mp4",
+        "downloads/motivational/villa-motivation/clips/3pkZO5MGQS8_part03.mp4"
+      ],
+      "slug": "3pkZO5MGQS8",
+      "title": "3pkZO5MGQS8",
+      "youtube_id": "3pkZO5MGQS8",
+      "sha256": "64201234e24fab41c2bee7c5b2a4995d469ff914a0397f5be61f8d46333a8320"
+    },
+    {
+      "id": "video:GDv8Iei3h4Y",
+      "kind": "video",
+      "path": "downloads/motivational/villa-motivation/clips/GDv8Iei3h4Y_part01.mp4",
+      "paths": [
+        "downloads/motivational/villa-motivation/clips/GDv8Iei3h4Y_part01.mp4",
+        "downloads/motivational/villa-motivation/clips/GDv8Iei3h4Y_part02.mp4",
+        "downloads/motivational/villa-motivation/clips/GDv8Iei3h4Y_part03.mp4"
+      ],
+      "slug": "GDv8Iei3h4Y",
+      "title": "GDv8Iei3h4Y",
+      "youtube_id": "GDv8Iei3h4Y",
+      "sha256": "f5ac270932814ee7ef1b98e119f44838c1cdcbb5c77c48ac8eb42ec918b652ec"
+    },
+    {
+      "id": "video:qUNInl5D-88",
+      "kind": "video",
+      "path": "downloads/motivational/villa-motivation/clips/qUNInl5D-88_part01.mp4",
+      "paths": [
+        "downloads/motivational/villa-motivation/clips/qUNInl5D-88_part01.mp4",
+        "downloads/motivational/villa-motivation/clips/qUNInl5D-88_part02.mp4",
+        "downloads/motivational/villa-motivation/clips/qUNInl5D-88_part03.mp4"
+      ],
+      "slug": "qUNInl5D-88",
+      "title": "qUNInl5D-88",
+      "youtube_id": "qUNInl5D-88",
+      "sha256": "746487c9bdb2c43d1c0ed4601a9bbb50f88f21376e0a36df86eddcf9bd558e6e"
+    },
+    {
+      "id": "video:R_9-JElwV2A",
+      "kind": "video",
+      "path": "downloads/motivational/villa-motivation/clips/R_9-JElwV2A_part01.mp4",
+      "paths": [
+        "downloads/motivational/villa-motivation/clips/R_9-JElwV2A_part01.mp4",
+        "downloads/motivational/villa-motivation/clips/R_9-JElwV2A_part02.mp4",
+        "downloads/motivational/villa-motivation/clips/R_9-JElwV2A_part03.mp4"
+      ],
+      "slug": "R_9-JElwV2A",
+      "title": "R_9-JElwV2A",
+      "youtube_id": "R_9-JElwV2A",
+      "sha256": "48f3f99239b09628cb9a4524117d86a7385da5bdbc8034d90d7758f6561eb26e"
+    },
+    {
+      "id": "video:RVARlSmLpaI",
+      "kind": "video",
+      "path": "downloads/motivational/villa-motivation/clips/RVARlSmLpaI_part01.mp4",
+      "paths": [
+        "downloads/motivational/villa-motivation/clips/RVARlSmLpaI_part01.mp4",
+        "downloads/motivational/villa-motivation/clips/RVARlSmLpaI_part02.mp4",
+        "downloads/motivational/villa-motivation/clips/RVARlSmLpaI_part03.mp4"
+      ],
+      "slug": "RVARlSmLpaI",
+      "title": "RVARlSmLpaI",
+      "youtube_id": "RVARlSmLpaI",
+      "sha256": "e053e8433e0935f78f03967b1778d2f1d212158d434d1e593f469a0ddbcfea86"
+    },
+    {
+      "id": "video:Wnw4PEvBavQ",
+      "kind": "video",
+      "path": "downloads/motivational/villa-motivation/clips/Wnw4PEvBavQ_part01.mp4",
+      "paths": [
+        "downloads/motivational/villa-motivation/clips/Wnw4PEvBavQ_part01.mp4",
+        "downloads/motivational/villa-motivation/clips/Wnw4PEvBavQ_part02.mp4",
+        "downloads/motivational/villa-motivation/clips/Wnw4PEvBavQ_part03.mp4"
+      ],
+      "slug": "Wnw4PEvBavQ",
+      "title": "Wnw4PEvBavQ",
+      "youtube_id": "Wnw4PEvBavQ",
+      "sha256": "a4bd0678f2b250d685e9de857670b6467a66626dcc374c82b5ea403c2f87a416"
+    },
+    {
+      "id": "video:villa-motivation-motivation",
+      "kind": "video",
+      "path": "downloads/motivational/villa-motivation/output/villa-motivation-motivation.mp4",
+      "paths": [
+        "downloads/motivational/villa-motivation/output/villa-motivation-motivation.mp4"
+      ],
+      "slug": "villa-motivation-motivation",
+      "title": "villa-motivation-motivation",
+      "youtube_id": null,
+      "sha256": "954c8a3d3c58dd909e097043fa6bd09b4fa5528c3fd5e54b817e9f44e68ecfa3"
+    },
+    {
+      "id": "video:4gQFGsB0VQw",
+      "kind": "video",
+      "path": "downloads/motivational/estate-cinematic-motivation/clips/4gQFGsB0VQw_part01.mp4",
+      "paths": [
+        "downloads/motivational/estate-cinematic-motivation/clips/4gQFGsB0VQw_part01.mp4",
+        "downloads/motivational/estate-cinematic-motivation/clips/4gQFGsB0VQw_part02.mp4",
+        "downloads/motivational/estate-cinematic-motivation/clips/4gQFGsB0VQw_part03.mp4"
+      ],
+      "slug": "4gQFGsB0VQw",
+      "title": "4gQFGsB0VQw",
+      "youtube_id": "4gQFGsB0VQw",
+      "sha256": "887171a8a4c6df886ed2a1d857458f52aea446dc243b7febd7a2889a68d3dea3"
+    },
+    {
+      "id": "video:7_29vB7_lBs",
+      "kind": "video",
+      "path": "downloads/motivational/estate-cinematic-motivation/clips/7_29vB7_lBs_part01.mp4",
+      "paths": [
+        "downloads/motivational/estate-cinematic-motivation/clips/7_29vB7_lBs_part01.mp4",
+        "downloads/motivational/estate-cinematic-motivation/clips/7_29vB7_lBs_part02.mp4",
+        "downloads/motivational/estate-cinematic-motivation/clips/7_29vB7_lBs_part03.mp4"
+      ],
+      "slug": "7_29vB7_lBs",
+      "title": "7_29vB7_lBs",
+      "youtube_id": "7_29vB7_lBs",
+      "sha256": "31d6eca5fe09eeb12beb6b99579dd53c7efdf0ff707dea33ee7aacc10e9a3db3"
+    },
+    {
+      "id": "video:h3fUgOKFMNU",
+      "kind": "video",
+      "path": "downloads/motivational/estate-cinematic-motivation/clips/h3fUgOKFMNU_part01.mp4",
+      "paths": [
+        "downloads/motivational/estate-cinematic-motivation/clips/h3fUgOKFMNU_part01.mp4",
+        "downloads/motivational/estate-cinematic-motivation/clips/h3fUgOKFMNU_part02.mp4",
+        "downloads/motivational/estate-cinematic-motivation/clips/h3fUgOKFMNU_part03.mp4"
+      ],
+      "slug": "h3fUgOKFMNU",
+      "title": "h3fUgOKFMNU",
+      "youtube_id": "h3fUgOKFMNU",
+      "sha256": "3574f826b313c796c97b7e66cc9166131bb4bc7f5a17e483e66ed7ae446fa02a"
+    },
+    {
+      "id": "video:nDjjfaAN2hQ",
+      "kind": "video",
+      "path": "downloads/motivational/estate-cinematic-motivation/clips/nDjjfaAN2hQ_part01.mp4",
+      "paths": [
+        "downloads/motivational/estate-cinematic-motivation/clips/nDjjfaAN2hQ_part01.mp4",
+        "downloads/motivational/estate-cinematic-motivation/clips/nDjjfaAN2hQ_part02.mp4",
+        "downloads/motivational/estate-cinematic-motivation/clips/nDjjfaAN2hQ_part03.mp4"
+      ],
+      "slug": "nDjjfaAN2hQ",
+      "title": "nDjjfaAN2hQ",
+      "youtube_id": "nDjjfaAN2hQ",
+      "sha256": "a7367e18bf9991e22c1ca920899b2833b24ad9ddcdef4e1765ed5d361bb3c947"
+    },
+    {
+      "id": "video:t4pJLiNIzqo",
+      "kind": "video",
+      "path": "downloads/motivational/estate-cinematic-motivation/clips/t4pJLiNIzqo_part01.mp4",
+      "paths": [
+        "downloads/motivational/estate-cinematic-motivation/clips/t4pJLiNIzqo_part01.mp4",
+        "downloads/motivational/estate-cinematic-motivation/clips/t4pJLiNIzqo_part02.mp4",
+        "downloads/motivational/estate-cinematic-motivation/clips/t4pJLiNIzqo_part03.mp4"
+      ],
+      "slug": "t4pJLiNIzqo",
+      "title": "t4pJLiNIzqo",
+      "youtube_id": "t4pJLiNIzqo",
+      "sha256": "d0dad38dca0853aafaeecbaee135b6490417efbf87dd31ca6b4c785cfc22732e"
+    },
+    {
+      "id": "video:y9j-BL5ocW8",
+      "kind": "video",
+      "path": "downloads/motivational/estate-cinematic-motivation/clips/y9j-BL5ocW8_part01.mp4",
+      "paths": [
+        "downloads/motivational/estate-cinematic-motivation/clips/y9j-BL5ocW8_part01.mp4",
+        "downloads/motivational/estate-cinematic-motivation/clips/y9j-BL5ocW8_part02.mp4",
+        "downloads/motivational/estate-cinematic-motivation/clips/y9j-BL5ocW8_part03.mp4"
+      ],
+      "slug": "y9j-BL5ocW8",
+      "title": "y9j-BL5ocW8",
+      "youtube_id": "y9j-BL5ocW8",
+      "sha256": "09e498a259ea4fd8b74f65d9689decdbabb72f8e50a3f694b37dcae109a61886"
+    },
+    {
+      "id": "video:estate-cinematic-motivation-motivation",
+      "kind": "video",
+      "path": "downloads/motivational/estate-cinematic-motivation/output/estate-cinematic-motivation-motivation.mp4",
+      "paths": [
+        "downloads/motivational/estate-cinematic-motivation/output/estate-cinematic-motivation-motivation.mp4"
+      ],
+      "slug": "estate-cinematic-motivation-motivation",
+      "title": "estate-cinematic-motivation-motivation",
+      "youtube_id": null,
+      "sha256": "456cd3835a5f97586f88cef5103b4c0467dbf8aa027cd27cccd28d12645fe873"
+    },
+    {
+      "id": "video:2v_7UH_nLv4",
+      "kind": "video",
+      "path": "downloads/motivational/mansion-exterior-motivation/clips/2v_7UH_nLv4_part01.mp4",
+      "paths": [
+        "downloads/motivational/mansion-exterior-motivation/clips/2v_7UH_nLv4_part01.mp4",
+        "downloads/motivational/mansion-exterior-motivation/clips/2v_7UH_nLv4_part02.mp4",
+        "downloads/motivational/mansion-exterior-motivation/clips/2v_7UH_nLv4_part03.mp4"
+      ],
+      "slug": "2v_7UH_nLv4",
+      "title": "2v_7UH_nLv4",
+      "youtube_id": "2v_7UH_nLv4",
+      "sha256": "1f2b0cce8a4c4387cb677ac903ebabd5373be32bc27faf2a4c0516d9db635a62"
+    },
+    {
+      "id": "video:4jnzf1yj48M",
+      "kind": "video",
+      "path": "downloads/motivational/mansion-exterior-motivation/clips/4jnzf1yj48M_part01.mp4",
+      "paths": [
+        "downloads/motivational/mansion-exterior-motivation/clips/4jnzf1yj48M_part01.mp4",
+        "downloads/motivational/mansion-exterior-motivation/clips/4jnzf1yj48M_part02.mp4",
+        "downloads/motivational/mansion-exterior-motivation/clips/4jnzf1yj48M_part03.mp4"
+      ],
+      "slug": "4jnzf1yj48M",
+      "title": "4jnzf1yj48M",
+      "youtube_id": "4jnzf1yj48M",
+      "sha256": "b1baa7d5fabe4368734105b1ac533a9ca692962f2ee81de7046290545d4db897"
+    },
+    {
+      "id": "video:aO_kPW39um8",
+      "kind": "video",
+      "path": "downloads/motivational/mansion-exterior-motivation/clips/aO_kPW39um8_part01.mp4",
+      "paths": [
+        "downloads/motivational/mansion-exterior-motivation/clips/aO_kPW39um8_part01.mp4",
+        "downloads/motivational/mansion-exterior-motivation/clips/aO_kPW39um8_part02.mp4",
+        "downloads/motivational/mansion-exterior-motivation/clips/aO_kPW39um8_part03.mp4"
+      ],
+      "slug": "aO_kPW39um8",
+      "title": "aO_kPW39um8",
+      "youtube_id": "aO_kPW39um8",
+      "sha256": "f295f4b49708fe1fead4e2b9261854b783dc123c806bd0d2611094954e768f8a"
+    },
+    {
+      "id": "video:ec_fXMrD7Ow",
+      "kind": "video",
+      "path": "downloads/motivational/mansion-exterior-motivation/clips/ec_fXMrD7Ow_part01.mp4",
+      "paths": [
+        "downloads/motivational/mansion-exterior-motivation/clips/ec_fXMrD7Ow_part01.mp4",
+        "downloads/motivational/mansion-exterior-motivation/clips/ec_fXMrD7Ow_part02.mp4",
+        "downloads/motivational/mansion-exterior-motivation/clips/ec_fXMrD7Ow_part03.mp4"
+      ],
+      "slug": "ec_fXMrD7Ow",
+      "title": "ec_fXMrD7Ow",
+      "youtube_id": "ec_fXMrD7Ow",
+      "sha256": "3e5228539d9acb0714cfe986be67e132e806cd9105df125c430dd16907d85eb8"
+    },
+    {
+      "id": "video:iJb8P2fD15E",
+      "kind": "video",
+      "path": "downloads/motivational/mansion-exterior-motivation/clips/iJb8P2fD15E_part01.mp4",
+      "paths": [
+        "downloads/motivational/mansion-exterior-motivation/clips/iJb8P2fD15E_part01.mp4",
+        "downloads/motivational/mansion-exterior-motivation/clips/iJb8P2fD15E_part02.mp4",
+        "downloads/motivational/mansion-exterior-motivation/clips/iJb8P2fD15E_part03.mp4"
+      ],
+      "slug": "iJb8P2fD15E",
+      "title": "iJb8P2fD15E",
+      "youtube_id": "iJb8P2fD15E",
+      "sha256": "100c48c649c343c94513325bcdab94701ba6c5cbc9601d5a4a3e9450c8214ebb"
+    },
+    {
+      "id": "video:mJVuZiK9a6I",
+      "kind": "video",
+      "path": "downloads/motivational/mansion-exterior-motivation/clips/mJVuZiK9a6I_part01.mp4",
+      "paths": [
+        "downloads/motivational/mansion-exterior-motivation/clips/mJVuZiK9a6I_part01.mp4",
+        "downloads/motivational/mansion-exterior-motivation/clips/mJVuZiK9a6I_part02.mp4",
+        "downloads/motivational/mansion-exterior-motivation/clips/mJVuZiK9a6I_part03.mp4"
+      ],
+      "slug": "mJVuZiK9a6I",
+      "title": "mJVuZiK9a6I",
+      "youtube_id": "mJVuZiK9a6I",
+      "sha256": "d2592621d02b24d9609d8510711b1b8e0df4f80046de4eccedd5a18a843d8908"
+    },
+    {
+      "id": "video:mansion-exterior-motivation-motivation",
+      "kind": "video",
+      "path": "downloads/motivational/mansion-exterior-motivation/output/mansion-exterior-motivation-motivation.mp4",
+      "paths": [
+        "downloads/motivational/mansion-exterior-motivation/output/mansion-exterior-motivation-motivation.mp4"
+      ],
+      "slug": "mansion-exterior-motivation-motivation",
+      "title": "mansion-exterior-motivation-motivation",
+      "youtube_id": null,
+      "sha256": "784717ee63f5fae9386bcd838e77b8e977a260a7bfde6ff6641c3572b145f3a1"
+    },
+    {
+      "id": "video:4Uoiqlm_C2Q",
+      "kind": "video",
+      "path": "downloads/motivational/mansion-tour-motivation/clips/4Uoiqlm_C2Q_part01.mp4",
+      "paths": [
+        "downloads/motivational/mansion-tour-motivation/clips/4Uoiqlm_C2Q_part01.mp4",
+        "downloads/motivational/mansion-tour-motivation/clips/4Uoiqlm_C2Q_part02.mp4",
+        "downloads/motivational/mansion-tour-motivation/clips/4Uoiqlm_C2Q_part03.mp4"
+      ],
+      "slug": "4Uoiqlm_C2Q",
+      "title": "4Uoiqlm_C2Q",
+      "youtube_id": "4Uoiqlm_C2Q",
+      "sha256": "99dfe77c613a1a5b88e533b3df80a9bcb00f64d418f6970123fd2a0c279f4a91"
+    },
+    {
+      "id": "video:idJthveed1M",
+      "kind": "video",
+      "path": "downloads/motivational/mansion-tour-motivation/clips/idJthveed1M_part01.mp4",
+      "paths": [
+        "downloads/motivational/mansion-tour-motivation/clips/idJthveed1M_part01.mp4",
+        "downloads/motivational/mansion-tour-motivation/clips/idJthveed1M_part02.mp4",
+        "downloads/motivational/mansion-tour-motivation/clips/idJthveed1M_part03.mp4"
+      ],
+      "slug": "idJthveed1M",
+      "title": "idJthveed1M",
+      "youtube_id": "idJthveed1M",
+      "sha256": "090642e51e15339594927c8d23cd16e234551ce5d4a8ed7b643391ae4c7da747"
+    },
+    {
+      "id": "video:Kvrk12W5qs8",
+      "kind": "video",
+      "path": "downloads/motivational/mansion-tour-motivation/clips/Kvrk12W5qs8_part01.mp4",
+      "paths": [
+        "downloads/motivational/mansion-tour-motivation/clips/Kvrk12W5qs8_part01.mp4",
+        "downloads/motivational/mansion-tour-motivation/clips/Kvrk12W5qs8_part02.mp4",
+        "downloads/motivational/mansion-tour-motivation/clips/Kvrk12W5qs8_part03.mp4"
+      ],
+      "slug": "Kvrk12W5qs8",
+      "title": "Kvrk12W5qs8",
+      "youtube_id": "Kvrk12W5qs8",
+      "sha256": "01b7dd161911e79b5b099ecdb89f05a3b0db44ff7de19bb3a294b654eb21cd71"
+    },
+    {
+      "id": "video:vx09_4cEzlM",
+      "kind": "video",
+      "path": "downloads/motivational/mansion-tour-motivation/clips/vx09_4cEzlM_part01.mp4",
+      "paths": [
+        "downloads/motivational/mansion-tour-motivation/clips/vx09_4cEzlM_part01.mp4",
+        "downloads/motivational/mansion-tour-motivation/clips/vx09_4cEzlM_part02.mp4",
+        "downloads/motivational/mansion-tour-motivation/clips/vx09_4cEzlM_part03.mp4"
+      ],
+      "slug": "vx09_4cEzlM",
+      "title": "vx09_4cEzlM",
+      "youtube_id": "vx09_4cEzlM",
+      "sha256": "c63e8538e1ab63e17fd17c17b22eff0506523d969dc17147e9cdd4ce1fd8f9c8"
+    },
+    {
+      "id": "video:-Pkj1qIcK2Y",
+      "kind": "video",
+      "path": "downloads/motivational/porsche-gt3rs-motivation/clips/-Pkj1qIcK2Y_part01.mp4",
+      "paths": [
+        "downloads/motivational/porsche-gt3rs-motivation/clips/-Pkj1qIcK2Y_part01.mp4",
+        "downloads/motivational/porsche-gt3rs-motivation/clips/-Pkj1qIcK2Y_part02.mp4",
+        "downloads/motivational/porsche-gt3rs-motivation/clips/-Pkj1qIcK2Y_part03.mp4"
+      ],
+      "slug": "-Pkj1qIcK2Y",
+      "title": "-Pkj1qIcK2Y",
+      "youtube_id": "-Pkj1qIcK2Y",
+      "sha256": "63fa612691ebb9545d181b261953677b3edd33eb8e2550e21278bb879622415c"
+    },
+    {
+      "id": "video:8FpXGOd_8u4",
+      "kind": "video",
+      "path": "downloads/motivational/porsche-gt3rs-motivation/clips/8FpXGOd_8u4_part01.mp4",
+      "paths": [
+        "downloads/motivational/porsche-gt3rs-motivation/clips/8FpXGOd_8u4_part01.mp4",
+        "downloads/motivational/porsche-gt3rs-motivation/clips/8FpXGOd_8u4_part02.mp4",
+        "downloads/motivational/porsche-gt3rs-motivation/clips/8FpXGOd_8u4_part03.mp4"
+      ],
+      "slug": "8FpXGOd_8u4",
+      "title": "8FpXGOd_8u4",
+      "youtube_id": "8FpXGOd_8u4",
+      "sha256": "b6ba7538923fdb86fa11d294c5ebbd23d81b950be89a90ac39cf9cb301310c27"
+    },
+    {
+      "id": "video:_BXXy86HmFI",
+      "kind": "video",
+      "path": "downloads/motivational/porsche-gt3rs-motivation/clips/_BXXy86HmFI_part01.mp4",
+      "paths": [
+        "downloads/motivational/porsche-gt3rs-motivation/clips/_BXXy86HmFI_part01.mp4",
+        "downloads/motivational/porsche-gt3rs-motivation/clips/_BXXy86HmFI_part02.mp4",
+        "downloads/motivational/porsche-gt3rs-motivation/clips/_BXXy86HmFI_part03.mp4"
+      ],
+      "slug": "_BXXy86HmFI",
+      "title": "_BXXy86HmFI",
+      "youtube_id": "_BXXy86HmFI",
+      "sha256": "820c3eee775e6d7125c89a445bd9de5facac973c658f3013fe0efcd986673e3d"
+    },
+    {
+      "id": "video:_XqUpE06pyc",
+      "kind": "video",
+      "path": "downloads/motivational/porsche-gt3rs-motivation/clips/_XqUpE06pyc_part01.mp4",
+      "paths": [
+        "downloads/motivational/porsche-gt3rs-motivation/clips/_XqUpE06pyc_part01.mp4",
+        "downloads/motivational/porsche-gt3rs-motivation/clips/_XqUpE06pyc_part02.mp4",
+        "downloads/motivational/porsche-gt3rs-motivation/clips/_XqUpE06pyc_part03.mp4"
+      ],
+      "slug": "_XqUpE06pyc",
+      "title": "_XqUpE06pyc",
+      "youtube_id": "_XqUpE06pyc",
+      "sha256": "7e87311a5ede84f1b298afe40ec900b76571d8ccb41b74cc88b5828f52ad65b6"
+    },
+    {
+      "id": "video:lQieyv0OE6I",
+      "kind": "video",
+      "path": "downloads/motivational/porsche-gt3rs-motivation/clips/lQieyv0OE6I_part01.mp4",
+      "paths": [
+        "downloads/motivational/porsche-gt3rs-motivation/clips/lQieyv0OE6I_part01.mp4",
+        "downloads/motivational/porsche-gt3rs-motivation/clips/lQieyv0OE6I_part02.mp4",
+        "downloads/motivational/porsche-gt3rs-motivation/clips/lQieyv0OE6I_part03.mp4"
+      ],
+      "slug": "lQieyv0OE6I",
+      "title": "lQieyv0OE6I",
+      "youtube_id": "lQieyv0OE6I",
+      "sha256": "e11b4d93fe45e00a31258a1c0dc6ed928873c498f2377df76842a8595d473367"
+    },
+    {
+      "id": "video:porsche-gt3rs-motivation-motivation",
+      "kind": "video",
+      "path": "downloads/motivational/porsche-gt3rs-motivation/output/porsche-gt3rs-motivation-motivation.mp4",
+      "paths": [
+        "downloads/motivational/porsche-gt3rs-motivation/output/porsche-gt3rs-motivation-motivation.mp4"
+      ],
+      "slug": "porsche-gt3rs-motivation-motivation",
+      "title": "porsche-gt3rs-motivation-motivation",
+      "youtube_id": null,
+      "sha256": "8a70c42cdcd187648943958c61017b89d984f85e3076cc7755ce78a8442aac1d"
+    },
+    {
+      "id": "video:NDeHsUtUOB4",
+      "kind": "video",
+      "role": "speech",
+      "path": "",
+      "paths": [],
+      "slug": "NDeHsUtUOB4",
+      "title": "Raw Action Solves Everything - Top G Andrew Tate - Motivational Speech",
+      "youtube_id": "NDeHsUtUOB4",
+      "sha256": "",
+      "transcript": "i always knew the answer to everything is raw action the answer to everything has always been raw action my dad had a tweet about this he said that raw action solves all and he used to say this i give you an example if you're a farmer and you need rain for your crop and there's no rain you can sit there and say there's no rain we're all going to starve or you can stand up and do a rain dance now will your rain dance work perhaps not perhaps the rain won't come but i would argue that you're better off standing up doing that rain dance than just sitting there waiting to die you have to do something raw action solves so when i was broke i was never like ah i'm poor i'm poor what do i do it was i'm poor what must i have to do something i just if i was broke i'd go for a run that's why i was such a great fighter if i was broke i'd sit there and go i'm actually poor how do i make money don't know how can i make where can i get some cash don't know what work can i do don't know oh let just go for a run then and i just go for three mile run you just have to say well i have to do something i can't just sit still and die a lot of people are happy to just sit still and die or can go to sleep and take a nap well if that's what you want to do then you can say a loser that's fine i'm glad there are losers because if everyone had lamborghinis my lamborghini wouldn't be fun to show off i need you to look at it and feel the deep pain in your heart of regret and failure that's the whole point of it i need to drive my bugatti and everyone be looking at it going i'll never have one of those and i can get all their energy and feel it all and it makes me happy fantastic so you can stay at home and do nothing but when i was poor i had to go for a run i couldn't sit still or lift weights or do something i couldn't even sleep",
+      "transcript_hash": "5046bd94d6201860bb26d31c73f6a5815964ec17606047a6d7d4abd17a0da476",
+      "transcript_tokens": [
+        "action",
+        "actually",
+        "always",
+        "answer",
+        "argue",
+        "better",
+        "broke",
+        "bugatti",
+        "can't",
+        "cash",
+        "come",
+        "couldn't",
+        "crop",
+        "dad",
+        "dance",
+        "deep",
+        "die",
+        "doing",
+        "don't",
+        "drive",
+        "energy",
+        "everyone",
+        "everything",
+        "example",
+        "failure",
+        "fantastic",
+        "farmer",
+        "feel",
+        "fighter",
+        "fine",
+        "fun",
+        "give",
+        "glad",
+        "going",
+        "great",
+        "happy",
+        "heart",
+        "home",
+        "i'd",
+        "i'll",
+        "i'm",
+        "lamborghini",
+        "lamborghinis",
+        "let",
+        "lift",
+        "looking",
+        "loser",
+        "losers",
+        "lot",
+        "make",
+        "makes",
+        "mile",
+        "money",
+        "must",
+        "nap",
+        "need",
+        "nothing",
+        "pain",
+        "people",
+        "perhaps",
+        "point",
+        "poor",
+        "rain",
+        "raw",
+        "regret",
+        "run",
+        "say",
+        "show",
+        "sit",
+        "sitting",
+        "sleep",
+        "solves",
+        "some",
+        "something",
+        "stand",
+        "standing",
+        "starve",
+        "stay",
+        "such",
+        "take",
+        "than",
+        "that's",
+        "there's",
+        "those",
+        "three",
+        "tweet",
+        "used",
+        "waiting",
+        "want",
+        "we're",
+        "weights",
+        "well",
+        "whole",
+        "will",
+        "won't",
+        "work",
+        "wouldn't",
+        "you're"
+      ],
+      "transcript_shingles": [
+        "i always knew the answer",
+        "knew the answer to everything",
+        "answer to everything is raw",
+        "is raw action the answer",
+        "action the answer to everything",
+        "to everything has always been",
+        "has always been raw action",
+        "raw action my dad had",
+        "my dad had a tweet",
+        "a tweet about this he",
+        "about this he said that",
+        "he said that raw action",
+        "raw action solves all and",
+        "solves all and he used",
+        "he used to say this",
+        "to say this i give",
+        "i give you an example",
+        "you an example if you're",
+        "if you're a farmer and",
+        "a farmer and you need",
+        "you need rain for your",
+        "rain for your crop and",
+        "your crop and there's no",
+        "there's no rain you can",
+        "rain you can sit there",
+        "sit there and say there's",
+        "and say there's no rain",
+        "no rain we're all going",
+        "we're all going to starve",
+        "to starve or you can",
+        "or you can stand up",
+        "can stand up and do",
+        "and do a rain dance",
+        "a rain dance now will",
+        "now will your rain dance",
+        "your rain dance work perhaps",
+        "work perhaps not perhaps the",
+        "not perhaps the rain won't",
+        "rain won't come but i",
+        "come but i would argue",
+        "would argue that you're better",
+        "that you're better off standing",
+        "better off standing up doing",
+        "up doing that rain dance",
+        "that rain dance than just",
+        "than just sitting there waiting",
+        "sitting there waiting to die",
+        "to die you have to",
+        "you have to do something",
+        "do something raw action solves",
+        "raw action solves so when",
+        "solves so when i was",
+        "i was broke i was",
+        "broke i was never like",
+        "never like ah i'm poor",
+        "ah i'm poor i'm poor",
+        "i'm poor what do i",
+        "what do i do it",
+        "do it was i'm poor",
+        "was i'm poor what must",
+        "what must i have to",
+        "i have to do something",
+        "to do something i just",
+        "i just if i was",
+        "if i was broke i'd",
+        "broke i'd go for a",
+        "go for a run that's",
+        "run that's why i was",
+        "why i was such a",
+        "such a great fighter if",
+        "great fighter if i was",
+        "if i was broke i'd",
+        "broke i'd sit there and",
+        "sit there and go i'm",
+        "go i'm actually poor how",
+        "actually poor how do i",
+        "do i make money don't",
+        "make money don't know how",
+        "know how can i make",
+        "can i make where can",
+        "make where can i get",
+        "i get some cash don't",
+        "some cash don't know what",
+        "know what work can i",
+        "work can i do don't",
+        "do don't know oh let",
+        "know oh let just go",
+        "just go for a run",
+        "for a run then and",
+        "then and i just go",
+        "i just go for three",
+        "go for three mile run",
+        "mile run you just have",
+        "you just have to say",
+        "to say well i have",
+        "well i have to do",
+        "to do something i can't",
+        "something i can't just sit",
+        "just sit still and die",
+        "still and die a lot",
+        "die a lot of people",
+        "of people are happy to",
+        "are happy to just sit",
+        "just sit still and die",
+        "still and die or can",
+        "or can go to sleep",
+        "go to sleep and take",
+        "and take a nap well",
+        "a nap well if that's",
+        "if that's what you want",
+        "what you want to do",
+        "want to do then you",
+        "then you can say a",
+        "can say a loser that's",
+        "loser that's fine i'm glad",
+        "fine i'm glad there are",
+        "there are losers because if",
+        "losers because if everyone had",
+        "everyone had lamborghinis my lamborghini",
+        "lamborghinis my lamborghini wouldn't be",
+        "lamborghini wouldn't be fun to",
+        "fun to show off i",
+        "show off i need you",
+        "need you to look at",
+        "to look at it and",
+        "it and feel the deep",
+        "feel the deep pain in",
+        "pain in your heart of",
+        "your heart of regret and",
+        "regret and failure that's the",
+        "failure that's the whole point",
+        "the whole point of it",
+        "of it i need to",
+        "i need to drive my",
+        "drive my bugatti and everyone",
+        "bugatti and everyone be looking",
+        "be looking at it going",
+        "at it going i'll never",
+        "i'll never have one of",
+        "have one of those and",
+        "of those and i can",
+        "i can get all their",
+        "get all their energy and",
+        "energy and feel it all",
+        "feel it all and it",
+        "and it makes me happy",
+        "makes me happy fantastic so",
+        "fantastic so you can stay",
+        "you can stay at home",
+        "at home and do nothing",
+        "and do nothing but when",
+        "nothing but when i was",
+        "i was poor i had",
+        "poor i had to go",
+        "to go for a run",
+        "for a run i couldn't",
+        "i couldn't sit still or",
+        "sit still or lift weights",
+        "lift weights or do something",
+        "or do something i couldn't"
+      ],
+      "speech_source_hash": "c501b2b6ee0aa2a059d03af21dd1109594318a4d7e2405f344b9578f772d86fd"
     }
   ],
   "stories": [

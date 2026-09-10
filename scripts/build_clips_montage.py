@@ -4,15 +4,42 @@
 from __future__ import annotations
 
 import argparse
+import math
 import random
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
+from broll_frame_gate import clean_spans, longest_clean_span, scan_clip_local, score_window
 from build_stills_slideshow import burn_captions
 
 FPS = 30
+DEFAULT_PLAYBACK_SPEED = 0.80
+BASELINE_AUDIO_SECONDS = 60.0
+BASELINE_SEGMENT_SECONDS = 12.0
+MIN_SEGMENT_SECONDS = 8.0
+MAX_SEGMENT_SECONDS = 18.0
+
+
+def segment_length_for_duration(duration: float) -> float:
+    """Scale montage beat length with speech duration (60s -> 12s, 90s -> 18s)."""
+    if duration <= 0:
+        return BASELINE_SEGMENT_SECONDS
+    scaled = BASELINE_SEGMENT_SECONDS * (duration / BASELINE_AUDIO_SECONDS)
+    return max(MIN_SEGMENT_SECONDS, min(MAX_SEGMENT_SECONDS, scaled))
+
+
+def montage_beats_needed(*, duration: float, segment_length: float, layout: str) -> int:
+    per_beat = max(segment_length, 0.1)
+    beats = max(1, math.ceil(duration / per_beat))
+    if layout != "single":
+        beats *= 2
+    return beats
+
+
+def min_unique_clips_needed(*, duration: float, segment_length: float, layout: str) -> int:
+    return montage_beats_needed(duration=duration, segment_length=segment_length, layout=layout)
 
 
 def _even(value: int) -> int:
@@ -61,18 +88,135 @@ def _scale_crop_filter(*, width: int, height: int, grade: bool) -> str:
     return chain + ",format=yuv420p"
 
 
+def _source_id(clip: Path) -> str:
+    stem = clip.stem
+    if "_part" in stem:
+        return stem.rsplit("_part", 1)[0]
+    return stem
+
+
+def _group_clips_by_source(clips: list[Path]) -> dict[str, list[Path]]:
+    pools: dict[str, list[Path]] = {}
+    for clip in clips:
+        pools.setdefault(_source_id(clip), []).append(clip)
+    return pools
+
+
+class _ClipPicker:
+    """Pick montage clips once each — no file repeats within one render."""
+
+    def __init__(self, clips: list[Path], rng: random.Random) -> None:
+        self.rng = rng
+        self.all_clips = list(clips)
+        self.pools = _group_clips_by_source(clips)
+        self.unused_files = set(clips)
+        self._unused_sources = list(self.pools.keys())
+        rng.shuffle(self._unused_sources)
+
+    def _reshuffle_sources(self) -> None:
+        self._unused_sources = [
+            source_id
+            for source_id, parts in self.pools.items()
+            if any(part in self.unused_files for part in parts)
+        ]
+        self.rng.shuffle(self._unused_sources)
+
+    def pick(self, *, exclude: set[Path] | None = None) -> Path:
+        exclude = exclude or set()
+        available_files = [clip for clip in self.unused_files if clip not in exclude]
+        if not available_files:
+            raise RuntimeError(
+                "Not enough unique B-roll clips for this video length. "
+                "Download more sources or use a shorter speech."
+            )
+
+        excluded_sources = {_source_id(item) for item in exclude}
+        unused_sources = {
+            _source_id(clip)
+            for clip in available_files
+            if _source_id(clip) not in excluded_sources
+        }
+        if unused_sources:
+            if not self._unused_sources or not unused_sources.intersection(self._unused_sources):
+                self._reshuffle_sources()
+            source_id = next(sid for sid in self._unused_sources if sid in unused_sources)
+            self._unused_sources.remove(source_id)
+            parts = [
+                part
+                for part in self.pools[source_id]
+                if part in self.unused_files and part not in exclude
+            ]
+            if parts:
+                clip = self.rng.choice(parts)
+                self.unused_files.discard(clip)
+                return clip
+
+        clip = self.rng.choice(available_files)
+        self.unused_files.discard(clip)
+        return clip
+
+    def used_clips(self) -> set[Path]:
+        return {clip for clip in self.all_clips if clip not in self.unused_files}
+
+
+def _window_in_span(
+    span: tuple[float, float],
+    needed: float,
+    rng: random.Random,
+) -> tuple[float, float]:
+    start, end = span
+    span_len = max(end - start, 0.0)
+    if span_len <= needed + 0.05:
+        return start, span_len
+    slack = span_len - needed
+    return start + rng.uniform(0.0, slack), needed
+
+
 def _pick_segment(
     clip: Path,
     *,
     segment_length: float,
     rng: random.Random,
-) -> tuple[float, float]:
+    subject: str = "",
+    source_needed: float | None = None,
+    strict: bool = False,
+    use_vision: bool = False,
+) -> tuple[float, float] | None:
     duration = probe_duration(clip)
-    if duration <= segment_length + 0.25:
-        return 0.0, min(segment_length, duration)
-    max_start = max(duration - segment_length - 0.1, 0.0)
-    start = rng.uniform(0.0, max_start)
-    return start, segment_length
+    needed = source_needed if source_needed is not None else segment_length
+    samples = scan_clip_local(clip, duration=duration)
+    min_length = min(needed, duration, 2.5)
+    spans = clean_spans(samples, min_length=min_length)
+    if not spans:
+        return None
+
+    fit = [span for span in spans if span[1] - span[0] >= min(needed, duration) - 0.05]
+    if fit:
+        window_start, window_len = _window_in_span(rng.choice(fit), min(needed, duration), rng)
+    else:
+        longest = longest_clean_span(samples, min_length=min_length)
+        if longest is None:
+            return None
+        window_start, window_len = _window_in_span(longest, min(needed, duration), rng)
+
+    report = score_window(
+        clip,
+        start=window_start,
+        duration=window_len,
+        clip_duration=duration,
+        subject=subject,
+        strict=strict,
+        use_vision=use_vision,
+    )
+    if not report["ok"]:
+        return None
+    return window_start, window_len
+
+
+def _playback_chain(playback_speed: float) -> str:
+    if abs(playback_speed - 1.0) < 0.01:
+        return ""
+    return f"setpts=PTS/{playback_speed},"
 
 
 def _export_segment(
@@ -84,8 +228,11 @@ def _export_segment(
     width: int,
     height: int,
     grade: bool,
+    playback_speed: float = 1.0,
+    output_duration: float | None = None,
 ) -> None:
-    vf = _scale_crop_filter(width=width, height=height, grade=grade)
+    vf = _playback_chain(playback_speed) + _scale_crop_filter(width=width, height=height, grade=grade)
+    frames = _duration_to_frames(output_duration if output_duration is not None else duration)
     cmd = [
         "ffmpeg",
         "-y",
@@ -93,8 +240,10 @@ def _export_segment(
         str(start),
         "-i",
         str(source),
+        "-t",
+        str(duration),
         "-frames:v",
-        str(_duration_to_frames(duration)),
+        str(frames),
         "-an",
         "-vf",
         vf,
@@ -257,6 +406,44 @@ def _mux_audio(
     subprocess.run(cmd, check=True, capture_output=True)
 
 
+def _source_needed(output_duration: float, playback_speed: float) -> float:
+    return max(0.4, output_duration * playback_speed)
+
+
+def _pick_passing_window(
+    picker: _ClipPicker,
+    *,
+    segment_length: float,
+    rng: random.Random,
+    subject: str,
+    source_needed: float,
+    strict: bool,
+    use_vision: bool,
+    exclude: set[Path] | None = None,
+) -> tuple[Path, float, float]:
+    tried: set[Path] = set(exclude or ())
+    attempts = 0
+    limit = max(len(picker.all_clips) * 2, 6)
+    while attempts < limit:
+        clip = picker.pick(exclude=tried)
+        picked = _pick_segment(
+            clip,
+            segment_length=segment_length,
+            rng=rng,
+            subject=subject,
+            source_needed=source_needed,
+            strict=strict,
+            use_vision=use_vision,
+        )
+        attempts += 1
+        if picked:
+            return clip, picked[0], picked[1]
+        tried.add(clip)
+        if len(tried) >= len(picker.all_clips):
+            break
+    raise RuntimeError("No B-roll window passed the subject/frame gate.")
+
+
 def build_montage(
     *,
     clips_dir: Path,
@@ -270,7 +457,10 @@ def build_montage(
     height: int,
     audio_start: float,
     audio_duration: float | None,
-) -> None:
+    subject: str = "",
+    playback_speed: float = DEFAULT_PLAYBACK_SPEED,
+    use_vision: bool = True,
+) -> set[Path]:
     clips = sorted(clips_dir.glob("*.mp4"))
     if not clips:
         raise FileNotFoundError(f"No .mp4 clips in {clips_dir}")
@@ -283,7 +473,19 @@ def build_montage(
     if target_duration <= 0:
         raise ValueError("audio_duration must be positive")
 
+    needed_clips = min_unique_clips_needed(
+        duration=target_duration,
+        segment_length=segment_length,
+        layout=layout,
+    )
+    if len(clips) < needed_clips:
+        raise RuntimeError(
+            f"Need at least {needed_clips} unique B-roll clips for "
+            f"{target_duration:.0f}s at {segment_length:.1f}s beats, have {len(clips)}."
+        )
+
     rng = random.Random(seed)
+    picker = _ClipPicker(clips, rng)
     output.parent.mkdir(parents=True, exist_ok=True)
 
     segments: list[Path] = []
@@ -295,25 +497,53 @@ def build_montage(
         while accumulated < target_duration - 0.02:
             remaining = target_duration - accumulated
             this_duration = min(segment_length, remaining)
+            needed = _source_needed(this_duration, playback_speed)
+            strict = segment_index == 0
+            vision = use_vision and segment_index < 2
 
             if layout == "single":
-                clip = rng.choice(clips)
-                start, _ = _pick_segment(clip, segment_length=this_duration, rng=rng)
+                clip, start, source_len = _pick_passing_window(
+                    picker,
+                    segment_length=this_duration,
+                    rng=rng,
+                    subject=subject,
+                    source_needed=needed,
+                    strict=strict,
+                    use_vision=vision,
+                )
+                out_len = min(this_duration, source_len / max(playback_speed, 0.05))
                 segment_path = tmp_dir / f"seg_{segment_index:04d}.mp4"
                 _export_segment(
                     clip,
                     segment_path,
                     start=start,
-                    duration=this_duration,
+                    duration=source_len,
                     width=width,
                     height=height,
                     grade=grade,
+                    playback_speed=playback_speed,
+                    output_duration=out_len,
                 )
             else:
-                left = rng.choice(clips)
-                right = rng.choice(clips)
-                left_start, _ = _pick_segment(left, segment_length=this_duration, rng=rng)
-                right_start, _ = _pick_segment(right, segment_length=this_duration, rng=rng)
+                left, left_start, left_len = _pick_passing_window(
+                    picker,
+                    segment_length=this_duration,
+                    rng=rng,
+                    subject=subject,
+                    source_needed=needed,
+                    strict=strict,
+                    use_vision=vision,
+                )
+                right, right_start, right_len = _pick_passing_window(
+                    picker,
+                    segment_length=this_duration,
+                    rng=rng,
+                    subject=subject,
+                    source_needed=needed,
+                    strict=strict,
+                    use_vision=vision,
+                    exclude={left},
+                )
                 segment_path = tmp_dir / f"seg_{segment_index:04d}.mp4"
                 _export_split_segment(
                     left,
@@ -321,7 +551,7 @@ def build_montage(
                     segment_path,
                     left_start=left_start,
                     right_start=right_start,
-                    duration=this_duration,
+                    duration=min(left_len, right_len),
                     width=width,
                     height=height,
                     layout=layout,
@@ -343,6 +573,7 @@ def build_montage(
             audio_start=audio_start,
             audio_duration=target_duration,
         )
+    return picker.used_clips()
 
 
 def main() -> int:
@@ -350,7 +581,20 @@ def main() -> int:
     parser.add_argument("--clips", type=Path, required=True, help="Directory of source .mp4 clips")
     parser.add_argument("--audio", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--segment-length", type=float, default=4.0, help="Seconds per montage beat")
+    parser.add_argument(
+        "--segment-length",
+        type=float,
+        default=None,
+        help="Seconds per montage beat (default: scales with audio length)",
+    )
+    parser.add_argument(
+        "--playback-speed",
+        type=float,
+        default=DEFAULT_PLAYBACK_SPEED,
+        help="Clip playback rate. 0.80 = slower motion",
+    )
+    parser.add_argument("--subject", default="", help="Required on-screen subject, e.g. porsche gt3rs")
+    parser.add_argument("--no-vision", action="store_true", help="Skip optional vision subject check")
     parser.add_argument(
         "--layout",
         choices=("single", "split-v", "split-h"),
@@ -377,6 +621,11 @@ def main() -> int:
         audio_duration = probe_duration(args.audio) - args.audio_start
     else:
         audio_duration = args.audio_duration
+    segment_length = (
+        args.segment_length
+        if args.segment_length is not None
+        else segment_length_for_duration(audio_duration)
+    )
 
     try:
         temp_output = args.output
@@ -386,7 +635,7 @@ def main() -> int:
             clips_dir=args.clips,
             audio=args.audio,
             output=temp_output,
-            segment_length=args.segment_length,
+            segment_length=segment_length,
             layout=args.layout,
             grade=not args.no_grade,
             seed=args.seed,
@@ -394,6 +643,9 @@ def main() -> int:
             height=args.height,
             audio_start=args.audio_start,
             audio_duration=audio_duration,
+            subject=args.subject,
+            playback_speed=args.playback_speed,
+            use_vision=not args.no_vision,
         )
         if args.captions:
             if not args.captions.is_file():
@@ -410,7 +662,7 @@ def main() -> int:
                 word_by_word=word_by_word,
             )
             temp_output.unlink(missing_ok=True)
-    except (FileNotFoundError, ValueError, subprocess.CalledProcessError) as exc:
+    except (FileNotFoundError, RuntimeError, ValueError, subprocess.CalledProcessError) as exc:
         print(exc, file=sys.stderr)
         return 1
     print(f"Saved: {args.output}")

@@ -1,0 +1,490 @@
+#!/usr/bin/env python3
+"""Local B-roll frame gate: talking-head, title-card, empty, optional subject check."""
+
+from __future__ import annotations
+
+import base64
+import os
+import re
+import subprocess
+from io import BytesIO
+from pathlib import Path
+from typing import Iterable
+
+from PIL import Image
+
+WORD_RE = re.compile(r"[a-z0-9]+")
+ALNUM_RE = re.compile(r"[^a-z0-9]+")
+
+BROLL_STOP = {
+    "4k",
+    "8k",
+    "asmr",
+    "broll",
+    "cinematic",
+    "clip",
+    "clips",
+    "dark",
+    "drive",
+    "driving",
+    "footage",
+    "free",
+    "hd",
+    "luxury",
+    "motivation",
+    "motivational",
+    "music",
+    "night",
+    "no",
+    "raw",
+    "reel",
+    "reels",
+    "short",
+    "shorts",
+    "stock",
+    "tour",
+    "uhd",
+    "video",
+    "videos",
+}
+
+SUBJECT_ALIASES = {
+    "porsche": ("porsche", "gt3", "gt3rs", "911", "carrera", "gt2"),
+    "gt3rs": ("gt3rs", "gt3", "porsche"),
+    "gt3": ("gt3", "gt3rs", "porsche"),
+    "lambo": ("lambo", "lamborghini", "aventador", "huracan", "urus", "revuelto"),
+    "lamborghini": ("lambo", "lamborghini", "aventador", "huracan", "urus", "revuelto"),
+    "ferrari": ("ferrari", "sf90", "pista", "roma", "812"),
+    "yacht": ("yacht", "superyacht", "megayacht"),
+    "mansion": ("mansion", "estate", "villa"),
+    "villa": ("villa", "estate"),
+}
+
+TALKING_HEAD_LIMIT = 0.10
+TITLE_CARD_LIMIT = 0.58
+EMPTY_LIMIT = 0.86
+PASS_RATIO = 0.8
+SCAN_STEP = 1.0
+MIN_CLEAN_SPAN = 3.0
+VEHICLE_MID_VAR_MIN = 1800.0
+VEHICLE_WORDS = frozenset(
+    {
+        "911",
+        "aventador",
+        "car",
+        "carrera",
+        "ferrari",
+        "gt2",
+        "gt3",
+        "gt3rs",
+        "huracan",
+        "lambo",
+        "lamborghini",
+        "pista",
+        "porsche",
+        "revuelto",
+        "sf90",
+        "urus",
+    }
+)
+
+
+def subject_tokens(*parts: str) -> list[str]:
+    raw = " ".join(part.replace("-", " ").replace("_", " ") for part in parts if part)
+    found: list[str] = []
+    seen: set[str] = set()
+    for word in WORD_RE.findall(raw.lower()):
+        if word in BROLL_STOP or len(word) < 3:
+            continue
+        if word not in seen:
+            seen.add(word)
+            found.append(word)
+    if found:
+        return found
+    fallback = [word for word in WORD_RE.findall(raw.lower()) if len(word) > 2]
+    return list(dict.fromkeys(fallback))
+
+
+def _normalized(text: str) -> str:
+    return ALNUM_RE.sub("", (text or "").lower())
+
+
+def title_matches_subject(title: str, subjects: Iterable[str]) -> bool:
+    tokens = [item for item in subjects if item]
+    if not tokens:
+        return True
+    hay = (title or "").lower()
+    compact = _normalized(title)
+    for token in tokens:
+        aliases = SUBJECT_ALIASES.get(token, (token,))
+        for alias in aliases:
+            if alias in hay.split() or alias in hay or _normalized(alias) in compact:
+                return True
+    return False
+
+
+def _is_skin_pixel(r: int, g: int, b: int) -> bool:
+    if r < 60 or g < 40 or b < 20:
+        return False
+    if max(r, g, b) - min(r, g, b) < 15:
+        return False
+    if r <= g or r <= b:
+        return False
+    return (r - g) >= 15 and (r - b) >= 15
+
+
+def talking_head_score(png_bytes: bytes) -> float:
+    img = Image.open(BytesIO(png_bytes)).convert("RGB")
+    width, height = img.size
+    regions = (
+        (int(width * 0.20), int(width * 0.80), int(height * 0.08), int(height * 0.62)),
+        (int(width * 0.28), int(width * 0.72), int(height * 0.55), int(height * 0.92)),
+    )
+    skin_hits = 0
+    total = 0
+    for x0, x1, y0, y1 in regions:
+        for x in range(x0, x1, 2):
+            for y in range(y0, y1, 2):
+                r, g, b = img.getpixel((x, y))
+                if _is_skin_pixel(r, g, b):
+                    skin_hits += 1
+                total += 1
+    return skin_hits / max(total, 1)
+
+
+def title_card_score(png_bytes: bytes) -> float:
+    img = Image.open(BytesIO(png_bytes)).convert("RGB")
+    width, height = img.size
+    dark = 0
+    bright = 0
+    colors: set[tuple[int, int, int]] = set()
+    total = 0
+    for x in range(0, width, 4):
+        for y in range(0, height, 4):
+            r, g, b = img.getpixel((x, y))
+            luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
+            if luma < 28:
+                dark += 1
+            if luma > 230:
+                bright += 1
+            colors.add((r // 32, g // 32, b // 32))
+            total += 1
+    if total == 0:
+        return 1.0
+    extreme = (dark + bright) / total
+    variety = 1.0 - min(len(colors) / 40.0, 1.0)
+    return extreme * variety
+
+
+def empty_score(png_bytes: bytes) -> float:
+    img = Image.open(BytesIO(png_bytes)).convert("L")
+    width, height = img.size
+    values: list[int] = []
+    for x in range(0, width, 4):
+        for y in range(0, height, 4):
+            values.append(img.getpixel((x, y)))
+    if not values:
+        return 1.0
+    mean = sum(values) / len(values)
+    var = sum((value - mean) ** 2 for value in values) / len(values)
+    return max(0.0, 1.0 - (var / 1800.0))
+
+
+def wants_vehicle(subject: str) -> bool:
+    tokens = set(subject_tokens(subject))
+    for token in list(tokens):
+        tokens.update(SUBJECT_ALIASES.get(token, ()))
+    return bool(tokens & VEHICLE_WORDS)
+
+
+def _luma_var(png_bytes: bytes, *, x0: float, x1: float, y0: float, y1: float) -> float:
+    img = Image.open(BytesIO(png_bytes)).convert("RGB")
+    width, height = img.size
+    values: list[float] = []
+    for x in range(int(width * x0), max(int(width * x1), int(width * x0) + 1), 3):
+        for y in range(int(height * y0), max(int(height * y1), int(height * y0) + 1), 3):
+            r, g, b = img.getpixel((min(x, width - 1), min(y, height - 1)))
+            values.append(0.2126 * r + 0.7152 * g + 0.0722 * b)
+    if not values:
+        return 0.0
+    mean = sum(values) / len(values)
+    return sum((value - mean) ** 2 for value in values) / len(values)
+
+
+def vehicle_missing(png_bytes: bytes) -> bool:
+    mid_var = _luma_var(png_bytes, x0=0.20, x1=0.80, y0=0.35, y1=0.75)
+    return mid_var < VEHICLE_MID_VAR_MIN
+
+
+def frame_fail_reasons(png_bytes: bytes, subject: str = "") -> list[str]:
+    reasons: list[str] = []
+    if talking_head_score(png_bytes) >= TALKING_HEAD_LIMIT:
+        reasons.append("talking-head")
+    if title_card_score(png_bytes) >= TITLE_CARD_LIMIT:
+        reasons.append("title-card")
+    if empty_score(png_bytes) >= EMPTY_LIMIT:
+        reasons.append("empty")
+    if wants_vehicle(subject) and vehicle_missing(png_bytes):
+        reasons.append("missing-subject")
+    return reasons
+
+
+def extract_preview_frame(source: Path, timestamp: float) -> bytes | None:
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-ss",
+        f"{timestamp:.3f}",
+        "-i",
+        str(source),
+        "-frames:v",
+        "1",
+        "-vf",
+        "scale=320:-1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "png",
+        "-",
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, check=True)
+    except subprocess.CalledProcessError:
+        return None
+    return result.stdout or None
+
+
+def sample_timestamps(duration: float, start: float, length: float, *, count: int = 5) -> list[float]:
+    if duration <= 0 or length <= 0:
+        return [max(start, 0.0)]
+    end = min(start + length, duration) - 0.12
+    begin = min(max(start + 0.35, 0.0), max(end, 0.0))
+    if end <= begin + 0.05:
+        return [begin]
+    if count <= 1:
+        return [begin]
+    span = end - begin
+    return [begin + span * (index / (count - 1)) for index in range(count)]
+
+
+def window_report(
+    frames: list[bytes],
+    *,
+    strict: bool = False,
+    subject: str = "",
+) -> dict[str, object]:
+    if not frames:
+        return {"ok": False, "pass_ratio": 0.0, "reasons": ["no-frames"]}
+    failed = 0
+    reasons: list[str] = []
+    for frame in frames:
+        frame_reasons = frame_fail_reasons(frame, subject)
+        if frame_reasons:
+            failed += 1
+            reasons.extend(frame_reasons)
+        elif strict and talking_head_score(frame) >= TALKING_HEAD_LIMIT * 0.7:
+            failed += 1
+            reasons.append("talking-head")
+    ratio = (len(frames) - failed) / len(frames)
+    first_bad = bool(frames) and bool(frame_fail_reasons(frames[0], subject))
+    needed = 1.0 if strict else PASS_RATIO
+    ok = ratio >= needed and not first_bad
+    return {
+        "ok": ok,
+        "pass_ratio": ratio,
+        "reasons": sorted(set(reasons)),
+        "first_bad": first_bad,
+    }
+
+
+def _load_env_files() -> None:
+    roots = (
+        Path(__file__).resolve().parent / ".env",
+        Path(__file__).resolve().parent.parent / ".env",
+    )
+    for path in roots:
+        if not path.is_file():
+            continue
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            if key and key not in os.environ:
+                os.environ[key] = value.strip().strip('"').strip("'")
+
+
+def vision_subject_present(png_bytes: bytes, subject: str) -> bool | None:
+    """Return True/False when a vision key exists, else None."""
+    if not subject.strip() or not png_bytes:
+        return None
+    _load_env_files()
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        return None
+    try:
+        from openai import OpenAI
+    except ImportError:
+        return None
+    payload = base64.b64encode(png_bytes).decode("ascii")
+    client = OpenAI(api_key=api_key)
+    prompt = (
+        f'Does this frame clearly show this subject: "{subject}"? '
+        "Answer YES only if the subject is visible as the main object. "
+        "Answer NO if it is a person talking, a title card, a logo, "
+        "an empty room, a different object, or anything out of context "
+        "for that subject."
+    )
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        max_tokens=4,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{payload}"},
+                    },
+                ],
+            }
+        ],
+    )
+    answer = (response.choices[0].message.content or "").strip().upper()
+    if answer.startswith("YES"):
+        return True
+    if answer.startswith("NO"):
+        return False
+    return None
+
+
+def sample_clip_stamps(duration: float, *, step: float = SCAN_STEP) -> list[float]:
+    if duration <= 0:
+        return [0.0]
+    stamps: list[float] = []
+    stamp = min(0.25, max(duration * 0.15, 0.0))
+    while stamp < duration - 0.08:
+        stamps.append(stamp)
+        stamp += max(step, 0.25)
+    if not stamps:
+        stamps.append(min(0.25, max(duration * 0.5, 0.0)))
+    return stamps
+
+
+def scan_clip_local(
+    source: Path,
+    *,
+    duration: float,
+    step: float = SCAN_STEP,
+    subject: str = "",
+) -> list[dict[str, object]]:
+    samples: list[dict[str, object]] = []
+    for stamp in sample_clip_stamps(duration, step=step):
+        frame = extract_preview_frame(source, stamp)
+        if not frame:
+            samples.append({"t": stamp, "ok": False, "reasons": ["no-frames"]})
+            continue
+        reasons = frame_fail_reasons(frame, subject)
+        samples.append({"t": stamp, "ok": not reasons, "reasons": reasons})
+    return samples
+
+
+def clean_spans(
+    samples: list[dict[str, object]],
+    *,
+    min_length: float = MIN_CLEAN_SPAN,
+) -> list[tuple[float, float]]:
+    if not samples:
+        return []
+    step = SCAN_STEP
+    if len(samples) >= 2:
+        step = max(float(samples[1]["t"]) - float(samples[0]["t"]), 0.25)
+    spans: list[tuple[float, float]] = []
+    start: float | None = None
+    last_ok: float | None = None
+    for sample in samples:
+        stamp = float(sample["t"])
+        if sample["ok"]:
+            if start is None:
+                start = stamp
+            last_ok = stamp
+            continue
+        if start is None or last_ok is None:
+            continue
+        end = last_ok + step
+        if end - start >= min_length:
+            spans.append((start, end))
+        start = None
+        last_ok = None
+    if start is not None and last_ok is not None:
+        end = last_ok + step
+        if end - start >= min_length:
+            spans.append((start, end))
+    return spans
+
+
+def longest_clean_span(
+    samples: list[dict[str, object]],
+    *,
+    min_length: float = MIN_CLEAN_SPAN,
+) -> tuple[float, float] | None:
+    spans = clean_spans(samples, min_length=min_length)
+    if not spans:
+        return None
+    return max(spans, key=lambda item: item[1] - item[0])
+
+
+def confirm_span_subject(
+    source: Path,
+    *,
+    start: float,
+    end: float,
+    subject: str,
+) -> bool:
+    if not subject.strip():
+        return True
+    mid = start + max((end - start) * 0.5, 0.0)
+    for stamp in (start + 0.2, mid):
+        stamp = min(max(stamp, start), max(end - 0.05, start))
+        frame = extract_preview_frame(source, stamp)
+        if not frame:
+            continue
+        present = vision_subject_present(frame, subject)
+        if present is False:
+            return False
+    return True
+
+
+def score_window(
+    source: Path,
+    *,
+    start: float,
+    duration: float,
+    clip_duration: float,
+    subject: str = "",
+    strict: bool = False,
+    use_vision: bool = False,
+) -> dict[str, object]:
+    frames: list[bytes] = []
+    for stamp in sample_timestamps(clip_duration, start, duration):
+        frame = extract_preview_frame(source, stamp)
+        if frame:
+            frames.append(frame)
+    report = window_report(frames, strict=strict, subject=subject)
+    if not report["ok"] or not use_vision or not subject or not frames:
+        return report
+    checked = 0
+    for frame in (frames[0], frames[len(frames) // 2]):
+        if checked >= 2:
+            break
+        present = vision_subject_present(frame, subject)
+        checked += 1
+        if present is False:
+            report["ok"] = False
+            reasons = list(report["reasons"])
+            reasons.append("missing-subject")
+            report["reasons"] = reasons
+            return report
+    return report

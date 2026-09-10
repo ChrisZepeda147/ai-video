@@ -11,13 +11,14 @@ Before creating a still, story, or picking a background video, check what is alr
 2. Stories: new title, hook, and plot. Do not rewrite Don't Go Inside, 4C, the roommate camera story, or anything else in the catalog.
 3. Photos: new subject/setting slug. Do not regenerate or overwrite an existing still in `prompts/dark-luxury-still/`.
 4. Houses and locations: be unique. Run `python scripts/content_reuse.py check-photo --slug "..." --subject "..."`. Do not repeat the same house type, city, or estate (e.g. another LA minimalist mansion if one exists). Change city, architecture, and setting every time — not just the car or time of day.
-5. Videos: do not re-download or re-cut a YouTube id already in the catalog. Speech tracks count. Montage jobs: `build_motivation_job.py` picks a new unused speech. Do not copy another job's MP3/subs.
+5. Videos: do not re-download or re-cut a YouTube id already in the catalog. Speech tracks count. Montage jobs: `build_motivation_job.py` picks a new unused speech **and** rejects a repeat transcript (same words on a new upload). Do not copy another job's MP3/subs.
 6. After a still or story, run `python scripts/content_reuse.py rebuild`. Skip if the job script already rebuilt.
 
 ```
 python scripts/content_reuse.py check-story --title "..." --hook "..." --text "..."
 python scripts/content_reuse.py check-photo --slug "new-slug" --subject "subject setting"
 python scripts/content_reuse.py check-video --youtube-id "xxxxxxxxxxx"
+python scripts/content_reuse.py check-speech --file downloads/motivational/job/audio/subs.en.json3
 ```
 
 If a check exits 2, change the idea. Do not pass `--allow-reuse` unless the user asked to remake that piece.

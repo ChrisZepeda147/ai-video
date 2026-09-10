@@ -9,15 +9,31 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
+import broll_pool
 import content_reuse
 import yt_dlp
-from build_clips_montage import build_montage, probe_duration
+from broll_frame_gate import (
+    MIN_CLEAN_SPAN,
+    confirm_span_subject,
+    longest_clean_span,
+    scan_clip_local,
+    subject_tokens,
+    title_matches_subject,
+)
+from build_clips_montage import (
+    DEFAULT_PLAYBACK_SPEED,
+    build_montage,
+    min_unique_clips_needed,
+    probe_duration,
+    segment_length_for_duration,
+)
 from build_stills_slideshow import burn_captions, parse_json3_words
 from youtube_popular_downloader import (
     VideoCandidate,
@@ -169,6 +185,13 @@ def json3_word_times(path: Path) -> list[tuple[float, str]]:
     return [(start, text) for start, _end, text in words]
 
 
+def captions_text(path: Path, *, start: float = 0.0, duration: float = 1_000_000.0) -> str:
+    if path.suffix.lower() != ".json3":
+        return content_reuse.transcript_text_from_json3(path)
+    words = parse_json3_words(path, start=start, duration=duration)
+    return " ".join(text for _start, _end, text in words)
+
+
 def pick_speech_excerpt(
     captions: Path,
     *,
@@ -273,6 +296,8 @@ def is_junk(path: Path) -> bool:
     name = path.name
     if name in JUNK_NAMES:
         return True
+    if "_source." in name or name.endswith(".part"):
+        return True
     return any(name.endswith(suffix) for suffix in JUNK_SUFFIXES)
 
 
@@ -293,21 +318,31 @@ def cleanup_job_dir(job_dir: Path, *, keep_work: bool = False) -> list[Path]:
             continue
         extra_srt = path.name.endswith(".srt") and (path.with_suffix(".json3")).is_file()
         if is_junk(path) or extra_srt:
-            path.unlink(missing_ok=True)
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                continue
             removed.append(path)
 
     audio_dir = job_dir / "audio"
     if audio_dir.is_dir() and (audio_dir / "speech.mp3").is_file():
         for path in audio_dir.iterdir():
             if path.is_file() and path.name not in KEEP_AUDIO:
-                path.unlink(missing_ok=True)
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    continue
                 removed.append(path)
 
     if output_ready and not keep_work:
         clips = job_dir / "clips"
         if clips.is_dir():
-            shutil.rmtree(clips)
-            removed.append(clips)
+            try:
+                shutil.rmtree(clips)
+            except OSError:
+                pass
+            else:
+                removed.append(clips)
 
     return removed
 
@@ -321,7 +356,8 @@ def prepare_speech(
     speech_url: str,
     min_seconds: float,
     max_seconds: float,
-) -> tuple[VideoCandidate, float]:
+    allow_reuse: bool = False,
+) -> tuple[VideoCandidate, float, str, str]:
     if speech_url:
         candidates = discover_urls([speech_url])
     else:
@@ -331,28 +367,49 @@ def prepare_speech(
 
     source_mp3: Path | None = None
     chosen: VideoCandidate | None = None
+    excerpt_text = ""
+    source_text = ""
+    start = 0.0
+    duration = max_seconds
+    captions: Path | None = None
     for candidate in candidates:
         if candidate.video_id in used_ids() and not speech_url:
             continue
         print(f"Trying speech: {candidate.title} ({candidate.video_id})")
         try:
             source_mp3 = download_one_audio(candidate, audio_dir)
+            captions = download_subs(candidate.url, audio_dir)
         except Exception as exc:  # noqa: BLE001 — next candidate on age-gate / download fail
             print(f"  skip: {exc}")
             continue
-        if source_mp3:
-            chosen = candidate
-            break
-    if chosen is None or source_mp3 is None:
+        if source_mp3 is None or captions is None:
+            continue
+        source_text = captions_text(captions)
+        start, duration = pick_speech_excerpt(
+            captions,
+            min_seconds=min_seconds,
+            max_seconds=max_seconds,
+        )
+        excerpt_text = captions_text(captions, start=start, duration=duration)
+        hits = content_reuse.find_speech_reuse(
+            excerpt_text,
+            youtube_id=candidate.video_id,
+            source_text=source_text,
+        )
+        if hits and not allow_reuse:
+            print(f"  skip repeat transcript: {hits[0].reason}")
+            if speech_url:
+                raise RuntimeError(f"Speech transcript already used: {hits[0].reason}")
+            for leftover in audio_dir.glob("*"):
+                if leftover.is_file():
+                    leftover.unlink(missing_ok=True)
+            continue
+        chosen = candidate
+        break
+    if chosen is None or source_mp3 is None or captions is None:
         raise RuntimeError("Could not download an unused speech.")
 
     url_file.write_text(f"{chosen.url}\n", encoding="utf-8")
-    captions = download_subs(chosen.url, audio_dir)
-    start, duration = pick_speech_excerpt(
-        captions,
-        min_seconds=min_seconds,
-        max_seconds=max_seconds,
-    )
     print(f"Excerpt: start={start:.2f}s duration={duration:.2f}s")
 
     speech_mp3 = audio_dir / "speech.mp3"
@@ -368,8 +425,53 @@ def prepare_speech(
     elif captions.resolve() != stable_caps.resolve():
         captions.replace(stable_caps)
 
-    content_reuse.register_video(youtube_id=chosen.video_id, title=chosen.title)
-    return chosen, duration
+    content_reuse.register_video(
+        youtube_id=chosen.video_id,
+        title=chosen.title,
+        transcript=excerpt_text,
+        source_transcript=source_text,
+        role="speech",
+    )
+    return chosen, duration, excerpt_text, source_text
+
+
+def resolve_segment_length(duration: float, segment_length: float | None) -> float:
+    if segment_length is not None:
+        return segment_length
+    resolved = segment_length_for_duration(duration)
+    print(f"Segment length: {resolved:.1f}s (auto from {duration:.0f}s speech)")
+    return resolved
+
+
+def broll_download_plan(
+    *,
+    duration: float,
+    segment_length: float,
+    clips_limit: int,
+    clip_length: int,
+    max_parts: int,
+) -> tuple[int, int, int]:
+    """Scale B-roll download so longer montages get longer parts and enough unique clips."""
+    needed = min_unique_clips_needed(
+        duration=duration,
+        segment_length=segment_length,
+        layout="single",
+    )
+    resolved_clip_length = max(clip_length, int(math.ceil(segment_length * 1.25)))
+    resolved_limit = max(clips_limit, needed + 2)
+    parts_per_source = max(1, math.ceil(needed / max(resolved_limit, 1)))
+    resolved_max_parts = max(max_parts, min(4, parts_per_source + 1))
+    if (
+        resolved_clip_length != clip_length
+        or resolved_limit != clips_limit
+        or resolved_max_parts != max_parts
+    ):
+        print(
+            "B-roll plan: "
+            f"{resolved_limit} source(s), {resolved_max_parts} part(s) each, "
+            f"{resolved_clip_length}s per part ({needed} unique clips needed)"
+        )
+    return resolved_limit, resolved_clip_length, resolved_max_parts
 
 
 def prepare_broll(
@@ -381,10 +483,20 @@ def prepare_broll(
     max_parts: int,
     min_views: int,
     min_duration: int,
+    start_offset: float,
+    subject: str,
+    use_vision: bool = True,
 ) -> list[str]:
     raw = discover_search(query=query, limit=max(limit * 4, 16))
     skip = used_ids()
     unused = [item for item in raw if item.video_id not in skip]
+    wanted = subject_tokens(query, subject)
+    titled = [item for item in unused if title_matches_subject(item.title, wanted)]
+    if titled:
+        print(f"Title-matched {len(titled)}/{len(unused)} B-roll hit(s) for: {', '.join(wanted)}")
+        unused = titled
+    elif wanted:
+        print(f"No B-roll title matched {wanted}; using unused search hits")
     candidates = filter_unwanted(
         unused,
         limit=limit,
@@ -402,6 +514,9 @@ def prepare_broll(
         candidates,
         clip_length=clip_length,
         max_parts=max_parts,
+        start_offset=start_offset,
+        subject=subject or query,
+        use_vision=use_vision,
     )
 
 
@@ -411,6 +526,9 @@ def download_broll_candidates(
     *,
     clip_length: int,
     max_parts: int,
+    start_offset: float = 0.0,
+    subject: str = "",
+    use_vision: bool = True,
 ) -> list[str]:
     print(f"Downloading {len(candidates)} B-roll source(s)...")
     results = download_videos(
@@ -423,12 +541,79 @@ def download_broll_candidates(
         split_parts=True,
         keep_source=False,
         aspect_ratio="9:16",
+        start_offset=start_offset,
     )
     ok_ids = [str(row.get("video_id") or "") for row in results if row.get("status") == "ok"]
-    parts = list(clips_dir.glob("*_part*.mp4"))
-    if not parts:
-        raise RuntimeError("B-roll download produced no clips.")
+    kept = filter_broll_clips(clips_dir, subject=subject, use_vision=use_vision)
+    if not kept:
+        raise RuntimeError("B-roll download produced no clips that passed the subject/frame gate.")
     return [item for item in ok_ids if item]
+
+
+def _trim_clip_to_span(clip: Path, start: float, end: float) -> None:
+    tmp = clip.with_name(f"{clip.stem}.trim{clip.suffix}")
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-ss",
+        f"{start:.3f}",
+        "-i",
+        str(clip),
+        "-t",
+        f"{max(end - start, 0.4):.3f}",
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "fast",
+        "-crf",
+        "23",
+        "-movflags",
+        "+faststart",
+        str(tmp),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True)
+    clip.unlink(missing_ok=True)
+    tmp.replace(clip)
+
+
+def filter_broll_clips(
+    clips_dir: Path,
+    *,
+    subject: str,
+    use_vision: bool = True,
+) -> list[Path]:
+    kept: list[Path] = []
+    for clip in sorted(clips_dir.glob("*_part*.mp4")):
+        try:
+            duration = probe_duration(clip)
+        except (subprocess.CalledProcessError, ValueError):
+            print(f"  drop {clip.name}: unreadable")
+            clip.unlink(missing_ok=True)
+            continue
+        samples = scan_clip_local(clip, duration=duration, subject=subject)
+        span = longest_clean_span(samples, min_length=min(MIN_CLEAN_SPAN, duration))
+        if span is None:
+            print(f"  drop {clip.name}: no subject span")
+            clip.unlink(missing_ok=True)
+            continue
+        start, end = span
+        if use_vision and not confirm_span_subject(
+            clip, start=start, end=end, subject=subject
+        ):
+            print(f"  drop {clip.name}: missing-subject / out-of-context")
+            clip.unlink(missing_ok=True)
+            continue
+        if start > 0.35 or end < duration - 0.35:
+            print(f"  trim {clip.name}: {start:.1f}-{end:.1f}s")
+            try:
+                _trim_clip_to_span(clip, start, end)
+            except subprocess.CalledProcessError:
+                print(f"  drop {clip.name}: trim failed")
+                clip.unlink(missing_ok=True)
+                continue
+        kept.append(clip)
+    return kept
 
 
 def prepare_broll_from_ids(
@@ -437,6 +622,9 @@ def prepare_broll_from_ids(
     *,
     clip_length: int,
     max_parts: int,
+    start_offset: float = 0.0,
+    subject: str = "",
+    use_vision: bool = True,
 ) -> list[str]:
     urls = [f"https://www.youtube.com/watch?v={video_id}" for video_id in video_ids if video_id]
     candidates = discover_urls(urls)
@@ -447,11 +635,70 @@ def prepare_broll_from_ids(
         candidates,
         clip_length=clip_length,
         max_parts=max_parts,
+        start_offset=start_offset,
+        subject=subject,
+        use_vision=use_vision,
     )
+
+
+def ensure_broll_clips(
+    *,
+    jobs_root: Path,
+    clips_dir: Path,
+    subject: str,
+    query: str,
+    needed_clips: int,
+    clips_limit: int,
+    clip_length: int,
+    max_parts: int,
+    min_views: int,
+    min_duration: int,
+    start_offset: float,
+    use_vision: bool,
+    broll_ids: list[str] | None = None,
+) -> list[str]:
+    """Fill clips_dir from pool first, then download only what is still missing."""
+    broll_pool.take_from_pool(jobs_root, subject=subject, clips_dir=clips_dir)
+    kept = filter_broll_clips(clips_dir, subject=subject, use_vision=use_vision)
+    if len(kept) >= needed_clips:
+        return broll_ids or []
+    if broll_ids:
+        candidates = discover_urls(
+            [f"https://www.youtube.com/watch?v={video_id}" for video_id in broll_ids]
+        )
+        if candidates:
+            download_broll_candidates(
+                clips_dir,
+                candidates,
+                clip_length=clip_length,
+                max_parts=max_parts,
+                start_offset=start_offset,
+                subject=subject,
+                use_vision=use_vision,
+            )
+            kept = filter_broll_clips(clips_dir, subject=subject, use_vision=use_vision)
+            if len(kept) >= needed_clips:
+                return broll_ids
+    downloaded = prepare_broll(
+        clips_dir=clips_dir,
+        query=query,
+        limit=clips_limit,
+        clip_length=clip_length,
+        max_parts=max_parts,
+        min_views=min_views,
+        min_duration=min_duration,
+        start_offset=start_offset,
+        subject=subject,
+        use_vision=use_vision,
+    )
+    if broll_ids:
+        return list(dict.fromkeys([*broll_ids, *downloaded]))
+    return downloaded
 
 
 def render_job(
     *,
+    jobs_root: Path,
     clips_dir: Path,
     audio: Path,
     captions: Path,
@@ -460,10 +707,13 @@ def render_job(
     segment_length: float,
     seed: int | None,
     grade: bool,
-) -> None:
+    subject: str = "",
+    playback_speed: float = DEFAULT_PLAYBACK_SPEED,
+    use_vision: bool = True,
+) -> set[Path]:
     output.parent.mkdir(parents=True, exist_ok=True)
     temp_output = output.with_suffix(".nocap.mp4")
-    build_montage(
+    used_clips = build_montage(
         clips_dir=clips_dir,
         audio=audio,
         output=temp_output,
@@ -475,6 +725,9 @@ def render_job(
         height=1920,
         audio_start=0.0,
         audio_duration=duration,
+        subject=subject,
+        playback_speed=playback_speed,
+        use_vision=use_vision,
     )
     burn_captions(
         temp_output,
@@ -488,19 +741,30 @@ def render_job(
     )
     temp_output.unlink(missing_ok=True)
     verify_output(output, duration)
+    broll_pool.stash_unused_clips(
+        jobs_root,
+        subject=subject,
+        clips_dir=clips_dir,
+        used=used_clips,
+    )
+    return used_clips
 
 
 def rerender_existing_job(
     *,
     jobs_root: Path,
     slug: str,
-    segment_length: float,
+    segment_length: float | None,
     seed: int | None,
     grade: bool,
     clip_length: int,
     max_parts: int,
+    clips_limit: int,
     keep_work: bool,
     cleanup: bool,
+    start_offset: float,
+    playback_speed: float,
+    use_vision: bool,
 ) -> int:
     job_dir = job_dir_for(slug, jobs_root)
     job_path = job_dir / "job.json"
@@ -510,27 +774,73 @@ def rerender_existing_job(
     if not job_path.is_file():
         print(f"No job.json at {job_path}", file=sys.stderr)
         return 1
-    if not audio.is_file() or not captions.is_file():
-        print(f"Missing speech or captions in {job_dir / 'audio'}", file=sys.stderr)
-        return 1
     payload = json.loads(job_path.read_text(encoding="utf-8"))
+    if not audio.is_file() or not captions.is_file():
+        speech_url = str(payload.get("speech_url") or "").strip()
+        speech_id = str(payload.get("speech_id") or "").strip()
+        if not speech_url and speech_id:
+            speech_url = f"https://www.youtube.com/watch?v={speech_id}"
+        if not speech_url:
+            print(f"Missing speech or captions in {job_dir / 'audio'}", file=sys.stderr)
+            return 1
+        print("Restoring speech from job.json...")
+        try:
+            _speech, duration, excerpt_text, source_text = prepare_speech(
+                audio_dir=job_dir / "audio",
+                url_file=job_dir / "url.txt",
+                speaker=str(payload.get("speaker") or "Andrew Tate"),
+                speech_query=str(payload.get("speech_query") or ""),
+                speech_url=speech_url,
+                min_seconds=60.0,
+                max_seconds=float(payload.get("audio_duration") or 90.0),
+                allow_reuse=True,
+            )
+        except (FileNotFoundError, RuntimeError, ValueError, subprocess.CalledProcessError) as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        payload["audio_duration"] = duration
+        payload["speech_excerpt"] = excerpt_text
+        payload["speech_source_hash"] = content_reuse.speech_fingerprint(source_text)["transcript_hash"]
+        write_job_json(job_path, payload)
     broll_ids = [str(item) for item in (payload.get("broll_ids") or []) if item]
     duration = float(payload.get("audio_duration") or probe_duration(audio))
+    segment_length = resolve_segment_length(duration, segment_length)
+    subject = str(payload.get("subject") or payload.get("broll_query") or slug)
     if not broll_ids:
         print("job.json has no broll_ids", file=sys.stderr)
         return 1
     clips_dir = job_dir / "clips"
     clips_dir.mkdir(parents=True, exist_ok=True)
+    clips_limit, clip_length, max_parts = broll_download_plan(
+        duration=duration,
+        segment_length=segment_length,
+        clips_limit=clips_limit,
+        clip_length=clip_length,
+        max_parts=max_parts,
+    )
+    needed_clips = min_unique_clips_needed(
+        duration=duration,
+        segment_length=segment_length,
+        layout="single",
+    )
     try:
-        existing = list(clips_dir.glob("*_part*.mp4"))
-        if not existing:
-            prepare_broll_from_ids(
-                clips_dir,
-                broll_ids,
-                clip_length=clip_length,
-                max_parts=max_parts,
-            )
+        ensure_broll_clips(
+            jobs_root=jobs_root,
+            clips_dir=clips_dir,
+            subject=subject,
+            query=str(payload.get("broll_query") or subject),
+            needed_clips=needed_clips,
+            clips_limit=clips_limit,
+            clip_length=clip_length,
+            max_parts=max_parts,
+            min_views=50000,
+            min_duration=30,
+            start_offset=start_offset,
+            use_vision=use_vision,
+            broll_ids=broll_ids,
+        )
         render_job(
+            jobs_root=jobs_root,
             clips_dir=clips_dir,
             audio=audio,
             captions=captions,
@@ -539,6 +849,9 @@ def rerender_existing_job(
             segment_length=segment_length,
             seed=seed,
             grade=grade,
+            subject=subject,
+            playback_speed=playback_speed,
+            use_vision=use_vision,
         )
     except (FileNotFoundError, RuntimeError, ValueError, subprocess.CalledProcessError) as exc:
         print(exc, file=sys.stderr)
@@ -594,11 +907,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--jobs-root", type=Path, default=None)
     parser.add_argument("--min-seconds", type=float, default=60.0)
     parser.add_argument("--max-seconds", type=float, default=90.0)
-    parser.add_argument("--segment-length", type=float, default=8.0)
+    parser.add_argument(
+        "--segment-length",
+        type=float,
+        default=None,
+        help="Seconds per montage beat (default: scales with speech length, 60s->12s, 90s->18s)",
+    )
+    parser.add_argument(
+        "--playback-speed",
+        type=float,
+        default=DEFAULT_PLAYBACK_SPEED,
+        help="Clip playback rate. Lower = slower motion",
+    )
+    parser.add_argument("--intro-skip", type=float, default=8.0, help="Skip this many seconds of each B-roll source")
+    parser.add_argument("--no-vision", action="store_true", help="Skip optional vision subject check")
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--no-grade", action="store_true")
     parser.add_argument("--clips-limit", type=int, default=5)
-    parser.add_argument("--clip-length", type=int, default=15)
+    parser.add_argument("--clip-length", type=int, default=24)
     parser.add_argument("--max-parts", type=int, default=3)
     parser.add_argument("--min-views", type=int, default=50000)
     parser.add_argument("--min-duration", type=int, default=30)
@@ -651,8 +977,12 @@ def main() -> int:
             grade=not args.no_grade,
             clip_length=args.clip_length,
             max_parts=args.max_parts,
+            clips_limit=args.clips_limit,
             keep_work=args.keep_work,
             cleanup=not args.no_cleanup,
+            start_offset=args.intro_skip,
+            playback_speed=args.playback_speed,
+            use_vision=not args.no_vision,
         )
 
     if not args.slug or not args.broll_query:
@@ -669,7 +999,7 @@ def main() -> int:
     print(f"Speaker: {speaker}  (edit {config_path.as_posix()})")
     print(f"Speech search: {speech_query}")
     try:
-        speech, duration = prepare_speech(
+        speech, duration, excerpt_text, source_text = prepare_speech(
             audio_dir=audio_dir,
             url_file=job_dir / "url.txt",
             speaker=speaker,
@@ -678,24 +1008,46 @@ def main() -> int:
             min_seconds=args.min_seconds,
             max_seconds=args.max_seconds,
         )
-        broll_ids = prepare_broll(
-            clips_dir=clips_dir,
-            query=args.broll_query,
-            limit=args.clips_limit,
+        segment_length = resolve_segment_length(duration, args.segment_length)
+        clips_limit, clip_length, max_parts = broll_download_plan(
+            duration=duration,
+            segment_length=segment_length,
+            clips_limit=args.clips_limit,
             clip_length=args.clip_length,
             max_parts=args.max_parts,
+        )
+        needed_clips = min_unique_clips_needed(
+            duration=duration,
+            segment_length=segment_length,
+            layout="single",
+        )
+        broll_ids = ensure_broll_clips(
+            jobs_root=jobs_root,
+            clips_dir=clips_dir,
+            subject=args.broll_query,
+            query=args.broll_query,
+            needed_clips=needed_clips,
+            clips_limit=clips_limit,
+            clip_length=clip_length,
+            max_parts=max_parts,
             min_views=args.min_views,
             min_duration=args.min_duration,
+            start_offset=args.intro_skip,
+            use_vision=not args.no_vision,
         )
         render_job(
+            jobs_root=jobs_root,
             clips_dir=clips_dir,
             audio=audio_dir / "speech.mp3",
             captions=audio_dir / "subs.en.json3",
             output=output,
             duration=duration,
-            segment_length=args.segment_length,
+            segment_length=segment_length,
             seed=args.seed,
             grade=not args.no_grade,
+            subject=args.broll_query,
+            playback_speed=args.playback_speed,
+            use_vision=not args.no_vision,
         )
     except (FileNotFoundError, RuntimeError, ValueError, subprocess.CalledProcessError) as exc:
         print(exc, file=sys.stderr)
@@ -710,8 +1062,14 @@ def main() -> int:
             "speech_id": speech.video_id,
             "speech_title": speech.title,
             "speech_url": speech.url,
+            "broll_query": args.broll_query,
+            "subject": args.broll_query,
             "broll_ids": broll_ids,
+            "speech_excerpt": excerpt_text,
+            "speech_source_hash": content_reuse.speech_fingerprint(source_text)["transcript_hash"],
             "audio_duration": duration,
+            "segment_length": segment_length,
+            "playback_speed": args.playback_speed,
             "output": str(output.as_posix()),
         },
     )

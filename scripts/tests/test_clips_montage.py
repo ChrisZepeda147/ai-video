@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import random
+import sys
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+import build_clips_montage as montage
+
+
+class ClipsMontageTests(unittest.TestCase):
+    def test_segment_length_scales_with_duration(self) -> None:
+        self.assertAlmostEqual(montage.segment_length_for_duration(60.0), 12.0)
+        self.assertAlmostEqual(montage.segment_length_for_duration(90.0), 18.0)
+        self.assertAlmostEqual(montage.segment_length_for_duration(45.0), 9.0)
+
+    def test_min_unique_clips_for_longer_video(self) -> None:
+        short = montage.min_unique_clips_needed(
+            duration=60.0,
+            segment_length=12.0,
+            layout="single",
+        )
+        long = montage.min_unique_clips_needed(
+            duration=90.0,
+            segment_length=18.0,
+            layout="single",
+        )
+        self.assertEqual(short, 5)
+        self.assertEqual(long, 5)
+
+    def test_clip_picker_never_reuses_files(self) -> None:
+        clips = [
+            Path("aaa_part01.mp4"),
+            Path("aaa_part02.mp4"),
+            Path("bbb_part01.mp4"),
+        ]
+        picker = montage._ClipPicker(clips, random.Random(0))
+        picked = [picker.pick() for _ in range(len(clips))]
+        self.assertEqual(len(picked), len(clips))
+        self.assertEqual(len(set(picked)), len(clips))
+        with self.assertRaises(RuntimeError):
+            picker.pick()
+
+
+if __name__ == "__main__":
+    unittest.main()
