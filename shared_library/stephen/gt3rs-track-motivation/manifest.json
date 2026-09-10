@@ -1,0 +1,48 @@
+{
+  "manifest_version": 1,
+  "manifest_id": "stephen:gt3rs-track-motivation:9e907962eb42fe52",
+  "owner": "stephen",
+  "slug": "gt3rs-track-motivation",
+  "title": "GET ANGRY, GET DISCIPLINED, GET RICH \u2014 OR STAY BROKE | Andrew Tate Motivation",
+  "speaker": "Andrew Tate",
+  "source_url": "https://www.youtube.com/watch?v=E6CkSdE6Y5E",
+  "source_external_id": "E6CkSdE6Y5E",
+  "source_start_sec": 379.2,
+  "source_end_sec": null,
+  "transcript": "THAT'S HOW I WON. YOU CAN BLINK AND cure your brain. You can say, \"I'm going to work really hard, and you know what? I'm not going to hate it. I'm not going to be stressed. I'm not going to be bored. I'm going to love it. I'm going to love this work. I'm going to sit down for 12 hours and have the best time of my life working as hard as possible because I have decided I'm going to blink and cure my mind, and I am going to enjoy the next 12 hours of focused work.\" And guess what? You'll work better than ever before. >> I was afraid, and I used that fear to train as hard as possible. And you can apply that to life as a whole. You need to use the fear of being mediocre and use it to make you try as hard as possible. The reason with most mediocre people is they don't have a fear of being mediocre. They've listened to the Matrix programming and they've been convinced that being mediocre is absolutely fine. It's fine to not be that successful. You know all our graves are the same size. Doesn't matter what you achieve in your life. Doo dee doo, dumpty dum. This is the slave mind. And I refuse to accept it. I do not accept that. I accept I'm an exceptional individual and I deserve an exceptional experience of the human consciousness, and that's what I'm going to [\u00a0__\u00a0] have. And I It doesn't matter. If I have to do it myself, that's fine cuz no one else is going to do it for me. So, yeah, there has to be a healthy fear.",
+  "transcript_hash": "70cfe9ce8cd9eb924ee4c3884582237a1eb1dfdc5f63430c41a88ddc2856c0c6",
+  "duration_sec": 70.85,
+  "topic": null,
+  "visual_style": "porsche 911 gt3 rs track cinematic 4k",
+  "visual_category": "Luxury",
+  "broll_ids": [
+    "-Pkj1qIcK2Y",
+    "8FpXGOd_8u4",
+    "DZAdVY9kKbc",
+    "F3-7CmM_SUo",
+    "IUN-bVQ-KXI",
+    "ZieW_OSkuiQ",
+    "_XqUpE06pyc",
+    "lQieyv0OE6I",
+    "nhLKppmp7w8"
+  ],
+  "parent_manifest_id": null,
+  "version": 1,
+  "version_label": null,
+  "change_summary": null,
+  "paths": {
+    "final": "final.mp4",
+    "audio": "audio/speech.mp3",
+    "caption": "captions/subs.en.json3",
+    "transcript": "transcript.txt"
+  },
+  "hashes": {
+    "final": "9e907962eb42fe52cfd4ee238cecc00e2540f4a60f783e8a9d3541c80845d87d",
+    "audio": "f2dd2de64000829035bc3063ce8808157c7ea26cc680dcc76113ee31673c8d73",
+    "caption": "10284174ffe665892cbfb001ad4c90fe5928ad579d4fa5998bf406e5bbbaec71"
+  },
+  "pipeline": "build_motivation_job",
+  "created_at": "2026-09-10T22:52:31+00:00",
+  "updated_at": "2026-09-10T22:52:31+00:00",
+  "exported_at": "2026-09-10T22:52:31+00:00"
+}
