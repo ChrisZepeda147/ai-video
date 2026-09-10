@@ -1,0 +1,47 @@
+{
+  "manifest_version": 1,
+  "manifest_id": "stephen:ferrari-track-motivation:57ed3dbd80146003",
+  "owner": "stephen",
+  "slug": "ferrari-track-motivation",
+  "title": "GET ANGRY, GET DISCIPLINED, GET RICH \u2014 OR STAY BROKE | Andrew Tate Motivation",
+  "speaker": "Andrew Tate",
+  "source_url": "https://www.youtube.com/watch?v=E6CkSdE6Y5E",
+  "source_external_id": "E6CkSdE6Y5E",
+  "source_start_sec": 15.4,
+  "source_end_sec": null,
+  "transcript": "You think I got out of this Romanian [\u00a0__\u00a0] situation with luck? Do you think I got out of it with law? Do you think I just sat around and the law helped me or I was lucky? I woke up four or five times a night. I could not sleep. When you wake up and you cannot sleep, you know what you do? You lay in bed and cry like a baby.",
+  "transcript_hash": "0c1d1780a801b5e3e577a9972b828637f10bd42e7cb314c549e66c958765d8d3",
+  "duration_sec": 19.16,
+  "topic": null,
+  "visual_style": "Ferrari driving cinematic 4k",
+  "visual_category": "Cars",
+  "broll_ids": [
+    "4gkfYynak1o",
+    "6t4vahzzBoc",
+    "D-6-pTL_NOI",
+    "gJ7SljP_vuA",
+    "IEQkph1dmmo",
+    "qmLbIyW2f1c",
+    "tYSo0LsHhvo",
+    "Vjd4NJaoxIs"
+  ],
+  "parent_manifest_id": null,
+  "version": 1,
+  "version_label": null,
+  "change_summary": null,
+  "paths": {
+    "final": "final.mp4",
+    "audio": "audio/speech.mp3",
+    "caption": "captions/subs.en.json3",
+    "transcript": "transcript.txt"
+  },
+  "hashes": {
+    "final": "57ed3dbd80146003d347e8edc20dd781da1aacfd71b3cfa16f2b925871ca0be6",
+    "audio": "700ce84d22643826406ce9c12a1cc266535e4517ac072043c2666b0615d934dc",
+    "caption": "e3f4d3564c4e18af0c0225140b385e1dccd47200fef30929c2a8e507776a7a9c"
+  },
+  "pipeline": "build_motivation_job",
+  "created_at": "2026-09-10T22:06:30+00:00",
+  "updated_at": "2026-09-10T22:06:30+00:00",
+  "exported_at": "2026-09-10T22:06:30+00:00"
+}

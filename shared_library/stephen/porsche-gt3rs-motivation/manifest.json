@@ -1,0 +1,41 @@
+{
+  "manifest_version": 1,
+  "manifest_id": "stephen:porsche-gt3rs-motivation:3fa8e3c1ce10d121",
+  "owner": "stephen",
+  "slug": "porsche-gt3rs-motivation",
+  "title": "Porsche Gt3Rs Motivation",
+  "speaker": "Andrew Tate",
+  "source_url": "https://www.youtube.com/watch?v=E6CkSdE6Y5E",
+  "source_external_id": null,
+  "source_start_sec": null,
+  "source_end_sec": null,
+  "transcript": null,
+  "transcript_hash": "",
+  "duration_sec": 63.61,
+  "topic": null,
+  "visual_style": "Porsche 911 GT3 RS cinematic driving 4k short",
+  "visual_category": "Custom",
+  "broll_ids": [
+    "c5LeLdbK_-A",
+    "DZAdVY9kKbc",
+    "E7pCceDrKmg",
+    "IUN-bVQ-KXI",
+    "vwhP4yurzis",
+    "nhLKppmp7w8",
+    "9j3mEUh7QV4"
+  ],
+  "parent_manifest_id": null,
+  "version": 1,
+  "version_label": null,
+  "change_summary": null,
+  "paths": {
+    "final": "final.mp4"
+  },
+  "hashes": {
+    "final": "3fa8e3c1ce10d121df8a09b658be0083097953e00634d05618e8a99de430e1b1"
+  },
+  "pipeline": "build_motivation_job",
+  "created_at": "2026-09-10T20:49:06+00:00",
+  "updated_at": "2026-09-10T20:49:06+00:00",
+  "exported_at": "2026-09-10T20:49:06+00:00"
+}

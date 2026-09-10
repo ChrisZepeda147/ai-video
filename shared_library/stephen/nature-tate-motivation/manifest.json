@@ -1,0 +1,46 @@
+{
+  "manifest_version": 1,
+  "manifest_id": "stephen:nature-tate-motivation:17873528f9e23449",
+  "owner": "stephen",
+  "slug": "nature-tate-motivation",
+  "title": "GET ANGRY, GET DISCIPLINED, GET RICH \u2014 OR STAY BROKE | Andrew Tate Motivation",
+  "speaker": "Andrew Tate",
+  "source_url": "https://www.youtube.com/watch?v=E6CkSdE6Y5E",
+  "source_external_id": "E6CkSdE6Y5E",
+  "source_start_sec": 65.68,
+  "source_end_sec": null,
+  "transcript": "You know, I'm so anti-therapy and I've had these conversations so many times with people. Their answer is that I need therapy, supposedly. If I need therapy, how come every single person on the planet knows my name? How come every single time I walk in the room they're like, \"Oh, Mr. Tate. Mr. Tate.\" And everyone starts going, \"Top G. Top G.\" and getting cameras out. How come I'm an international celebrity with hundreds of millions of [\u00a0__\u00a0] dollars? How come when I was thrown in jail and put in a Romanian dungeon for 4 months to stare at the wall, I came out perfectly fine and still destroyed the mainstream media and all of their set up interviews in a way you could never do? How come I'm so monumentally successful and my women never turned on me and I have so many [\u00a0__\u00a0] children and all I do is win and you're telling me that I need therapy while you're in therapy and you're a nobody. Nobody even knows who you are. I don't need therapy. I self-therapize. And I self-therapize with anger because anger makes me brave. And my bravery has allowed me to grab demons by the neck. People say to me, \"Oh, I have anxiety.\" And they talk about it like it's a bad thing. Like this anxiety demon has come",
+  "transcript_hash": "a1f7b1e07de332fe66864734c4db9096b84b37cd14c1cd34c08dc62a46b3e0be",
+  "duration_sec": 63.80899999999998,
+  "topic": null,
+  "visual_style": "nature cinematic 4k mountains forest ocean short",
+  "visual_category": "Luxury",
+  "broll_ids": [
+    "eNUpTV9BGac",
+    "AKeUssuu3Is",
+    "WNCl-69POro",
+    "RzVvThhjAKw",
+    "UV0mhY2Dxr0",
+    "1t7g690boao",
+    "VNu15Qqomt8"
+  ],
+  "parent_manifest_id": null,
+  "version": 1,
+  "version_label": null,
+  "change_summary": null,
+  "paths": {
+    "final": "final.mp4",
+    "audio": "audio/speech.mp3",
+    "caption": "captions/subs.en.json3",
+    "transcript": "transcript.txt"
+  },
+  "hashes": {
+    "final": "17873528f9e234494f9a96b8d3d758f02077edc14e3b52a4d65e962acab4c810",
+    "audio": "544eaf25bfe7c25b663a8c8b37f055b2a9f4ea933003959c79d8f7b2c85e9728",
+    "caption": "017faa4a160102c955f55c49d21f2d00244e845c4a7f0341787d7b0e078688be"
+  },
+  "pipeline": "build_motivation_job",
+  "created_at": "2026-09-10T20:49:06+00:00",
+  "updated_at": "2026-09-10T20:49:06+00:00",
+  "exported_at": "2026-09-10T20:49:06+00:00"
+}
