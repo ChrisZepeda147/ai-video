@@ -25,9 +25,13 @@ Script picks unused speech from configured speaker, unused B-roll, renders 9:16 
 
 Change `speaker` to whoever you want. Blank `speech_query` searches `{speaker} motivational speech`. `--speaker` / `--speech-query` override one run.
 
+## Leftover speech
+
+Script takes 60–90s. Rest of that download is split into more excerpts and stashed in `downloads/motivational/speech-pool/{speaker}/`. Next job for the same speaker uses the pool first — no new YouTube download.
+
 ## Repeat speech
 
-Script fingerprints the excerpt + source captions. Same words on a new YouTube id still counts as used. It skips that candidate and tries the next speech.
+Script fingerprints the excerpt + source captions. Same words on a new YouTube id still counts as used. It skips that candidate and tries the next speech. Leftover minutes from the same download are new excerpts, not repeats.
 
 Do not copy `speech.mp3` / `subs.en.json3` from another job. Do not pass `--speech-url` of a speech already used, even a re-upload.
 

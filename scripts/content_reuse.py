@@ -59,6 +59,7 @@ SPEECH_SHINGLE_LIMIT = 160
 
 PHOTO_EXCLUDE_NAMES = {"reference.png"}
 PHOTO_EXCLUDE_DIRS = {"references", "captioned"}
+POOL_DIR_NAMES = frozenset({"broll-pool", "speech-pool"})
 
 
 @dataclass
@@ -404,9 +405,11 @@ def scan_speech_transcripts(root: Path) -> list[dict[str, Any]]:
         return []
     rows: list[dict[str, Any]] = []
     for job_dir in sorted(jobs.iterdir()):
-        if not job_dir.is_dir():
+        if not job_dir.is_dir() or job_dir.name in POOL_DIR_NAMES:
             continue
         job_path = job_dir / "job.json"
+        if not job_path.is_file():
+            continue
         captions = job_dir / "audio" / "subs.en.json3"
         payload: dict[str, Any] = {}
         if job_path.is_file():
@@ -425,8 +428,13 @@ def scan_speech_transcripts(root: Path) -> list[dict[str, Any]]:
             continue
         fingerprint = speech_fingerprint(text)
         source_hash = str(payload.get("speech_source_hash") or "")
+        start_ms = payload.get("speech_start")
+        if speech_id and start_ms is not None:
+            record_id = f"video:{speech_id}:{int(round(float(start_ms) * 1000))}"
+        else:
+            record_id = f"video:speech-{job_dir.name}"
         record = {
-            "id": f"video:{speech_id}" if speech_id else f"video:speech-{job_dir.name}",
+            "id": record_id,
             "kind": "video",
             "role": "speech",
             "path": rel_path(captions if captions.is_file() else job_path, root),
@@ -701,6 +709,7 @@ SPEECH_JOB_KEYS = (
     "speech_excerpt",
     "speech_source_excerpt",
     "speech_source_hash",
+    "speech_start",
 )
 
 
@@ -798,6 +807,7 @@ def register_video(
     transcript: str = "",
     source_transcript: str = "",
     role: str = "",
+    record_id: str = "",
     root: Path | None = None,
 ) -> Catalog:
     base = root or project_root()
@@ -807,7 +817,7 @@ def register_video(
     else:
         yt = youtube_id.strip()
         record = {
-            "id": f"video:{yt}" if yt else f"video:{slugify(title or 'video')}",
+            "id": record_id or (f"video:{yt}" if yt else f"video:{slugify(title or 'video')}"),
             "kind": "video",
             "path": "",
             "paths": [],
@@ -816,6 +826,8 @@ def register_video(
             "youtube_id": yt or None,
             "sha256": "",
         }
+    if record_id:
+        record["id"] = record_id
     if title:
         record["title"] = title
     if role:

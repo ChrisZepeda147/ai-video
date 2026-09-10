@@ -444,6 +444,123 @@ def _pick_passing_window(
     raise RuntimeError("No B-roll window passed the subject/frame gate.")
 
 
+def build_silent_montage(
+    *,
+    clips_dir: Path,
+    output: Path,
+    target_duration: float,
+    segment_length: float,
+    layout: str = "single",
+    grade: bool,
+    seed: int | None,
+    width: int,
+    height: int,
+    subject: str = "",
+    playback_speed: float = 1.0,
+    use_vision: bool = True,
+) -> set[Path]:
+    """Stitch shuffled B-roll into a fixed-length silent video."""
+    clips = sorted(clips_dir.glob("*.mp4"))
+    if not clips:
+        raise FileNotFoundError(f"No .mp4 clips in {clips_dir}")
+    if target_duration <= 0:
+        raise ValueError("target_duration must be positive")
+
+    needed_clips = min_unique_clips_needed(
+        duration=target_duration,
+        segment_length=segment_length,
+        layout=layout,
+    )
+    if len(clips) < needed_clips:
+        raise RuntimeError(
+            f"Need at least {needed_clips} unique B-roll clips for "
+            f"{target_duration:.0f}s at {segment_length:.1f}s beats, have {len(clips)}."
+        )
+
+    rng = random.Random(seed)
+    picker = _ClipPicker(clips, rng)
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    segments: list[Path] = []
+    accumulated = 0.0
+    segment_index = 0
+
+    with tempfile.TemporaryDirectory(prefix="clips_silent_") as tmp:
+        tmp_dir = Path(tmp)
+        while accumulated < target_duration - 0.02:
+            remaining = target_duration - accumulated
+            this_duration = min(segment_length, remaining)
+            needed = _source_needed(this_duration, playback_speed)
+            strict = segment_index == 0
+            vision = use_vision and segment_index < 2
+
+            if layout == "single":
+                clip, start, source_len = _pick_passing_window(
+                    picker,
+                    segment_length=this_duration,
+                    rng=rng,
+                    subject=subject,
+                    source_needed=needed,
+                    strict=strict,
+                    use_vision=vision,
+                )
+                out_len = min(this_duration, source_len / max(playback_speed, 0.05))
+                segment_path = tmp_dir / f"seg_{segment_index:04d}.mp4"
+                _export_segment(
+                    clip,
+                    segment_path,
+                    start=start,
+                    duration=source_len,
+                    width=width,
+                    height=height,
+                    grade=grade,
+                    playback_speed=playback_speed,
+                    output_duration=out_len,
+                )
+            else:
+                left, left_start, left_len = _pick_passing_window(
+                    picker,
+                    segment_length=this_duration,
+                    rng=rng,
+                    subject=subject,
+                    source_needed=needed,
+                    strict=strict,
+                    use_vision=vision,
+                )
+                right, right_start, right_len = _pick_passing_window(
+                    picker,
+                    segment_length=this_duration,
+                    rng=rng,
+                    subject=subject,
+                    source_needed=needed,
+                    strict=strict,
+                    use_vision=vision,
+                    exclude={left},
+                )
+                segment_path = tmp_dir / f"seg_{segment_index:04d}.mp4"
+                _export_split_segment(
+                    left,
+                    right,
+                    segment_path,
+                    left_start=left_start,
+                    right_start=right_start,
+                    duration=min(left_len, right_len),
+                    width=width,
+                    height=height,
+                    layout=layout,
+                    grade=grade,
+                )
+
+            segments.append(segment_path)
+            accumulated += probe_duration(segment_path)
+            segment_index += 1
+
+        silent_video = tmp_dir / "montage_silent.mp4"
+        _concat_segments(segments, silent_video)
+        _pad_video_to_duration(silent_video, output, target_duration=target_duration)
+    return picker.used_clips()
+
+
 def build_montage(
     *,
     clips_dir: Path,

@@ -18,6 +18,7 @@ from typing import Any
 
 import broll_pool
 import content_reuse
+import speech_pool
 import yt_dlp
 from broll_frame_gate import (
     MIN_CLEAN_SPAN,
@@ -45,6 +46,18 @@ from youtube_popular_downloader import (
 
 KEEP_AUDIO = frozenset({"speech.mp3", "subs.en.json3"})
 KEEP_TOP = frozenset({"url.txt", "job.json", "config.json"})
+
+
+def _preview(text: str, limit: int = 120) -> str:
+    cleaned = " ".join(str(text or "").split())
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[: limit - 3].rstrip() + "..."
+
+
+def _reuse_hit_detail(hit: content_reuse.ReuseHit) -> str:
+    where = hit.path or hit.title
+    return f"{hit.reason} (prior: {where})"
 JUNK_SUFFIXES = (
     "_source.webp",
     "_source.info.json",
@@ -192,18 +205,16 @@ def captions_text(path: Path, *, start: float = 0.0, duration: float = 1_000_000
     return " ".join(text for _start, _end, text in words)
 
 
-def pick_speech_excerpt(
-    captions: Path,
+def _pick_window_from_words(
+    words: list[tuple[float, str]],
     *,
     min_seconds: float,
     max_seconds: float,
-) -> tuple[float, float]:
-    if captions.suffix.lower() != ".json3":
-        return 0.0, max_seconds
-    words = json3_word_times(captions)
+    default_start: float | None = None,
+) -> tuple[float, float] | None:
     if not words:
-        return 0.0, max_seconds
-    start = words[0][0] if words[0][0] < 3.0 else 0.0
+        return None
+    start = default_start if default_start is not None else words[0][0]
     window_end = start + max_seconds
     window_min = start + min_seconds
     best: tuple[float, float] | None = None
@@ -224,7 +235,78 @@ def pick_speech_excerpt(
     if best:
         return best
     last = min(words[-1][0] - start + 0.4, max_seconds)
-    return start, max(last, min_seconds)
+    if last < min_seconds:
+        return None
+    return start, last
+
+
+def pick_speech_excerpt(
+    captions: Path,
+    *,
+    min_seconds: float,
+    max_seconds: float,
+) -> tuple[float, float]:
+    if captions.suffix.lower() != ".json3":
+        return 0.0, max_seconds
+    words = json3_word_times(captions)
+    if not words:
+        return 0.0, max_seconds
+    start = words[0][0] if words[0][0] < 3.0 else 0.0
+    picked = _pick_window_from_words(
+        words,
+        min_seconds=min_seconds,
+        max_seconds=max_seconds,
+        default_start=start,
+    )
+    if picked:
+        return picked
+    return start, max_seconds
+
+
+def leftover_speech_windows(
+    captions: Path,
+    *,
+    used_start: float,
+    used_duration: float,
+    min_seconds: float,
+    max_seconds: float,
+    source_duration: float = 0.0,
+) -> list[tuple[float, float]]:
+    """Unused 60–90s excerpts after the job takes its minute."""
+    if captions.suffix.lower() != ".json3":
+        return []
+    words = json3_word_times(captions)
+    if not words:
+        return []
+    windows: list[tuple[float, float]] = []
+    cursor = used_start + used_duration + 0.15
+    while True:
+        remaining = [(when, text) for when, text in words if when >= cursor]
+        picked = _pick_window_from_words(
+            remaining,
+            min_seconds=min_seconds,
+            max_seconds=max_seconds,
+        )
+        if picked is None:
+            break
+        windows.append(picked)
+        cursor = picked[0] + picked[1] + 0.15
+    before = [(when, text) for when, text in words if when + 0.15 < used_start]
+    picked_before = _pick_window_from_words(
+        before,
+        min_seconds=min_seconds,
+        max_seconds=max_seconds,
+    )
+    if picked_before and picked_before[0] + picked_before[1] <= used_start:
+        windows.insert(0, picked_before)
+    if source_duration <= 0:
+        return windows
+    clamped: list[tuple[float, float]] = []
+    for start, duration in windows:
+        duration = min(duration, source_duration - start)
+        if duration >= min_seconds:
+            clamped.append((start, duration))
+    return clamped
 
 
 def shift_json3(src: Path, dest: Path, *, start: float, duration: float) -> None:
@@ -244,6 +326,11 @@ def shift_json3(src: Path, dest: Path, *, start: float, duration: float) -> None
 
 
 def trim_audio(src: Path, dest: Path, *, start: float, duration: float) -> None:
+    out = dest
+    tmp: Path | None = None
+    if src.resolve() == dest.resolve():
+        tmp = dest.with_name(f"{dest.stem}.trim{dest.suffix}")
+        out = tmp
     cmd = [
         "ffmpeg",
         "-y",
@@ -257,9 +344,13 @@ def trim_audio(src: Path, dest: Path, *, start: float, duration: float) -> None:
         "libmp3lame",
         "-b:a",
         "192k",
-        str(dest),
+        str(out),
     ]
     subprocess.run(cmd, check=True, capture_output=True)
+    if tmp is None:
+        return
+    dest.unlink(missing_ok=True)
+    tmp.replace(dest)
 
 
 def verify_output(path: Path, expected: float) -> None:
@@ -347,8 +438,147 @@ def cleanup_job_dir(job_dir: Path, *, keep_work: bool = False) -> list[Path]:
     return removed
 
 
+def speech_record_id(youtube_id: str, start: float) -> str:
+    return f"video:{youtube_id}:{int(round(start * 1000))}"
+
+
+def _clear_audio_dir(audio_dir: Path) -> None:
+    for leftover in audio_dir.glob("*"):
+        if leftover.is_file():
+            leftover.unlink(missing_ok=True)
+
+
+def _write_job_speech(
+    *,
+    audio_dir: Path,
+    source_mp3: Path,
+    captions: Path,
+    start: float,
+    duration: float,
+) -> None:
+    speech_mp3 = audio_dir / "speech.mp3"
+    trim_audio(source_mp3, speech_mp3, start=start, duration=duration)
+    if source_mp3.resolve() != speech_mp3.resolve():
+        source_mp3.unlink(missing_ok=True)
+    stable_caps = audio_dir / "subs.en.json3"
+    if captions.suffix.lower() == ".json3":
+        shift_json3(captions, stable_caps, start=start, duration=duration)
+        if captions.resolve() != stable_caps.resolve():
+            captions.unlink(missing_ok=True)
+        return
+    if captions.resolve() != stable_caps.resolve():
+        captions.replace(stable_caps)
+
+
+def _stash_speech_leftovers(
+    *,
+    jobs_root: Path,
+    speaker: str,
+    candidate: VideoCandidate,
+    source_mp3: Path,
+    captions: Path,
+    used_start: float,
+    used_duration: float,
+    min_seconds: float,
+    max_seconds: float,
+    source_text: str,
+) -> list[Path]:
+    try:
+        source_duration = probe_duration(source_mp3)
+    except (subprocess.CalledProcessError, ValueError):
+        source_duration = 0.0
+    windows = leftover_speech_windows(
+        captions,
+        used_start=used_start,
+        used_duration=used_duration,
+        min_seconds=min_seconds,
+        max_seconds=max_seconds,
+        source_duration=source_duration,
+    )
+    if not windows:
+        return []
+    source_hash = content_reuse.speech_fingerprint(source_text)["transcript_hash"]
+    stashed: list[Path] = []
+    audio_dir = source_mp3.parent
+    for index, (start, duration) in enumerate(windows, start=2):
+        tmp_audio = audio_dir / f"_stash_part{index:02d}.mp3"
+        tmp_caps = audio_dir / f"_stash_part{index:02d}.json3"
+        try:
+            trim_audio(source_mp3, tmp_audio, start=start, duration=duration)
+            if captions.suffix.lower() == ".json3":
+                shift_json3(captions, tmp_caps, start=start, duration=duration)
+            else:
+                tmp_audio.unlink(missing_ok=True)
+                continue
+        except (OSError, subprocess.CalledProcessError, ValueError) as exc:
+            print(f"  skip leftover {index}: {exc}")
+            tmp_audio.unlink(missing_ok=True)
+            tmp_caps.unlink(missing_ok=True)
+            continue
+        excerpt = captions_text(captions, start=start, duration=duration)
+        dest = speech_pool.stash_excerpt(
+            jobs_root,
+            speaker=speaker,
+            youtube_id=candidate.video_id,
+            title=candidate.title,
+            url=candidate.url,
+            start=start,
+            duration=duration,
+            excerpt=excerpt,
+            audio=tmp_audio,
+            captions=tmp_caps,
+            source_hash=source_hash,
+        )
+        if dest is not None:
+            stashed.append(dest)
+    if stashed:
+        print(f"Stashed {len(stashed)} leftover speech excerpt(s) for later {speaker} jobs")
+    return stashed
+
+
+def _take_pooled_speech(
+    *,
+    jobs_root: Path,
+    audio_dir: Path,
+    url_file: Path,
+    speaker: str,
+    speech_url: str,
+    allow_reuse: bool,
+) -> tuple[VideoCandidate, float, float, str, str] | None:
+    want_id = speech_pool.youtube_id_from_url(speech_url) if speech_url else ""
+    item = speech_pool.take_from_pool(
+        jobs_root,
+        speaker=speaker,
+        audio_dir=audio_dir,
+        youtube_id=want_id,
+        allow_reuse=allow_reuse,
+    )
+    if item is None:
+        return None
+    candidate = VideoCandidate(
+        video_id=item.youtube_id,
+        title=item.title,
+        url=item.url,
+        channel="",
+        view_count=None,
+        duration_seconds=item.duration,
+        published_at=None,
+        source="speech-pool",
+    )
+    url_file.write_text(f"{item.url}\n", encoding="utf-8")
+    content_reuse.register_video(
+        youtube_id=item.youtube_id,
+        title=item.title,
+        transcript=item.excerpt,
+        role="speech",
+        record_id=speech_record_id(item.youtube_id, item.start),
+    )
+    return candidate, item.start, item.duration, item.excerpt, item.excerpt
+
+
 def prepare_speech(
     *,
+    jobs_root: Path,
     audio_dir: Path,
     url_file: Path,
     speaker: str,
@@ -357,11 +587,23 @@ def prepare_speech(
     min_seconds: float,
     max_seconds: float,
     allow_reuse: bool = False,
-) -> tuple[VideoCandidate, float, str, str]:
+) -> tuple[VideoCandidate, float, float, str, str]:
+    pooled = _take_pooled_speech(
+        jobs_root=jobs_root,
+        audio_dir=audio_dir,
+        url_file=url_file,
+        speaker=speaker,
+        speech_url=speech_url,
+        allow_reuse=allow_reuse,
+    )
+    if pooled is not None:
+        return pooled
     if speech_url:
         candidates = discover_urls([speech_url])
+        print(f"Speech URL: {speech_url}")
     else:
         candidates = search_unused_speeches(query=speech_query, speaker=speaker, limit=8)
+        print(f"Speech candidates: {len(candidates)} unused (search: {speech_query})")
     if not candidates:
         raise RuntimeError("No unused speech found. Try --speech-url or a different --speech-query.")
 
@@ -374,6 +616,7 @@ def prepare_speech(
     captions: Path | None = None
     for candidate in candidates:
         if candidate.video_id in used_ids() and not speech_url:
+            print(f"  skip used id: {candidate.video_id} — {candidate.title}")
             continue
         print(f"Trying speech: {candidate.title} ({candidate.video_id})")
         try:
@@ -397,12 +640,10 @@ def prepare_speech(
             source_text=source_text,
         )
         if hits and not allow_reuse:
-            print(f"  skip repeat transcript: {hits[0].reason}")
+            print(f"  skip repeat transcript: {_reuse_hit_detail(hits[0])}")
             if speech_url:
-                raise RuntimeError(f"Speech transcript already used: {hits[0].reason}")
-            for leftover in audio_dir.glob("*"):
-                if leftover.is_file():
-                    leftover.unlink(missing_ok=True)
+                raise RuntimeError(f"Speech transcript already used: {_reuse_hit_detail(hits[0])}")
+            _clear_audio_dir(audio_dir)
             continue
         chosen = candidate
         break
@@ -410,29 +651,38 @@ def prepare_speech(
         raise RuntimeError("Could not download an unused speech.")
 
     url_file.write_text(f"{chosen.url}\n", encoding="utf-8")
+    print(f"Speech picked: {chosen.title} ({chosen.video_id})")
     print(f"Excerpt: start={start:.2f}s duration={duration:.2f}s")
-
-    speech_mp3 = audio_dir / "speech.mp3"
-    trim_audio(source_mp3, speech_mp3, start=start, duration=duration)
-    if source_mp3.resolve() != speech_mp3.resolve():
-        source_mp3.unlink(missing_ok=True)
-
-    stable_caps = audio_dir / "subs.en.json3"
-    if captions.suffix.lower() == ".json3":
-        shift_json3(captions, stable_caps, start=start, duration=duration)
-        if captions.resolve() != stable_caps.resolve():
-            captions.unlink(missing_ok=True)
-    elif captions.resolve() != stable_caps.resolve():
-        captions.replace(stable_caps)
-
+    print(f"  preview: {_preview(excerpt_text)}")
+    if not allow_reuse:
+        _stash_speech_leftovers(
+            jobs_root=jobs_root,
+            speaker=speaker,
+            candidate=chosen,
+            source_mp3=source_mp3,
+            captions=captions,
+            used_start=start,
+            used_duration=duration,
+            min_seconds=min_seconds,
+            max_seconds=max_seconds,
+            source_text=source_text,
+        )
+    _write_job_speech(
+        audio_dir=audio_dir,
+        source_mp3=source_mp3,
+        captions=captions,
+        start=start,
+        duration=duration,
+    )
     content_reuse.register_video(
         youtube_id=chosen.video_id,
         title=chosen.title,
         transcript=excerpt_text,
         source_transcript=source_text,
         role="speech",
+        record_id=speech_record_id(chosen.video_id, start),
     )
-    return chosen, duration, excerpt_text, source_text
+    return chosen, start, duration, excerpt_text, source_text
 
 
 def resolve_segment_length(duration: float, segment_length: float | None) -> float:
@@ -544,9 +794,13 @@ def download_broll_candidates(
         start_offset=start_offset,
     )
     ok_ids = [str(row.get("video_id") or "") for row in results if row.get("status") == "ok"]
+    failed = len(candidates) - len(ok_ids)
+    if failed:
+        print(f"  download: {len(ok_ids)} ok, {failed} failed")
     kept = filter_broll_clips(clips_dir, subject=subject, use_vision=use_vision)
     if not kept:
         raise RuntimeError("B-roll download produced no clips that passed the subject/frame gate.")
+    print(f"  ready: {len(kept)} clip(s) after subject/frame gate")
     return [item for item in ok_ids if item]
 
 
@@ -584,7 +838,8 @@ def filter_broll_clips(
     use_vision: bool = True,
 ) -> list[Path]:
     kept: list[Path] = []
-    for clip in sorted(clips_dir.glob("*_part*.mp4")):
+    all_clips = sorted(clips_dir.glob("*_part*.mp4"))
+    for clip in all_clips:
         try:
             duration = probe_duration(clip)
         except (subprocess.CalledProcessError, ValueError):
@@ -613,6 +868,8 @@ def filter_broll_clips(
                 clip.unlink(missing_ok=True)
                 continue
         kept.append(clip)
+    if all_clips:
+        print(f"  frame gate: kept {len(kept)}/{len(all_clips)} clip(s)")
     return kept
 
 
@@ -661,6 +918,7 @@ def ensure_broll_clips(
     broll_pool.take_from_pool(jobs_root, subject=subject, clips_dir=clips_dir)
     kept = filter_broll_clips(clips_dir, subject=subject, use_vision=use_vision)
     if len(kept) >= needed_clips:
+        print(f"B-roll: {len(kept)} clip(s) ready (need {needed_clips}) — skip download")
         return broll_ids or []
     if broll_ids:
         candidates = discover_urls(
@@ -713,6 +971,12 @@ def render_job(
 ) -> set[Path]:
     output.parent.mkdir(parents=True, exist_ok=True)
     temp_output = output.with_suffix(".nocap.mp4")
+    clip_count = len(list(clips_dir.glob("*_part*.mp4")))
+    grade_note = "charcoal grade" if grade else "no grade"
+    print(
+        f"Rendering montage: {clip_count} clip(s), {duration:.0f}s speech, "
+        f"{segment_length:.1f}s beats, {playback_speed:.0%} speed, {grade_note}"
+    )
     used_clips = build_montage(
         clips_dir=clips_dir,
         audio=audio,
@@ -729,6 +993,7 @@ def render_job(
         playback_speed=playback_speed,
         use_vision=use_vision,
     )
+    print("Burning word captions...")
     burn_captions(
         temp_output,
         captions,
@@ -741,6 +1006,8 @@ def render_job(
     )
     temp_output.unlink(missing_ok=True)
     verify_output(output, duration)
+    size_mb = output.stat().st_size / (1024 * 1024)
+    print(f"  render done: {output.name} ({size_mb:.1f} MB, {duration:.1f}s)")
     broll_pool.stash_unused_clips(
         jobs_root,
         subject=subject,
@@ -785,7 +1052,8 @@ def rerender_existing_job(
             return 1
         print("Restoring speech from job.json...")
         try:
-            _speech, duration, excerpt_text, source_text = prepare_speech(
+            _speech, start, duration, excerpt_text, source_text = prepare_speech(
+                jobs_root=jobs_root,
                 audio_dir=job_dir / "audio",
                 url_file=job_dir / "url.txt",
                 speaker=str(payload.get("speaker") or "Andrew Tate"),
@@ -799,6 +1067,7 @@ def rerender_existing_job(
             print(exc, file=sys.stderr)
             return 1
         payload["audio_duration"] = duration
+        payload["speech_start"] = start
         payload["speech_excerpt"] = excerpt_text
         payload["speech_source_hash"] = content_reuse.speech_fingerprint(source_text)["transcript_hash"]
         write_job_json(job_path, payload)
@@ -867,13 +1136,16 @@ def write_job_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+SKIP_CLEANUP_DIRS = frozenset({broll_pool.POOL_DIRNAME, speech_pool.POOL_DIRNAME})
+
+
 def cleanup_all(jobs_root: Path, *, keep_work: bool) -> int:
     if not jobs_root.is_dir():
         print(f"No jobs folder: {jobs_root}", file=sys.stderr)
         return 1
     total = 0
     for child in sorted(jobs_root.iterdir()):
-        if not child.is_dir():
+        if not child.is_dir() or child.name in SKIP_CLEANUP_DIRS:
             continue
         removed = cleanup_job_dir(child, keep_work=keep_work)
         print(f"Cleaned {child.name}: {len(removed)} item(s)")
@@ -996,10 +1268,14 @@ def main() -> int:
     audio_dir.mkdir(parents=True, exist_ok=True)
     clips_dir.mkdir(parents=True, exist_ok=True)
 
+    print(f"Job: {args.slug}")
+    print(f"Output: {output.as_posix()}")
     print(f"Speaker: {speaker}  (edit {config_path.as_posix()})")
     print(f"Speech search: {speech_query}")
+    print(f"B-roll query: {args.broll_query}")
     try:
-        speech, duration, excerpt_text, source_text = prepare_speech(
+        speech, start, duration, excerpt_text, source_text = prepare_speech(
+            jobs_root=jobs_root,
             audio_dir=audio_dir,
             url_file=job_dir / "url.txt",
             speaker=speaker,
@@ -1067,6 +1343,7 @@ def main() -> int:
             "broll_ids": broll_ids,
             "speech_excerpt": excerpt_text,
             "speech_source_hash": content_reuse.speech_fingerprint(source_text)["transcript_hash"],
+            "speech_start": start,
             "audio_duration": duration,
             "segment_length": segment_length,
             "playback_speed": args.playback_speed,

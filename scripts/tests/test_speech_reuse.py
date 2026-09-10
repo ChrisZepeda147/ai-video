@@ -144,6 +144,60 @@ class SpeechReuseTests(unittest.TestCase):
             self.assertEqual(job["broll_ids"], ["eeeeeeeeeee"])
             self.assertNotIn("ddddddddddd", content_reuse.used_youtube_ids(root=root))
 
+    def test_leftover_excerpt_is_not_reuse_without_source_text(self) -> None:
+        first = REPEAT_SPEECH
+        leftover = (
+            "money is a tool not a trophy you stack skills you protect your time "
+            "and you walk away from rooms that make you smaller every single week"
+        )
+        catalog = content_reuse.Catalog(
+            videos=[
+                {
+                    "id": "video:aaaaaaaaaaa:0",
+                    "kind": "video",
+                    "role": "speech",
+                    "title": "Original upload",
+                    "youtube_id": "aaaaaaaaaaa",
+                    "speech_source_hash": content_reuse.speech_fingerprint(first + " " + leftover)[
+                        "transcript_hash"
+                    ],
+                    **content_reuse.speech_fingerprint(first),
+                }
+            ]
+        )
+        hits = content_reuse.find_speech_reuse(leftover, catalog=catalog)
+        self.assertEqual(hits, [])
+
+    def test_scan_keeps_two_excerpts_from_same_speech(self) -> None:
+        leftover = (
+            "money is a tool not a trophy you stack skills you protect your time "
+            "and you walk away from rooms that make you smaller every single week"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            jobs = root / "downloads" / "motivational"
+            for slug, start, text in (
+                ("job-one", 0.0, REPEAT_SPEECH),
+                ("job-two", 70.0, leftover),
+            ):
+                job = jobs / slug
+                job.mkdir(parents=True)
+                (job / "job.json").write_text(
+                    json.dumps(
+                        {
+                            "speech_id": "ddddddddddd",
+                            "speech_title": "Demo speech",
+                            "speech_excerpt": text,
+                            "speech_start": start,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            rows = content_reuse.scan_speech_transcripts(root)
+            self.assertEqual(len(rows), 2)
+            self.assertEqual({row["id"] for row in rows}, {"video:ddddddddddd:0", "video:ddddddddddd:70000"})
+
 
 if __name__ == "__main__":
     unittest.main()
+
