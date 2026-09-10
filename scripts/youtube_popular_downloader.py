@@ -79,12 +79,6 @@ LIVE_TITLE_RE = re.compile(
     r"(🔴|\blive\b|\blivestream\b|\b24/?7\b|\bstate of play\b|\bdirect\b|\bshowcase\b)",
     re.IGNORECASE,
 )
-GAMEPLAY_TITLE_RE = re.compile(
-    r"\b(gameplay|let'?s play|playthrough|walkthrough|no commentary|"
-    r"full game|ranked|clutch|highlights?|speedrun|boss fight|"
-    r"playing|i beat|i won)\b",
-    re.IGNORECASE,
-)
 BACKGROUND_GAMEPLAY_TITLE_RE = re.compile(
     r"\b(no commentary|without commentary|background gameplay|satisfying|"
     r"parkour|subway surfers|mobile gameplay|asmr gameplay|screen record|"
@@ -232,11 +226,6 @@ def _iso8601_duration_to_seconds(duration: str | None) -> float | None:
     return float(hours * 3600 + minutes * 60 + seconds)
 
 
-def discover_trending_ytdlp(*, limit: int) -> list[VideoCandidate]:
-    """Search for popular background gameplay when API results are thin."""
-    return discover_background_gameplay(limit=max(limit * 4, 30))
-
-
 def discover_background_gameplay(*, limit: int) -> list[VideoCandidate]:
     per_query = max(limit // 2, 12)
     seen: set[str] = set()
@@ -293,10 +282,6 @@ def is_trailer(video: VideoCandidate) -> bool:
 
 def is_live_or_event(video: VideoCandidate) -> bool:
     return bool(LIVE_TITLE_RE.search(video.title))
-
-
-def looks_like_gameplay(video: VideoCandidate) -> bool:
-    return bool(GAMEPLAY_TITLE_RE.search(video.title))
 
 
 def looks_like_background_gameplay(video: VideoCandidate) -> bool:
