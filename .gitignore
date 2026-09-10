@@ -4,6 +4,7 @@ scripts/.tiktok_tokens.json
 downloads/
 assets/generated/
 data/discovery/*
+data/motivation_jobs/
 !data/discovery/.gitkeep
 data/publishing/credentials/
 data/publishing/oauth_states/

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""One-shot luxury motivation job: unused speech + B-roll + render + cleanup.
+"""One-shot luxury motivation job: speech + B-roll + render + cleanup.
 
 Speaker comes from downloads/motivational/config.json (edit `speaker`).
 CLI --speaker / --speech-query override the file.
+Reuse policy defaults to allow — production library is advisory context only.
 """
 
 from __future__ import annotations
@@ -18,6 +19,14 @@ from typing import Any
 import content_reuse
 import yt_dlp
 from build_clips_montage import build_montage, probe_duration
+from discovery.reuse_policy import REUSE_POLICIES, normalize_reuse_policy
+from toolchain_env import (
+    check_toolchain,
+    classify_download_error,
+    format_toolchain_report,
+    resolve_tool,
+    subprocess_env,
+)
 from build_stills_slideshow import burn_captions, parse_json3_words
 from youtube_popular_downloader import (
     VideoCandidate,
@@ -40,6 +49,12 @@ JUNK_SUFFIXES = (
     ".nocap.mp4",
 )
 JUNK_NAMES = frozenset({"manifest.json", "clips-urls.txt"})
+
+
+class MotivationJobError(RuntimeError):
+    def __init__(self, code: str, message: str):
+        self.code = code
+        super().__init__(f"{code}: {message}")
 
 
 def project_root() -> Path:
@@ -110,19 +125,66 @@ def speech_score(candidate: VideoCandidate) -> tuple[int, int]:
     return (score, candidate.view_count or 0)
 
 
-def search_unused_speeches(*, query: str, speaker: str, limit: int) -> list[VideoCandidate]:
+def prior_source_ranges(video_id: str) -> list[tuple[float, float]]:
+    """Advisory ranges from production library for this YouTube source."""
+    try:
+        from discovery.config import default_db_path, load_env
+        from discovery.store import DiscoveryStore
+
+        load_env()
+        store = DiscoveryStore(default_db_path())
+        try:
+            rows = store._conn.execute(
+                """
+                SELECT source_start_sec, source_end_sec
+                FROM production_library_videos
+                WHERE source_external_id = ?
+                  AND source_start_sec IS NOT NULL
+                  AND source_end_sec IS NOT NULL
+                ORDER BY created_at DESC
+                """,
+                (video_id,),
+            ).fetchall()
+        finally:
+            store.close()
+        return [
+            (float(row["source_start_sec"]), float(row["source_end_sec"]))
+            for row in rows
+            if row["source_start_sec"] is not None and row["source_end_sec"] is not None
+        ]
+    except Exception:
+        return []
+
+
+def search_speeches(
+    *,
+    query: str,
+    speaker: str,
+    limit: int,
+    reuse_policy: str = "allow",
+) -> list[VideoCandidate]:
     raw = discover_search(query=query, limit=max(limit * 3, 12))
-    skip = used_ids()
+    used = used_ids()
+    skip = used if reuse_policy == "require_new" else set()
     matches = [
         item
         for item in raw
         if item.video_id not in skip and speaker_matches(item, speaker)
     ]
-    matches.sort(key=speech_score, reverse=True)
+    if reuse_policy == "prefer_new":
+        matches.sort(
+            key=lambda item: (
+                item.video_id in used,
+                -speech_score(item)[0],
+                -speech_score(item)[1],
+            )
+        )
+    else:
+        matches.sort(key=speech_score, reverse=True)
     return matches[:limit]
 
 
-def download_one_audio(candidate: VideoCandidate, audio_dir: Path) -> Path | None:
+def download_one_audio(candidate: VideoCandidate, audio_dir: Path) -> tuple[Path | None, str | None]:
     audio_dir.mkdir(parents=True, exist_ok=True)
     results = download_videos(
         [candidate],
@@ -136,9 +198,10 @@ def download_one_audio(candidate: VideoCandidate, audio_dir: Path) -> Path | Non
         aspect_ratio="original",
     )
     if not results or results[0].get("status") != "ok":
-        return None
+        error = results[0].get("error") if results else "download failed"
+        return None, classify_download_error(str(error))
     mp3s = sorted(audio_dir.glob("*.mp3"))
-    return mp3s[0] if mp3s else None
+    return (mp3s[0], None) if mp3s else (None, "DOWNLOAD_FAILED")
 
 
 def download_subs(url: str, audio_dir: Path) -> Path:
@@ -169,37 +232,58 @@ def json3_word_times(path: Path) -> list[tuple[float, str]]:
     return [(start, text) for start, _end, text in words]
 
 
+def _range_overlaps(a0: float, a1: float, b0: float, b1: float) -> bool:
+    return max(a0, b0) < min(a1, b1)
+
+
 def pick_speech_excerpt(
     captions: Path,
     *,
     min_seconds: float,
     max_seconds: float,
+    avoid_ranges: list[tuple[float, float]] | None = None,
 ) -> tuple[float, float]:
     if captions.suffix.lower() != ".json3":
         return 0.0, max_seconds
     words = json3_word_times(captions)
     if not words:
         return 0.0, max_seconds
+
+    avoid = avoid_ranges or []
+    candidates: list[tuple[float, float, int]] = []
+    start_points = sorted({0.0, *(word[0] for word in words if word[0] >= 0.0)})
+    for start in start_points:
+        if any(_range_overlaps(start, start + min_seconds, lo, hi) for lo, hi in avoid):
+            continue
+        window_end = start + max_seconds
+        window_min = start + min_seconds
+        best: tuple[float, float] | None = None
+        score = 0
+        for i, (when, text) in enumerate(words):
+            if when < window_min or when > window_end:
+                continue
+            nxt = words[i + 1][0] if i + 1 < len(words) else when + 2.0
+            gap = nxt - when
+            ends_sentence = text.endswith((".", "?", "!"))
+            if gap < 0.65 and not ends_sentence:
+                continue
+            duration = min(when - start + 0.45, max_seconds)
+            if duration < min_seconds:
+                continue
+            local_score = 2 if ends_sentence else 1
+            best = (start, duration)
+            score = local_score
+            if ends_sentence and gap >= 0.65:
+                break
+        if best and not any(_range_overlaps(best[0], best[0] + best[1], lo, hi) for lo, hi in avoid):
+            candidates.append((best[0], best[1], score))
+
+    if candidates:
+        candidates.sort(key=lambda item: (-item[2], item[0]))
+        chosen = candidates[0]
+        return chosen[0], chosen[1]
+
     start = words[0][0] if words[0][0] < 3.0 else 0.0
-    window_end = start + max_seconds
-    window_min = start + min_seconds
-    best: tuple[float, float] | None = None
-    for i, (when, text) in enumerate(words):
-        if when < window_min or when > window_end:
-            continue
-        nxt = words[i + 1][0] if i + 1 < len(words) else when + 2.0
-        gap = nxt - when
-        ends_sentence = text.endswith((".", "?", "!"))
-        if gap < 0.65 and not ends_sentence:
-            continue
-        duration = min(when - start + 0.45, max_seconds)
-        if duration < min_seconds:
-            continue
-        best = (start, duration)
-        if ends_sentence and gap >= 0.65:
-            return best
-    if best:
-        return best
     last = min(words[-1][0] - start + 0.4, max_seconds)
     return start, max(last, min_seconds)
 
@@ -221,8 +305,9 @@ def shift_json3(src: Path, dest: Path, *, start: float, duration: float) -> None
 
 
 def trim_audio(src: Path, dest: Path, *, start: float, duration: float) -> None:
+    ffmpeg = resolve_tool("ffmpeg") or "ffmpeg"
     cmd = [
-        "ffmpeg",
+        ffmpeg,
         "-y",
         "-ss",
         str(start),
@@ -240,9 +325,10 @@ def trim_audio(src: Path, dest: Path, *, start: float, duration: float) -> None:
 
 
 def verify_output(path: Path, expected: float) -> None:
+    ffprobe = resolve_tool("ffprobe") or "ffprobe"
     result = subprocess.run(
         [
-            "ffprobe",
+            ffprobe,
             "-v",
             "error",
             "-show_entries",
@@ -321,37 +407,98 @@ def prepare_speech(
     speech_url: str,
     min_seconds: float,
     max_seconds: float,
+    reuse_policy: str = "allow",
 ) -> tuple[VideoCandidate, float]:
+    toolchain = check_toolchain()
+    if not toolchain["ffmpeg"]["found"] or not toolchain["ffprobe"]["found"]:
+        raise MotivationJobError(
+            "FFMPEG_NOT_FOUND",
+            format_toolchain_report(toolchain)
+            + "\nSet FFMPEG_DIR in scripts/.env or install FFmpeg and add it to PATH.",
+        )
+
     if speech_url:
         candidates = discover_urls([speech_url])
     else:
-        candidates = search_unused_speeches(query=speech_query, speaker=speaker, limit=8)
+        candidates = search_speeches(
+            query=speech_query,
+            speaker=speaker,
+            limit=8,
+            reuse_policy=reuse_policy,
+        )
     if not candidates:
-        raise RuntimeError("No unused speech found. Try --speech-url or a different --speech-query.")
+        if reuse_policy == "require_new":
+            raise MotivationJobError(
+                "REUSE_RESTRICTION",
+                "No unused speech candidates found. Try --speech-url or relax reuse policy.",
+            )
+        raise MotivationJobError(
+            "NO_CANDIDATE_FOUND",
+            "No speech candidates found. Try --speech-url or a different --speech-query.",
+        )
 
     source_mp3: Path | None = None
     chosen: VideoCandidate | None = None
+    last_code: str | None = None
+    skipped_reuse = 0
     for candidate in candidates:
-        if candidate.video_id in used_ids() and not speech_url:
+        if reuse_policy == "require_new" and candidate.video_id in used_ids() and not speech_url:
+            skipped_reuse += 1
             continue
-        print(f"Trying speech: {candidate.title} ({candidate.video_id})")
+        used_before = candidate.video_id in used_ids()
+        prior_ranges = prior_source_ranges(candidate.video_id) if used_before else []
+        if used_before:
+            print(
+                f"Trying speech (previously used source): {candidate.title} ({candidate.video_id})"
+            )
+            if prior_ranges:
+                formatted = ", ".join(f"{lo:.0f}s–{hi:.0f}s" for lo, hi in prior_ranges[:6])
+                print(f"  prior ranges: {formatted}")
+        else:
+            print(f"Trying speech: {candidate.title} ({candidate.video_id})")
         try:
-            source_mp3 = download_one_audio(candidate, audio_dir)
+            source_mp3, error_code = download_one_audio(candidate, audio_dir)
         except Exception as exc:  # noqa: BLE001 — next candidate on age-gate / download fail
-            print(f"  skip: {exc}")
+            error_code = classify_download_error(exc)
+            print(f"  skip ({error_code}): {exc}")
+            last_code = error_code
+            if error_code == "FFMPEG_NOT_FOUND":
+                break
+            continue
+        if error_code:
+            print(f"  skip ({error_code})")
+            last_code = error_code
+            if error_code == "FFMPEG_NOT_FOUND":
+                break
             continue
         if source_mp3:
             chosen = candidate
             break
+
+    if last_code == "FFMPEG_NOT_FOUND":
+        raise MotivationJobError("FFMPEG_NOT_FOUND", format_toolchain_report())
     if chosen is None or source_mp3 is None:
-        raise RuntimeError("Could not download an unused speech.")
+        if skipped_reuse and skipped_reuse == len(candidates):
+            raise MotivationJobError(
+                "REUSE_RESTRICTION",
+                "All speech candidates were skipped by require_new reuse policy.",
+            )
+        if last_code:
+            raise MotivationJobError(last_code, f"Speech download failed ({last_code}).")
+        raise MotivationJobError("DOWNLOAD_FAILED", "Could not download speech from any candidate.")
 
     url_file.write_text(f"{chosen.url}\n", encoding="utf-8")
     captions = download_subs(chosen.url, audio_dir)
+    prior_ranges = prior_source_ranges(chosen.video_id)
+    avoid_ranges = prior_ranges if reuse_policy == "require_new" else None
+    if prior_ranges and reuse_policy != "require_new":
+        formatted = ", ".join(f"{lo:.0f}s–{hi:.0f}s" for lo, hi in prior_ranges[:8])
+        print(f"  prior production segments (advisory): {formatted}")
     start, duration = pick_speech_excerpt(
         captions,
         min_seconds=min_seconds,
         max_seconds=max_seconds,
+        avoid_ranges=avoid_ranges,
     )
     print(f"Excerpt: start={start:.2f}s duration={duration:.2f}s")
 
@@ -381,12 +528,16 @@ def prepare_broll(
     max_parts: int,
     min_views: int,
     min_duration: int,
+    reuse_policy: str = "allow",
 ) -> list[str]:
     raw = discover_search(query=query, limit=max(limit * 4, 16))
-    skip = used_ids()
-    unused = [item for item in raw if item.video_id not in skip]
+    used = used_ids()
+    if reuse_policy == "require_new":
+        pool = [item for item in raw if item.video_id not in used]
+    else:
+        pool = list(raw)
     candidates = filter_unwanted(
-        unused,
+        pool,
         limit=limit,
         exclude_music=True,
         exclude_trailers=True,
@@ -395,8 +546,15 @@ def prepare_broll(
         min_views=min_views,
         min_duration=float(min_duration),
     )
+    if reuse_policy == "prefer_new":
+        candidates.sort(key=lambda item: item.video_id in used)
     if not candidates:
-        raise RuntimeError(f"No unused B-roll for query: {query}")
+        if reuse_policy == "require_new":
+            raise MotivationJobError(
+                "REUSE_RESTRICTION",
+                f"No unused B-roll for query: {query}",
+            )
+        raise MotivationJobError("NO_CANDIDATE_FOUND", f"No B-roll candidates for query: {query}")
     return download_broll_candidates(
         clips_dir,
         candidates,
@@ -573,13 +731,19 @@ def cleanup_all(jobs_root: Path, *, keep_work: bool) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--slug", help="Job folder name, e.g. yacht-motivation")
-    parser.add_argument("--broll-query", default="", help="YouTube search for unused B-roll")
+    parser.add_argument("--broll-query", default="", help="YouTube search for B-roll")
     parser.add_argument(
         "--speech-query",
         default=None,
         help="YouTube search for speech. Default: '{speaker} motivational speech'",
     )
-    parser.add_argument("--speech-url", default="", help="Use this unused speech URL instead of search")
+    parser.add_argument("--speech-url", default="", help="Use this speech URL instead of search")
+    parser.add_argument(
+        "--reuse-policy",
+        default="allow",
+        choices=sorted(REUSE_POLICIES),
+        help="allow (default): reuse OK; prefer_new: rank fresh first; require_new: unused only",
+    )
     parser.add_argument(
         "--speaker",
         default=None,
@@ -622,6 +786,8 @@ def main() -> int:
             pass
 
     args = build_parser().parse_args()
+    subprocess_env()
+    reuse_policy = normalize_reuse_policy(args.reuse_policy)
     jobs_root = args.jobs_root or (project_root() / "downloads" / "motivational")
     speaker, speech_query, config_path = resolve_speech_settings(
         jobs_root=jobs_root,
@@ -668,6 +834,8 @@ def main() -> int:
 
     print(f"Speaker: {speaker}  (edit {config_path.as_posix()})")
     print(f"Speech search: {speech_query}")
+    print(f"Reuse policy: {reuse_policy}")
+    print(format_toolchain_report())
     try:
         speech, duration = prepare_speech(
             audio_dir=audio_dir,
@@ -677,6 +845,7 @@ def main() -> int:
             speech_url=args.speech_url,
             min_seconds=args.min_seconds,
             max_seconds=args.max_seconds,
+            reuse_policy=reuse_policy,
         )
         broll_ids = prepare_broll(
             clips_dir=clips_dir,
@@ -686,6 +855,7 @@ def main() -> int:
             max_parts=args.max_parts,
             min_views=args.min_views,
             min_duration=args.min_duration,
+            reuse_policy=reuse_policy,
         )
         render_job(
             clips_dir=clips_dir,
@@ -697,8 +867,12 @@ def main() -> int:
             seed=args.seed,
             grade=not args.no_grade,
         )
-    except (FileNotFoundError, RuntimeError, ValueError, subprocess.CalledProcessError) as exc:
+    except MotivationJobError as exc:
         print(exc, file=sys.stderr)
+        return 1
+    except (FileNotFoundError, RuntimeError, ValueError, subprocess.CalledProcessError) as exc:
+        code = classify_download_error(exc)
+        print(f"{code}: {exc}", file=sys.stderr)
         return 1
 
     write_job_json(
@@ -719,6 +893,20 @@ def main() -> int:
     if not args.no_cleanup:
         removed = cleanup_job_dir(job_dir, keep_work=args.keep_work)
         print(f"Cleaned {len(removed)} leftover file(s).")
+    try:
+        from discovery.auto_register import sync_register_best_effort
+
+        reg = sync_register_best_effort(slug=args.slug, visual_style=args.broll_query)
+        if reg:
+            print(f"Production library: Video {reg.get('id')} ({reg.get('video_key')})")
+    except Exception as exc:
+        print(f"Library register skipped: {exc}", file=sys.stderr)
+    try:
+        from discovery.site_videos import sync_legacy_renders_to_site
+
+        sync_legacy_renders_to_site(slugs=[args.slug], rebuild_catalog=False)
+    except Exception:
+        pass
     print(f"Saved: {output}")
     return 0
 

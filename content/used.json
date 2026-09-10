@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-09-08T04:32:26+00:00",
+  "updated_at": "2026-09-10T04:28:42+00:00",
   "photos": [
     {
       "id": "photo:purple-gt3rs-forest-mansion",
@@ -367,6 +367,524 @@
       "title": "svj-pair-la-mansion-move",
       "youtube_id": null,
       "sha256": "e5842d55aeff7012fbdbbea0ed378ed20df26233a0e5828ecbabd2cc6ae5f0c6"
+    },
+    {
+      "id": "video:kbncqwso98-let-her-leave-motivational-speech-andrew-tate",
+      "kind": "video",
+      "path": "downloads/motivational/pool/speech/-kBnCqwSO98/-kBnCqwSO98_LET HER LEAVE - Motivational Speech (Andrew Tate).webm",
+      "paths": [
+        "downloads/motivational/pool/speech/-kBnCqwSO98/-kBnCqwSO98_LET HER LEAVE - Motivational Speech (Andrew Tate).webm"
+      ],
+      "slug": "kbncqwso98-let-her-leave-motivational-speech-andrew-tate",
+      "title": "-kBnCqwSO98 LET HER LEAVE - Motivational Speech (Andrew Tate)",
+      "youtube_id": null,
+      "sha256": "12120eba5cddb53f9c25522862a64b078b4a29f4709974db2e2b65c9618bc3ac"
+    },
+    {
+      "id": "video:ft-dxwguxb0-self-discipline-best-motivational-speech-video-featuring-will-smith",
+      "kind": "video",
+      "path": "downloads/motivational/pool/speech/ft_DXwgUXB0/ft_DXwgUXB0_SELF DISCIPLINE - Best Motivational Speech Video (Featuring Will Smith).webm",
+      "paths": [
+        "downloads/motivational/pool/speech/ft_DXwgUXB0/ft_DXwgUXB0_SELF DISCIPLINE - Best Motivational Speech Video (Featuring Will Smith).webm"
+      ],
+      "slug": "ft-dxwguxb0-self-discipline-best-motivational-speech-video-featuring-will-smith",
+      "title": "ft DXwgUXB0 SELF DISCIPLINE - Best Motivational Speech Video (Featuring Will Smith)",
+      "youtube_id": null,
+      "sha256": "38cc713ffa449ea88b58f89dc6ca0ab0cc3c32589a86727159e07b6f47632f83"
+    },
+    {
+      "id": "video:i0fbrqxomlk-andrew-tate-s-legendary-motivational-speech-to-adin-ross",
+      "kind": "video",
+      "path": "downloads/motivational/pool/speech/i0fbrQXOmLk/i0fbrQXOmLk_Andrew Tate's LEGENDARY Motivational Speech To Adin Ross.webm",
+      "paths": [
+        "downloads/motivational/pool/speech/i0fbrQXOmLk/i0fbrQXOmLk_Andrew Tate's LEGENDARY Motivational Speech To Adin Ross.webm"
+      ],
+      "slug": "i0fbrqxomlk-andrew-tate-s-legendary-motivational-speech-to-adin-ross",
+      "title": "i0fbrQXOmLk Andrew Tate's LEGENDARY Motivational Speech To Adin Ross",
+      "youtube_id": null,
+      "sha256": "eed1220abbe4a80ab5516daea7f1f5df2294656eca6a2d0d2876f89407790187"
+    },
+    {
+      "id": "video:l56po1jpwlu-andrew-tate-s-advice-will-change-your-life-how-to-be-successful-rich-one-hour",
+      "kind": "video",
+      "path": "downloads/motivational/pool/speech/l56po1JpWlU/l56po1JpWlU_Andrew Tate's Advice Will CHANGE YOUR LIFE \uff5c How To Be Successful & Rich (ONE HOUR).webm",
+      "paths": [
+        "downloads/motivational/pool/speech/l56po1JpWlU/l56po1JpWlU_Andrew Tate's Advice Will CHANGE YOUR LIFE \uff5c How To Be Successful & Rich (ONE HOUR).webm"
+      ],
+      "slug": "l56po1jpwlu-andrew-tate-s-advice-will-change-your-life-how-to-be-successful-rich-one-hour",
+      "title": "l56po1JpWlU Andrew Tate's Advice Will CHANGE YOUR LIFE \uff5c How To Be Successful & Rich (ONE HOUR)",
+      "youtube_id": null,
+      "sha256": "321054daa37d321a0083087799fe7b7348d419b47c84c864ed85ec9b61a469f8"
+    },
+    {
+      "id": "video:rhjianjvr6g-discipline-yourself-best-motivational-speeches-by-jordan-peterson",
+      "kind": "video",
+      "path": "downloads/motivational/pool/speech/rhjiANJVR6g/rhjiANJVR6g_DISCIPLINE YOURSELF -  Best Motivational Speeches by Jordan Peterson.webm",
+      "paths": [
+        "downloads/motivational/pool/speech/rhjiANJVR6g/rhjiANJVR6g_DISCIPLINE YOURSELF -  Best Motivational Speeches by Jordan Peterson.webm"
+      ],
+      "slug": "rhjianjvr6g-discipline-yourself-best-motivational-speeches-by-jordan-peterson",
+      "title": "rhjiANJVR6g DISCIPLINE YOURSELF -  Best Motivational Speeches by Jordan Peterson",
+      "youtube_id": null,
+      "sha256": "87c13535cbd591eee98f6bc43077673345486560619ed97f71ea5519bd8f9fe2"
+    },
+    {
+      "id": "video:tbnzavrz9xc-watch-this-everyday-and-change-your-life-denzel-washington-motivational-speech",
+      "kind": "video",
+      "path": "downloads/motivational/pool/speech/tbnzAVRZ9Xc/tbnzAVRZ9Xc_WATCH THIS EVERYDAY AND CHANGE YOUR LIFE - Denzel Washington Motivational Speech.webm",
+      "paths": [
+        "downloads/motivational/pool/speech/tbnzAVRZ9Xc/tbnzAVRZ9Xc_WATCH THIS EVERYDAY AND CHANGE YOUR LIFE - Denzel Washington Motivational Speech.webm"
+      ],
+      "slug": "tbnzavrz9xc-watch-this-everyday-and-change-your-life-denzel-washington-motivational-speech",
+      "title": "tbnzAVRZ9Xc WATCH THIS EVERYDAY AND CHANGE YOUR LIFE - Denzel Washington Motivational Speech",
+      "youtube_id": null,
+      "sha256": "977713ab0c770524d5ec3d536cbce40372aa89220dd4fa194fb967f72f1d4df6"
+    },
+    {
+      "id": "video:tbuigbcf9jc-admiral-mcraven-leaves-the-audience-speechless-one-of-the-best-motivational-speeches",
+      "kind": "video",
+      "path": "downloads/motivational/pool/speech/TBuIGBCF9jc/TBuIGBCF9jc_Admiral McRaven Leaves the Audience SPEECHLESS \uff5c One of the Best Motivational Speeches.webm",
+      "paths": [
+        "downloads/motivational/pool/speech/TBuIGBCF9jc/TBuIGBCF9jc_Admiral McRaven Leaves the Audience SPEECHLESS \uff5c One of the Best Motivational Speeches.webm"
+      ],
+      "slug": "tbuigbcf9jc-admiral-mcraven-leaves-the-audience-speechless-one-of-the-best-motivational-speeches",
+      "title": "TBuIGBCF9jc Admiral McRaven Leaves the Audience SPEECHLESS \uff5c One of the Best Motivational Speeches",
+      "youtube_id": null,
+      "sha256": "9743e0c403a83a455951e90309e98f685afc6277595e0a330288a59ab9421bcd"
+    },
+    {
+      "id": "video:0qrw8i3p-9m-do-it-alone-broke-tired-scared-just-do-it-andrew-tate-motivation-motivational-speech",
+      "kind": "video",
+      "path": "downloads/motivational/short-20260910-020241/audio/0Qrw8i3p_9M_DO IT ALONE, BROKE, TIRED & SCARED. JUST DO IT. - Andrew Tate Motivation \uff5c Motivational Speech.webm",
+      "paths": [
+        "downloads/motivational/short-20260910-020241/audio/0Qrw8i3p_9M_DO IT ALONE, BROKE, TIRED & SCARED. JUST DO IT. - Andrew Tate Motivation \uff5c Motivational Speech.webm"
+      ],
+      "slug": "0qrw8i3p-9m-do-it-alone-broke-tired-scared-just-do-it-andrew-tate-motivation-motivational-speech",
+      "title": "0Qrw8i3p 9M DO IT ALONE, BROKE, TIRED & SCARED. JUST DO IT. - Andrew Tate Motivation \uff5c Motivational Speech",
+      "youtube_id": null,
+      "sha256": "f0e7f5c08d8b6c5d2a1c2fecae919f2d7202200b466382c4bcd5749080e3a4f1"
+    },
+    {
+      "id": "video:4degeyockxu-the-only-30-minutes-of-andrew-tate-mindset-you-ll-ever-need-no-music",
+      "kind": "video",
+      "path": "downloads/motivational/short-20260910-020241/audio/4degEyoCkXU_The ONLY 30 Minutes of Andrew Tate Mindset You'll EVER Need (NO MUSIC).webm",
+      "paths": [
+        "downloads/motivational/short-20260910-020241/audio/4degEyoCkXU_The ONLY 30 Minutes of Andrew Tate Mindset You'll EVER Need (NO MUSIC).webm"
+      ],
+      "slug": "4degeyockxu-the-only-30-minutes-of-andrew-tate-mindset-you-ll-ever-need-no-music",
+      "title": "4degEyoCkXU The ONLY 30 Minutes of Andrew Tate Mindset You'll EVER Need (NO MUSIC)",
+      "youtube_id": null,
+      "sha256": "ac7d807aac2a21b9637e6eb45fb5b61103b5e502ff476b8e74923396db696513"
+    },
+    {
+      "id": "video:djuqu8x2s-i-30-minutes-of-andrew-tate-that-will-fix-your-life-no-music",
+      "kind": "video",
+      "path": "downloads/motivational/short-20260910-020241/audio/DJuQu8X2s_I_30 Minutes of Andrew Tate That Will FIX Your Life. (NO MUSIC).webm",
+      "paths": [
+        "downloads/motivational/short-20260910-020241/audio/DJuQu8X2s_I_30 Minutes of Andrew Tate That Will FIX Your Life. (NO MUSIC).webm"
+      ],
+      "slug": "djuqu8x2s-i-30-minutes-of-andrew-tate-that-will-fix-your-life-no-music",
+      "title": "DJuQu8X2s I 30 Minutes of Andrew Tate That Will FIX Your Life. (NO MUSIC)",
+      "youtube_id": null,
+      "sha256": "fd165934f567b131ef9db2c4d38261c211d8ae1bb9a7f9389d3089b7cdef5531"
+    },
+    {
+      "id": "video:dwfbwzv-bvq-suffer-or-perish-andrew-tate-motivational-speech",
+      "kind": "video",
+      "path": "downloads/motivational/short-20260910-020241/audio/dWfBwZv-bvQ_Suffer or Perish \uff5c Andrew Tate Motivational Speech.webm",
+      "paths": [
+        "downloads/motivational/short-20260910-020241/audio/dWfBwZv-bvQ_Suffer or Perish \uff5c Andrew Tate Motivational Speech.webm"
+      ],
+      "slug": "dwfbwzv-bvq-suffer-or-perish-andrew-tate-motivational-speech",
+      "title": "dWfBwZv-bvQ Suffer or Perish \uff5c Andrew Tate Motivational Speech",
+      "youtube_id": null,
+      "sha256": "a897ff52a81b28f923f0f455c0a5a7739dcf97f2b6cd67d96012eb585462252e"
+    },
+    {
+      "id": "video:gfabechntke-how-to-become-addicted-to-discipline-andrew-tate-motivation-for-2026-new-year-motivational-speech",
+      "kind": "video",
+      "path": "downloads/motivational/short-20260910-020241/audio/GFabeCHntkE_How to Become Addicted to Discipline -Andrew Tate Motivation for 2026 \uff5c New Year Motivational Speech.webm",
+      "paths": [
+        "downloads/motivational/short-20260910-020241/audio/GFabeCHntkE_How to Become Addicted to Discipline -Andrew Tate Motivation for 2026 \uff5c New Year Motivational Speech.webm"
+      ],
+      "slug": "gfabechntke-how-to-become-addicted-to-discipline-andrew-tate-motivation-for-2026-new-year-motivational-speech",
+      "title": "GFabeCHntkE How to Become Addicted to Discipline -Andrew Tate Motivation for 2026 \uff5c New Year Motivational Speech",
+      "youtube_id": null,
+      "sha256": "2ee3b27d0980320bfcb003d7546b7a6eb0d7852c27935e4b1469e3c0af75c354"
+    },
+    {
+      "id": "video:lfjahzlizag-the-1-mindset-andrew-tate-motivation-motivational-speech",
+      "kind": "video",
+      "path": "downloads/motivational/short-20260910-020241/audio/LFJAHZlizAg_THE 1% MINDSET - Andrew Tate Motivation \uff5c Motivational Speech.webm",
+      "paths": [
+        "downloads/motivational/short-20260910-020241/audio/LFJAHZlizAg_THE 1% MINDSET - Andrew Tate Motivation \uff5c Motivational Speech.webm"
+      ],
+      "slug": "lfjahzlizag-the-1-mindset-andrew-tate-motivation-motivational-speech",
+      "title": "LFJAHZlizAg THE 1% MINDSET - Andrew Tate Motivation \uff5c Motivational Speech",
+      "youtube_id": null,
+      "sha256": "4b8706fa8d24cd622030e8beaefcd8c9d06eafcb9cd19a84a28e6ec64afea222"
+    },
+    {
+      "id": "video:musgyxijt7c-zero-dopamine-just-raw-truth-andrew-tate-motivation-for-2026-new-year-motivational-speech",
+      "kind": "video",
+      "path": "downloads/motivational/short-20260910-020241/audio/muSgYxIjt7c_Zero Dopamine. Just Raw Truth - Andrew Tate Motivation for 2026 \uff5cNew Year Motivational Speech.webm",
+      "paths": [
+        "downloads/motivational/short-20260910-020241/audio/muSgYxIjt7c_Zero Dopamine. Just Raw Truth - Andrew Tate Motivation for 2026 \uff5cNew Year Motivational Speech.webm"
+      ],
+      "slug": "musgyxijt7c-zero-dopamine-just-raw-truth-andrew-tate-motivation-for-2026-new-year-motivational-speech",
+      "title": "muSgYxIjt7c Zero Dopamine. Just Raw Truth - Andrew Tate Motivation for 2026 \uff5cNew Year Motivational Speech",
+      "youtube_id": null,
+      "sha256": "a4fe000ccf7c736fac4c5e8f76504331bde7606cd9f6d685b405747ecba7026f"
+    },
+    {
+      "id": "video:ndehsutuob4-raw-action-solves-everything-top-g-andrew-tate-motivational-speech",
+      "kind": "video",
+      "path": "downloads/motivational/short-20260910-020241/audio/NDeHsUtUOB4_Raw Action Solves Everything - Top G Andrew Tate - Motivational Speech.webm",
+      "paths": [
+        "downloads/motivational/short-20260910-020241/audio/NDeHsUtUOB4_Raw Action Solves Everything - Top G Andrew Tate - Motivational Speech.webm"
+      ],
+      "slug": "ndehsutuob4-raw-action-solves-everything-top-g-andrew-tate-motivational-speech",
+      "title": "NDeHsUtUOB4 Raw Action Solves Everything - Top G Andrew Tate - Motivational Speech",
+      "youtube_id": null,
+      "sha256": "bf032590fce0f6d778d4f67f34a216431f2e21894238c63ad560deee37778441"
+    },
+    {
+      "id": "video:final",
+      "kind": "video",
+      "path": "downloads/production_library/video_000002/final.mp4",
+      "paths": [
+        "downloads/production_library/video_000002/final.mp4"
+      ],
+      "slug": "final",
+      "title": "final",
+      "youtube_id": null,
+      "sha256": "9fd2aad33ee9b535e44c42fdf915ff641313a4004654cb1908998e69d03781ee"
+    },
+    {
+      "id": "video:captioned",
+      "kind": "video",
+      "path": "downloads/production/test-render/work/captioned.mp4",
+      "paths": [
+        "downloads/production/test-render/work/captioned.mp4"
+      ],
+      "slug": "captioned",
+      "title": "captioned",
+      "youtube_id": null,
+      "sha256": "c9b936a163cb84ee9137fa239ae9050c5831a36156f4e61ab291e13454b3b9ce"
+    },
+    {
+      "id": "video:concat",
+      "kind": "video",
+      "path": "downloads/production/test-render/work/concat.mp4",
+      "paths": [
+        "downloads/production/test-render/work/concat.mp4"
+      ],
+      "slug": "concat",
+      "title": "concat",
+      "youtube_id": null,
+      "sha256": "c9b936a163cb84ee9137fa239ae9050c5831a36156f4e61ab291e13454b3b9ce"
+    },
+    {
+      "id": "video:seg-000",
+      "kind": "video",
+      "path": "downloads/production/test-render/work/seg_000.mp4",
+      "paths": [
+        "downloads/production/test-render/work/seg_000.mp4"
+      ],
+      "slug": "seg-000",
+      "title": "seg 000",
+      "youtube_id": null,
+      "sha256": "c9b936a163cb84ee9137fa239ae9050c5831a36156f4e61ab291e13454b3b9ce"
+    },
+    {
+      "id": "video:with-audio",
+      "kind": "video",
+      "path": "downloads/production/test-render/work/with_audio.mp4",
+      "paths": [
+        "downloads/production/test-render/work/with_audio.mp4"
+      ],
+      "slug": "with-audio",
+      "title": "with audio",
+      "youtube_id": null,
+      "sha256": "c9b936a163cb84ee9137fa239ae9050c5831a36156f4e61ab291e13454b3b9ce"
+    },
+    {
+      "id": "video:4degEyoCkXU",
+      "kind": "video",
+      "path": "",
+      "paths": [],
+      "slug": "4degEyoCkXU",
+      "title": "The ONLY 30 Minutes of Andrew Tate Mindset You'll EVER Need (NO MUSIC)",
+      "youtube_id": "4degEyoCkXU",
+      "sha256": ""
+    },
+    {
+      "id": "video:ba7JNTI17uo",
+      "kind": "video",
+      "path": "downloads/motivational/tate-web-e2e-20260909-204122/clips/ba7JNTI17uo_part01.mp4",
+      "paths": [
+        "downloads/motivational/tate-web-e2e-20260909-204122/clips/ba7JNTI17uo_part01.mp4",
+        "downloads/motivational/tate-web-e2e-20260909-204122/clips/ba7JNTI17uo_part02.mp4",
+        "downloads/motivational/tate-web-e2e-20260909-204122/clips/ba7JNTI17uo_part03.mp4"
+      ],
+      "slug": "ba7JNTI17uo",
+      "title": "ba7JNTI17uo",
+      "youtube_id": "ba7JNTI17uo",
+      "sha256": "8413ac7de9b117ecf1dc02f5033c946fb5581618f563ed675ad720371b7cc5b6"
+    },
+    {
+      "id": "video:bWlgfsU9JJk",
+      "kind": "video",
+      "path": "downloads/motivational/tate-web-e2e-20260909-204122/clips/bWlgfsU9JJk_part01.mp4",
+      "paths": [
+        "downloads/motivational/tate-web-e2e-20260909-204122/clips/bWlgfsU9JJk_part01.mp4",
+        "downloads/motivational/tate-web-e2e-20260909-204122/clips/bWlgfsU9JJk_part02.mp4",
+        "downloads/motivational/tate-web-e2e-20260909-204122/clips/bWlgfsU9JJk_part03.mp4"
+      ],
+      "slug": "bWlgfsU9JJk",
+      "title": "bWlgfsU9JJk",
+      "youtube_id": "bWlgfsU9JJk",
+      "sha256": "3786e6151d8277b9f63de7bc816f520f47c728082fa74344decf4062fdf03b4f"
+    },
+    {
+      "id": "video:fW_NJUfAk9k",
+      "kind": "video",
+      "path": "downloads/motivational/tate-web-e2e-20260909-204122/clips/fW_NJUfAk9k_part01.mp4",
+      "paths": [
+        "downloads/motivational/tate-web-e2e-20260909-204122/clips/fW_NJUfAk9k_part01.mp4",
+        "downloads/motivational/tate-web-e2e-20260909-204122/clips/fW_NJUfAk9k_part02.mp4",
+        "downloads/motivational/tate-web-e2e-20260909-204122/clips/fW_NJUfAk9k_part03.mp4"
+      ],
+      "slug": "fW_NJUfAk9k",
+      "title": "fW_NJUfAk9k",
+      "youtube_id": "fW_NJUfAk9k",
+      "sha256": "ac2a90370ab333ec30313f5bba064423222f95858097ceb902d72a67b49a8c99"
+    },
+    {
+      "id": "video:NMThdHhrLoM",
+      "kind": "video",
+      "path": "downloads/motivational/tate-web-e2e-20260909-204122/clips/NMThdHhrLoM_part01.mp4",
+      "paths": [
+        "downloads/motivational/tate-web-e2e-20260909-204122/clips/NMThdHhrLoM_part01.mp4",
+        "downloads/motivational/tate-web-e2e-20260909-204122/clips/NMThdHhrLoM_part02.mp4",
+        "downloads/motivational/tate-web-e2e-20260909-204122/clips/NMThdHhrLoM_part03.mp4"
+      ],
+      "slug": "NMThdHhrLoM",
+      "title": "NMThdHhrLoM",
+      "youtube_id": "NMThdHhrLoM",
+      "sha256": "5c6058938a9619eb1e2c6749602abab85dcfc31e551ec3b0a0c0191c07038414"
+    },
+    {
+      "id": "video:sitXeGjm4Mc",
+      "kind": "video",
+      "path": "downloads/motivational/tate-web-e2e-20260909-204122/clips/sitXeGjm4Mc_part01.mp4",
+      "paths": [
+        "downloads/motivational/tate-web-e2e-20260909-204122/clips/sitXeGjm4Mc_part01.mp4",
+        "downloads/motivational/tate-web-e2e-20260909-204122/clips/sitXeGjm4Mc_part02.mp4",
+        "downloads/motivational/tate-web-e2e-20260909-204122/clips/sitXeGjm4Mc_part03.mp4"
+      ],
+      "slug": "sitXeGjm4Mc",
+      "title": "sitXeGjm4Mc",
+      "youtube_id": "sitXeGjm4Mc",
+      "sha256": "21978639287efa1259bff62cc12efa8b62a82552242653a67b1bb3b859e0d8d7"
+    },
+    {
+      "id": "video:tate-web-e2e-20260909-204122-motivation-nocap",
+      "kind": "video",
+      "path": "downloads/motivational/tate-web-e2e-20260909-204122/output/tate-web-e2e-20260909-204122-motivation.nocap.mp4",
+      "paths": [
+        "downloads/motivational/tate-web-e2e-20260909-204122/output/tate-web-e2e-20260909-204122-motivation.nocap.mp4"
+      ],
+      "slug": "tate-web-e2e-20260909-204122-motivation-nocap",
+      "title": "tate-web-e2e-20260909-204122-motivation.nocap",
+      "youtube_id": null,
+      "sha256": "3d6f7fdb3f3b473b419a649cbc112764fd13abb789feb1b45e08c428c49c95a2"
+    },
+    {
+      "id": "video:DJuQu8X2s_I",
+      "kind": "video",
+      "path": "",
+      "paths": [],
+      "slug": "DJuQu8X2s_I",
+      "title": "Andrew Tate Motivating You For 30 Minutes Straight. (NO MUSIC)",
+      "youtube_id": "DJuQu8X2s_I",
+      "sha256": ""
+    },
+    {
+      "id": "video:u9fftcQGSa0",
+      "kind": "video",
+      "path": "downloads/motivational/tate-web-e2e-204506/clips/u9fftcQGSa0_part01.mp4",
+      "paths": [
+        "downloads/motivational/tate-web-e2e-204506/clips/u9fftcQGSa0_part01.mp4",
+        "downloads/motivational/tate-web-e2e-204506/clips/u9fftcQGSa0_part02.mp4",
+        "downloads/motivational/tate-web-e2e-204506/clips/u9fftcQGSa0_part03.mp4"
+      ],
+      "slug": "u9fftcQGSa0",
+      "title": "u9fftcQGSa0",
+      "youtube_id": "u9fftcQGSa0",
+      "sha256": "02d468a17a20f73336391cdb76cdc3dfd42fce6bbe1c35bc9c9b2736f49a41a7"
+    },
+    {
+      "id": "video:tate-e2e-204514-motivation",
+      "kind": "video",
+      "path": "downloads/motivational/tate-e2e-204514/output/tate-e2e-204514-motivation.mp4",
+      "paths": [
+        "downloads/motivational/tate-e2e-204514/output/tate-e2e-204514-motivation.mp4"
+      ],
+      "slug": "tate-e2e-204514-motivation",
+      "title": "tate-e2e-204514-motivation",
+      "youtube_id": null,
+      "sha256": "e97ae8fe5bbe73c55f289638682bb2db6b6dc16d24f186f783e8bf2da573433b"
+    },
+    {
+      "id": "video:eNFKHh_MUXY",
+      "kind": "video",
+      "path": "downloads/motivational/tate-web-e2e-204506/clips/eNFKHh_MUXY_part01.mp4",
+      "paths": [
+        "downloads/motivational/tate-web-e2e-204506/clips/eNFKHh_MUXY_part01.mp4",
+        "downloads/motivational/tate-web-e2e-204506/clips/eNFKHh_MUXY_part02.mp4",
+        "downloads/motivational/tate-web-e2e-204506/clips/eNFKHh_MUXY_part03.mp4"
+      ],
+      "slug": "eNFKHh_MUXY",
+      "title": "eNFKHh_MUXY",
+      "youtube_id": "eNFKHh_MUXY",
+      "sha256": "a9693387e470dcff41a76472ac1f3fc3ccf2022549f6fdbefeed5d23c0afd059"
+    },
+    {
+      "id": "video:LgHj9zlA2Ag",
+      "kind": "video",
+      "path": "downloads/motivational/tate-web-e2e-204506/clips/LgHj9zlA2Ag_part01.mp4",
+      "paths": [
+        "downloads/motivational/tate-web-e2e-204506/clips/LgHj9zlA2Ag_part01.mp4",
+        "downloads/motivational/tate-web-e2e-204506/clips/LgHj9zlA2Ag_part02.mp4",
+        "downloads/motivational/tate-web-e2e-204506/clips/LgHj9zlA2Ag_part03.mp4"
+      ],
+      "slug": "LgHj9zlA2Ag",
+      "title": "LgHj9zlA2Ag",
+      "youtube_id": "LgHj9zlA2Ag",
+      "sha256": "23744f4b5a2d316d7377f852964b610b009be9ff98d6c62676347f39e2f7df18"
+    },
+    {
+      "id": "video:MuNyfqxAO6Y",
+      "kind": "video",
+      "path": "downloads/motivational/tate-web-e2e-204506/clips/MuNyfqxAO6Y_part01.mp4",
+      "paths": [
+        "downloads/motivational/tate-web-e2e-204506/clips/MuNyfqxAO6Y_part01.mp4",
+        "downloads/motivational/tate-web-e2e-204506/clips/MuNyfqxAO6Y_part02.mp4",
+        "downloads/motivational/tate-web-e2e-204506/clips/MuNyfqxAO6Y_part03.mp4"
+      ],
+      "slug": "MuNyfqxAO6Y",
+      "title": "MuNyfqxAO6Y",
+      "youtube_id": "MuNyfqxAO6Y",
+      "sha256": "3016166e4312ffbd02c9d8cda03f6d728da6727ead41f6b10bd168634d4eeb5d"
+    },
+    {
+      "id": "video:RiVs0E554o0",
+      "kind": "video",
+      "path": "downloads/motivational/tate-web-e2e-204506/clips/RiVs0E554o0_part01.mp4",
+      "paths": [
+        "downloads/motivational/tate-web-e2e-204506/clips/RiVs0E554o0_part01.mp4",
+        "downloads/motivational/tate-web-e2e-204506/clips/RiVs0E554o0_part02.mp4",
+        "downloads/motivational/tate-web-e2e-204506/clips/RiVs0E554o0_part03.mp4"
+      ],
+      "slug": "RiVs0E554o0",
+      "title": "RiVs0E554o0",
+      "youtube_id": "RiVs0E554o0",
+      "sha256": "ab8af19f3e0a8aa8a301c868633ec07715cecc2c2d8faed48f1b55950cd02021"
+    },
+    {
+      "id": "video:tate-web-e2e-204506-motivation",
+      "kind": "video",
+      "path": "downloads/motivational/tate-web-e2e-204506/output/tate-web-e2e-204506-motivation.mp4",
+      "paths": [
+        "downloads/motivational/tate-web-e2e-204506/output/tate-web-e2e-204506-motivation.mp4"
+      ],
+      "slug": "tate-web-e2e-204506-motivation",
+      "title": "tate-web-e2e-204506-motivation",
+      "youtube_id": null,
+      "sha256": "9fd2aad33ee9b535e44c42fdf915ff641313a4004654cb1908998e69d03781ee"
+    },
+    {
+      "id": "video:0ANLBX2EgmM",
+      "kind": "video",
+      "path": "downloads/motivational/short-20260910-041015/clips/0ANLBX2EgmM_part01.mp4",
+      "paths": [
+        "downloads/motivational/short-20260910-041015/clips/0ANLBX2EgmM_part01.mp4",
+        "downloads/motivational/short-20260910-041015/clips/0ANLBX2EgmM_part02.mp4",
+        "downloads/motivational/short-20260910-041015/clips/0ANLBX2EgmM_part03.mp4"
+      ],
+      "slug": "0ANLBX2EgmM",
+      "title": "0ANLBX2EgmM",
+      "youtube_id": "0ANLBX2EgmM",
+      "sha256": "bcab3826c42e5ed40a9603d1d43c29e134da0a23d8b15e8091658ccad1bcb455"
+    },
+    {
+      "id": "video:3E20r534TjU",
+      "kind": "video",
+      "path": "downloads/motivational/short-20260910-041015/clips/3E20r534TjU_part01.mp4",
+      "paths": [
+        "downloads/motivational/short-20260910-041015/clips/3E20r534TjU_part01.mp4",
+        "downloads/motivational/short-20260910-041015/clips/3E20r534TjU_part02.mp4",
+        "downloads/motivational/short-20260910-041015/clips/3E20r534TjU_part03.mp4"
+      ],
+      "slug": "3E20r534TjU",
+      "title": "3E20r534TjU",
+      "youtube_id": "3E20r534TjU",
+      "sha256": "2b913be1d3a0e5130e0ebc352594950954cf979096b4186924d201f08a91bfd5"
+    },
+    {
+      "id": "video:J_4leOeH9Lc",
+      "kind": "video",
+      "path": "downloads/motivational/short-20260910-041015/clips/J_4leOeH9Lc_part01.mp4",
+      "paths": [
+        "downloads/motivational/short-20260910-041015/clips/J_4leOeH9Lc_part01.mp4",
+        "downloads/motivational/short-20260910-041015/clips/J_4leOeH9Lc_part02.mp4",
+        "downloads/motivational/short-20260910-041015/clips/J_4leOeH9Lc_part03.mp4"
+      ],
+      "slug": "J_4leOeH9Lc",
+      "title": "J_4leOeH9Lc",
+      "youtube_id": "J_4leOeH9Lc",
+      "sha256": "5b64af082fb63a5911075a85d60633ff74cce331621d24fa5e83f6061715a673"
+    },
+    {
+      "id": "video:L_KaQfS1hRQ",
+      "kind": "video",
+      "path": "downloads/motivational/short-20260910-041015/clips/L_KaQfS1hRQ_part01.mp4",
+      "paths": [
+        "downloads/motivational/short-20260910-041015/clips/L_KaQfS1hRQ_part01.mp4",
+        "downloads/motivational/short-20260910-041015/clips/L_KaQfS1hRQ_part02.mp4",
+        "downloads/motivational/short-20260910-041015/clips/L_KaQfS1hRQ_part03.mp4"
+      ],
+      "slug": "L_KaQfS1hRQ",
+      "title": "L_KaQfS1hRQ",
+      "youtube_id": "L_KaQfS1hRQ",
+      "sha256": "0bba986561c299c8c6816da9e6739e36b01a030d5583268e0be79f48c206060b"
+    },
+    {
+      "id": "video:vYuoECsqZy8",
+      "kind": "video",
+      "path": "downloads/motivational/short-20260910-041015/clips/vYuoECsqZy8_part01.mp4",
+      "paths": [
+        "downloads/motivational/short-20260910-041015/clips/vYuoECsqZy8_part01.mp4",
+        "downloads/motivational/short-20260910-041015/clips/vYuoECsqZy8_part02.mp4",
+        "downloads/motivational/short-20260910-041015/clips/vYuoECsqZy8_part03.mp4"
+      ],
+      "slug": "vYuoECsqZy8",
+      "title": "vYuoECsqZy8",
+      "youtube_id": "vYuoECsqZy8",
+      "sha256": "37d53c80596d0986b089cff95eb965c3c0cc8789684070ea97d7592d9ac546ec"
+    },
+    {
+      "id": "video:short-20260910-041015-motivation",
+      "kind": "video",
+      "path": "downloads/motivational/short-20260910-041015/output/short-20260910-041015-motivation.mp4",
+      "paths": [
+        "downloads/motivational/short-20260910-041015/output/short-20260910-041015-motivation.mp4"
+      ],
+      "slug": "short-20260910-041015-motivation",
+      "title": "short-20260910-041015-motivation",
+      "youtube_id": null,
+      "sha256": "05bfb18a979ab38c73b1f0bf85edbf42bc102287a7f476a4274180c16c05bc21"
     }
   ],
   "stories": [

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { BackendOfflineBanner } from "@/components/backend-banner";
 import { PageHeader } from "@/components/page-header";
 import { PlatformBadge } from "@/components/platform-badge";
@@ -105,8 +106,18 @@ export default async function DashboardPage() {
     <>
       <PageHeader
         title="Dashboard"
-        description="Live discovery metrics from the Python catalog. Production queue and account sections remain demo data until those pipelines are connected."
+        description="Build 30s motivation Shorts, then track them in Videos."
       />
+
+      <div className="mb-8 rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-4">
+        <p className="font-medium text-violet-100">Ready to make a Short?</p>
+        <p className="mt-1 text-sm text-violet-200/80">
+          Inspirational speech + rotating luxury backgrounds — one click.
+        </p>
+        <Link href="/create" className="mt-3 inline-block rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500">
+          Make Short →
+        </Link>
+      </div>
 
       {discoveryOffline ? (
         <BackendOfflineBanner

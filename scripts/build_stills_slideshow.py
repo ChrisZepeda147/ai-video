@@ -7,6 +7,8 @@ import argparse
 import json
 import re
 import subprocess
+
+from toolchain_env import resolve_tool
 import sys
 from pathlib import Path
 
@@ -48,8 +50,9 @@ def build_slideshow(
     concat_in = "".join(f"[v{i}]" for i in range(len(images)))
     filters.append(f"{concat_in}concat=n={len(images)}:v=1:a=0[vout]")
 
+    ffmpeg = resolve_tool("ffmpeg") or "ffmpeg"
     cmd = [
-        "ffmpeg",
+        ffmpeg,
         "-hide_banner",
         "-loglevel",
         "error",
@@ -237,8 +240,9 @@ def burn_captions(
         trim_srt(captions, start=audio_start, duration=audio_duration, out_path=trimmed)
         build_centered_ass(trimmed, width=width, height=height, ass_path=ass_path)
     escaped = str(ass_path.resolve()).replace("\\", "/").replace(":", "\\:")
+    ffmpeg = resolve_tool("ffmpeg") or "ffmpeg"
     cmd = [
-        "ffmpeg",
+        ffmpeg,
         "-hide_banner",
         "-loglevel",
         "error",
@@ -324,8 +328,16 @@ def main() -> int:
         import content_reuse
 
         content_reuse.register_video(file_path=args.output, title=args.output.stem)
+        from discovery.auto_register import sync_register_best_effort
         from discovery.site_videos import sync_legacy_renders_to_site
 
+        sync_register_best_effort(
+            final_path=args.output,
+            slug=args.output.stem,
+            title=args.output.stem.replace("-", " "),
+            job_dir=args.output.parent,
+            pipeline="build_stills_slideshow",
+        )
         sync_legacy_renders_to_site(slugs=[args.output.stem])
     except Exception:
         pass

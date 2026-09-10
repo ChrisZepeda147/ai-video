@@ -1,14 +1,13 @@
-import { PageHeader } from "@/components/page-header";
 import { Workbench } from "@/components/workbench/workbench";
 
 export default function WorkbenchPage() {
   return (
-    <>
-      <PageHeader
-        title="Workbench"
-        description="Quick Create — find unused source audio/video or generate original AI images and clips without starting from a reference."
-      />
+    <div>
+      <h1 className="mb-6 text-2xl font-semibold text-zinc-100">Workbench</h1>
+      <p className="mb-6 text-sm text-zinc-400">
+        Discovery-assisted source find + Cursor generation handoff. Production pipeline stays separate.
+      </p>
       <Workbench />
-    </>
+    </div>
   );
 }

@@ -1,14 +1,14 @@
 import {
   BarChart3,
   Clapperboard,
-  Compass,
   LayoutDashboard,
+  MessageSquare,
   Settings,
   Sparkles,
   Users,
   Video,
-  Wrench,
-  Rocket,
+  Library,
+  LayoutGrid,
   type LucideIcon,
 } from "lucide-react";
 
@@ -27,52 +27,52 @@ export const navItems: NavItem[] = [
     description: "Overview and production status",
   },
   {
-    href: "/discover",
-    label: "Discover",
-    icon: Compass,
-    description: "Viral references and benchmark channels",
+    href: "/command",
+    label: "Command",
+    icon: MessageSquare,
+    description: "Natural-language Cursor commands",
   },
   {
-    href: "/workbench",
-    label: "Workbench",
-    icon: Wrench,
-    description: "Quick find source or create original visuals",
+    href: "/library",
+    label: "Library",
+    icon: Library,
+    description: "Production videos and components",
+  },
+  {
+    href: "/combinations",
+    label: "Combinations",
+    icon: LayoutGrid,
+    description: "Audio + visual pairing board",
   },
   {
     href: "/create",
-    label: "Create",
+    label: "Make Short",
     icon: Sparkles,
-    description: "Production workspace — concepts, jobs, visuals",
+    description: "Build motivation Shorts (quick path)",
   },
   {
     href: "/videos",
     label: "Videos",
     icon: Video,
-    description: "Rendered videos and assets",
+    description: "Rendered Shorts dashboard",
   },
   {
     href: "/review",
     label: "Review",
     icon: Clapperboard,
-    description: "Visual and video approvals",
+    description: "Approve before publishing",
   },
   {
     href: "/accounts",
     label: "Accounts",
     icon: Users,
-    description: "Connected publishing accounts",
+    description: "TikTok and YouTube accounts",
   },
   {
     href: "/analytics",
     label: "Analytics",
     icon: BarChart3,
-    description: "Performance across channels",
-  },
-  {
-    href: "/pilot",
-    label: "Pilot",
-    icon: Rocket,
-    description: "First end-to-end batch workflow",
+    description: "Performance metrics",
   },
   {
     href: "/settings",
@@ -80,4 +80,11 @@ export const navItems: NavItem[] = [
     icon: Settings,
     description: "Preflight and configuration",
   },
+];
+
+/** Hidden routes kept for power users / legacy links */
+export const secondaryNavItems: NavItem[] = [
+  { href: "/discover", label: "Discover", icon: LayoutDashboard, description: "Viral reference research" },
+  { href: "/workbench", label: "Workbench", icon: LayoutDashboard, description: "Discovery find + Cursor generation" },
+  { href: "/pilot", label: "Pilot", icon: LayoutDashboard, description: "Batch workflow" },
 ];

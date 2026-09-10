@@ -860,8 +860,21 @@ def main() -> int:
             )
         print(f"Recorded in {content_reuse.catalog_path()}")
         try:
+            from discovery.auto_register import sync_register_best_effort
             from discovery.site_videos import sync_legacy_renders_to_site
 
+            for clip in clips:
+                final_path = output_dir / f"{clip.video_id}_part{clip.part:02d}_final.mp4"
+                if final_path.is_file():
+                    sync_register_best_effort(
+                        final_path=final_path,
+                        slug=output_dir.name,
+                        title=str(story.get("title") or series_title),
+                        topic=str(story.get("genre") or ""),
+                        hook=str(story.get("hook") or ""),
+                        job_dir=output_dir,
+                        pipeline="story_voiceover_pipeline",
+                    )
             sync_legacy_renders_to_site(slugs=[output_dir.name])
         except ImportError:
             pass

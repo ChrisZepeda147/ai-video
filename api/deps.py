@@ -15,6 +15,13 @@ from discovery.store import DiscoveryStore  # noqa: E402
 
 load_env()
 
+try:
+    from toolchain_env import apply_to_os_environ
+
+    apply_to_os_environ()
+except ImportError:
+    pass
+
 
 def get_store() -> Generator[DiscoveryStore, None, None]:
     store = DiscoveryStore(default_db_path())

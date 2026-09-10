@@ -113,7 +113,7 @@ export function Workbench() {
           rows={3}
           placeholder={
             mode === "find"
-              ? 'Find unused Andrew Tate motivational audio about discipline…'
+              ? 'Find Andrew Tate motivational audio about discipline (show prior usage if any)…'
               : "Create 8 beautiful realistic luxury images and 2 moving AI clips…"
           }
           className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100"

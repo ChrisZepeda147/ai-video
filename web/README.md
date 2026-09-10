@@ -4,18 +4,33 @@ Next.js production dashboard for the Ai-Video content pipeline. The Python scrip
 
 ## Quick start
 
-Run **two terminals** — FastAPI backend first, then the dashboard:
+Run **two terminals** — API first, then dashboard:
 
-**Terminal 1 — discovery API (from repo root):**
+**Terminal 1 — API:**
 
 ```powershell
-pip install -r requirements-api.txt
-python -m uvicorn api.main:app --reload --port 8000
+.\scripts\start-api.ps1
 ```
 
 **Terminal 2 — dashboard:**
 
 ```powershell
+.\scripts\start-dashboard.ps1
+```
+
+If port 3000 was stuck or you saw "Another next dev server is already running", either script auto-fixes it.
+Full refresh (API + dashboard in new windows):
+
+```powershell
+npm run restart:dev
+```
+
+Manual equivalent:
+
+```powershell
+pip install -r requirements-api.txt
+python -m uvicorn api.main:app --reload --port 8000
+
 cd web
 copy .env.example .env.local
 npm install
@@ -61,14 +76,31 @@ Story/voiceover/stills pipelines auto-register when the discovery DB exists.
 
 | Route | Purpose |
 |-------|---------|
-| `/` | Dashboard overview (demo data) |
-| `/discover` | Viral references and benchmark channels |
-| `/create` | Creative DNA, concepts, visual briefs |
-| `/videos` | All finished Shorts — site pipeline + legacy Cursor renders |
+| `/` | Dashboard overview |
+| `/command` | **Natural-language commands** → Cursor Agent CLI |
+| `/library` | Production library (videos + reusable components) |
+| `/library/[id]` | Video detail + edit commands |
+| `/create` | **Make Short** — quick motivation montage path |
+| `/workbench` | Discovery find + Cursor generation handoff |
+| `/videos` | Rendered Shorts dashboard (site + legacy) |
+| `/discover` | Viral references (secondary) |
 | `/review` | Approval queues |
 | `/accounts` | Publishing accounts |
 | `/analytics` | Performance metrics |
 | `/settings` | Integrations and config |
+
+## Cursor command flow
+
+1. Install Cursor Agent CLI: `irm 'https://cursor.com/install?win32=true' | iex`
+2. Set `CURSOR_API_KEY` in `scripts/.env` (or user env)
+3. Open [http://localhost:3000/command](http://localhost:3000/command)
+4. Type a plain-English request — backend runs `agent -p --force --trust` in this repo
+5. When Cursor finishes, it must register the video:
+   `python scripts/register_production_video.py --title "..." --final-path downloads/...`
+
+Optional dry-run (no CLI): set `CURSOR_BRIDGE_DRY_RUN=1` before starting the API.
+
+Optional internal auth: set matching `AI_VIDEO_INTERNAL_KEY` (API) and `NEXT_PUBLIC_AI_VIDEO_INTERNAL_KEY` (web).
 
 ## Architecture (planned)
 

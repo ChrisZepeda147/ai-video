@@ -359,10 +359,29 @@ def estimate_part_count(
     return max(count, 1)
 
 
+def _toolchain_opts() -> dict[str, str]:
+    try:
+        from toolchain_env import apply_to_os_environ, ytdlp_ffmpeg_opts
+
+        apply_to_os_environ()
+        return ytdlp_ffmpeg_opts()
+    except ImportError:
+        return {}
+
+
+def _resolve_tool(name: str) -> str:
+    try:
+        from toolchain_env import resolve_tool
+
+        return resolve_tool(name) or name
+    except ImportError:
+        return name
+
+
 def probe_duration(path: Path) -> float:
     result = subprocess.run(
         [
-            "ffprobe",
+            _resolve_tool("ffprobe"),
             "-v",
             "error",
             "-show_entries",
@@ -420,7 +439,7 @@ def export_clip(
     max_height: int,
 ) -> None:
     cmd = [
-        "ffmpeg",
+        _resolve_tool("ffmpeg"),
         "-y",
         "-ss",
         str(start),
@@ -507,6 +526,7 @@ def filter_unwanted(
     background_gameplay_only: bool,
     min_views: int,
     min_duration: float,
+    quiet: bool = False,
 ) -> list[VideoCandidate]:
     kept: list[VideoCandidate] = []
     skipped_music = 0
@@ -559,7 +579,7 @@ def filter_unwanted(
     if skipped_other:
         parts.append(f"{skipped_other} non-background gameplay")
     if parts:
-        print(f"Filtered out {' and '.join(parts)}.")
+        _safe_print(f"Filtered out {' and '.join(parts)}.", quiet=quiet)
     return kept[:limit]
 
 
@@ -589,13 +609,17 @@ def download_videos(
     split_parts: bool,
     keep_source: bool,
     aspect_ratio: str,
+    quiet: bool = False,
+    id_only_filenames: bool = False,
 ) -> list[dict[str, Any]]:
+    _configure_stdout()
     output_dir.mkdir(parents=True, exist_ok=True)
     results: list[dict[str, Any]] = []
 
     if audio_only:
         format_selector = "bestaudio/best"
-        outtmpl = str(output_dir / "%(id)s_%(title)s.%(ext)s")
+        name_tpl = "%(id)s.%(ext)s" if id_only_filenames else "%(id)s_%(title)s.%(ext)s"
+        outtmpl = str(output_dir / name_tpl)
         postprocessors = [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}]
     else:
         format_selector = f"bestvideo[height<={max_height}]+bestaudio/best[height<={max_height}]/best"
@@ -614,11 +638,12 @@ def download_videos(
         "writeinfojson": True,
         "postprocessors": postprocessors,
         "overwrites": True,
+        **_toolchain_opts(),
     }
 
     for candidate in candidates:
-        print(f"\n--- Downloading: {candidate.title}")
-        print(f"    {candidate.url}")
+        _safe_print(f"\n--- Downloading: {candidate.title}", quiet=quiet)
+        _safe_print(f"    {candidate.url}", quiet=quiet)
         record: dict[str, Any] = {
             **asdict(candidate),
             "status": "pending",
@@ -645,13 +670,16 @@ def download_videos(
                 if audio_only or not split_parts:
                     if audio_only:
                         record["file_path"] = str(filepath)
-                        print(f"    Saved: {filepath}")
+                        _safe_print(f"    Saved: {filepath}", quiet=quiet)
                     else:
                         converted = output_dir / f"{candidate.video_id}_16x9.mp4"
                         duration = probe_duration(filepath)
                         size = aspect_output_size(aspect_ratio, max_height)
                         if size:
-                            print(f"    Converting to {aspect_ratio} ({size[0]}x{size[1]})...")
+                            _safe_print(
+                                f"    Converting to {aspect_ratio} ({size[0]}x{size[1]})...",
+                                quiet=quiet,
+                            )
                         export_clip(
                             filepath,
                             converted,
@@ -664,10 +692,13 @@ def download_videos(
                             filepath.unlink()
                         record["file_path"] = str(converted)
                         record["aspect_ratio"] = aspect_ratio
-                        print(f"    Saved: {converted}")
+                        _safe_print(f"    Saved: {converted}", quiet=quiet)
                     record["status"] = "ok"
                 else:
-                    print(f"    Splitting into ~{_format_duration(float(clip_length))} parts...")
+                    _safe_print(
+                        f"    Splitting into ~{_format_duration(float(clip_length))} parts...",
+                        quiet=quiet,
+                    )
                     parts = split_into_parts(
                         filepath,
                         output_dir=output_dir,
@@ -685,7 +716,7 @@ def download_videos(
         except Exception as exc:  # noqa: BLE001 — collect per-video failures
             record["status"] = "error"
             record["error"] = str(exc)
-            print(f"    Failed: {exc}", file=sys.stderr)
+            _safe_print(f"    Failed: {exc}", file=sys.stderr, quiet=quiet)
         results.append(record)
 
     return results
@@ -811,9 +842,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="edge-tts voice name for narration",
     )
     common.add_argument(
+        "--require-unused",
+        action="store_true",
+        help="Only download YouTube IDs not in content/used.json (default: reuse allowed)",
+    )
+    common.add_argument(
         "--allow-reuse",
         action="store_true",
-        help="Allow downloading a YouTube video you already used",
+        help=argparse.SUPPRESS,
     )
     common.add_argument(
         "--any-topic",
@@ -856,6 +892,15 @@ def _configure_stdout() -> None:
                 reconfigure(encoding="utf-8", errors="replace")
             except Exception:
                 pass
+
+
+def _safe_print(message: str, *, file=None, quiet: bool = False) -> None:
+    if quiet:
+        return
+    stream = file or sys.stdout
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    safe = str(message).encode(encoding, errors="replace").decode(encoding, errors="replace")
+    print(safe, file=stream)
 
 
 def _load_local_env() -> None:
@@ -941,7 +986,7 @@ def main() -> int:
     else:
         candidates = candidates[: args.limit]
 
-    if not args.allow_reuse:
+    if args.require_unused and not args.allow_reuse:
         used_ids = content_reuse.used_youtube_ids()
         if used_ids:
             before = len(candidates)
@@ -949,10 +994,16 @@ def main() -> int:
             candidates = [video for video in candidates if video.video_id not in used_ids]
             skipped_used = before - len(candidates)
             if skipped_used:
-                print(f"Skipped {skipped_used} already-used source video(s).")
+                print(f"Skipped {skipped_used} already-used source video(s) (--require-unused).")
                 for video in reused[:8]:
-                    print(f"  used: {video.title} ({video.video_id})")
+                    print(f"  prior use: {video.title} ({video.video_id})")
             candidates = candidates[: args.limit]
+    elif used_hint := content_reuse.used_youtube_ids():
+        reused = [video for video in candidates if video.video_id in used_hint]
+        if reused:
+            print(f"Note: {len(reused)} candidate(s) appear in content/used.json (reuse allowed).")
+            for video in reused[:5]:
+                print(f"  prior use: {video.title} ({video.video_id})")
 
     if not candidates:
         print("No videos found.", file=sys.stderr)

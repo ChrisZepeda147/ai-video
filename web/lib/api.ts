@@ -18,6 +18,11 @@ import type {
   ProductionProjectItem,
   VideoLibraryResponse,
   VideoImportResponse,
+  CommandJob,
+  ProductionLibraryVideo,
+  ShortBuildDefaults,
+  ShortBuildJob,
+  ShortPoolResponse,
   PublishingAccountsResponse,
   PublishingJobsResponse,
   AnalyticsOverview,
@@ -30,9 +35,15 @@ import type {
 } from "@/lib/types";
 
 const DEFAULT_API_URL = "http://localhost:8000";
+const API_FETCH_TIMEOUT_MS = 5000;
 
 export function getApiBaseUrl(): string {
   return process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || DEFAULT_API_URL;
+}
+
+function internalHeaders(): Record<string, string> {
+  const key = process.env.NEXT_PUBLIC_AI_VIDEO_INTERNAL_KEY?.trim();
+  return key ? { "X-Internal-Key": key } : {};
 }
 
 type QueryValue = string | number | boolean | undefined | null;
@@ -52,6 +63,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<ApiResult<
   try {
     const response = await fetch(url, {
       ...init,
+      signal: init?.signal ?? AbortSignal.timeout(API_FETCH_TIMEOUT_MS),
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
@@ -321,6 +333,50 @@ export async function fetchVideoLibrary(params?: { include_missing?: boolean; li
   return fetchJson<VideoLibraryResponse>(buildUrl("/api/videos/library", params));
 }
 
+export async function fetchShortBuildDefaults() {
+  return fetchJson<ShortBuildDefaults>(buildUrl("/api/shorts/build/defaults"));
+}
+
+export async function fetchShortPool() {
+  return fetchJson<ShortPoolResponse>(buildUrl("/api/shorts/pool"));
+}
+
+export async function postPullShortPool(body: {
+  speech_query: string;
+  broll_query?: string;
+  visual_style?: string;
+  speech_count?: number;
+  broll_count?: number;
+}) {
+  return fetchJson<ShortPoolResponse & { speech_pulled?: number; broll_pulled?: number }>(
+    buildUrl("/api/shorts/pool/pull"),
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+export async function postBuildShort(body: {
+  slug?: string;
+  speech_query?: string;
+  broll_query?: string;
+  speech_url?: string;
+  speaker?: string;
+  min_seconds?: number;
+  max_seconds?: number;
+  segment_length?: number;
+  apply_grade?: boolean;
+  register_site?: boolean;
+  rerender?: boolean;
+}) {
+  return fetchJson<ShortBuildJob>(buildUrl("/api/shorts/build"), {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function fetchShortBuildStatus(jobId: string) {
+  return fetchJson<ShortBuildJob>(buildUrl(`/api/shorts/build/${jobId}`));
+}
+
 export async function postImportVideos(body?: {
   slug?: string;
   slugs?: string[];
@@ -528,4 +584,114 @@ export async function postTestPublish(body: {
     method: "POST",
     body: JSON.stringify(body),
   });
+}
+
+export async function fetchCommandStatus() {
+  return fetchJson<{ cursor_agent_available: boolean }>(buildUrl("/api/commands/status"));
+}
+
+export async function fetchCommands(limit = 50) {
+  return fetchJson<{ items: CommandJob[] }>(buildUrl("/api/commands", { limit }), {
+    headers: internalHeaders(),
+  });
+}
+
+export async function postCommand(body: {
+  command: string;
+  video_id?: number;
+  parent_video_id?: number;
+  session_id?: string;
+  batch_count?: number;
+}) {
+  return fetchJson<CommandJob>(buildUrl("/api/commands"), {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: internalHeaders(),
+  });
+}
+
+export async function fetchCommandJob(jobKey: string) {
+  return fetchJson<CommandJob>(buildUrl(`/api/commands/${jobKey}`), {
+    headers: internalHeaders(),
+  });
+}
+
+export async function fetchCombinationCatalog(owner?: string) {
+  return fetchJson<import("@/lib/types").CombinationCatalog>(
+    buildUrl("/api/library/combinations/catalog", owner ? { owner } : undefined),
+  );
+}
+
+export async function fetchCombinationStatus(body: {
+  owner: string;
+  audio_component_id: number;
+}) {
+  return fetchJson<import("@/lib/types").CombinationStatusResponse>(
+    buildUrl("/api/library/combinations/status"),
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function postCombinationRender(body: {
+  owner: string;
+  audio_component_id: number;
+  visual_pack_id: number;
+  force?: boolean;
+  audio_start_sec?: number;
+  audio_end_sec?: number;
+  version_label?: string;
+}) {
+  return fetchJson<import("@/lib/types").CombinationRenderResponse>(
+    buildUrl("/api/library/combinations/render"),
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(600_000),
+    },
+  );
+}
+
+export async function fetchProductionLibrary(params?: {
+  limit?: number;
+  speaker?: string;
+  topic?: string;
+  status?: string;
+}) {
+  return fetchJson<{ items: ProductionLibraryVideo[] }>(buildUrl("/api/library/videos", params));
+}
+
+export async function fetchProductionVideo(videoId: number) {
+  return fetchJson<ProductionLibraryVideo>(buildUrl(`/api/library/videos/${videoId}`));
+}
+
+export async function postImportProductionVideo(form: FormData) {
+  try {
+    const response = await fetch(buildUrl("/api/library/import"), {
+      method: "POST",
+      body: form,
+      signal: AbortSignal.timeout(120_000),
+      headers: {
+        Accept: "application/json",
+        ...internalHeaders(),
+      },
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      let message = `Import failed (${response.status})`;
+      try {
+        const err = (await response.json()) as { detail?: string };
+        if (err.detail) message = err.detail;
+      } catch {
+        /* ignore */
+      }
+      return { ok: false as const, error: "offline" as const, message };
+    }
+    const data = (await response.json()) as ProductionLibraryVideo;
+    return { ok: true as const, data };
+  } catch {
+    return { ok: false as const, error: "offline" as const, message: "Discovery backend is offline." };
+  }
 }

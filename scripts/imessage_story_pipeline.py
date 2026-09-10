@@ -1022,8 +1022,20 @@ def main() -> int:
                 content_reuse.register_video(file_path=final, title=str(to_save.get("title") or final.stem))
         print(f"Recorded in {content_reuse.catalog_path()}")
         try:
+            from discovery.auto_register import sync_register_best_effort
             from discovery.site_videos import sync_legacy_renders_to_site
 
+            for record in results:
+                final = Path(str(record.get("final_path") or ""))
+                if final.is_file():
+                    sync_register_best_effort(
+                        final_path=final,
+                        slug=story_path.parent.name,
+                        title=str(to_save.get("title") or final.stem),
+                        hook=str(to_save.get("hook") or ""),
+                        job_dir=output_dir,
+                        pipeline="imessage_story_pipeline",
+                    )
             sync_legacy_renders_to_site(slugs=[story_path.parent.name])
         except ImportError:
             pass

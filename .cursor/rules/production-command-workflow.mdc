@@ -1,0 +1,63 @@
+---
+description: Production library + Cursor command workflow for ai-video
+alwaysApply: true
+---
+
+# Production command workflow
+
+The private website sends natural-language commands to **Cursor Agent CLI** — Cursor remains the operator. Python scripts remain the production machinery.
+
+The dashboard exists primarily as **memory for Cursor**: production history, component lookup, organization, and version tracking for the same Cursor-driven workflow that already creates videos successfully. Reuse detection is **informational by default** — never reject a source, timestamp, segment, visual, or component merely because it was used before.
+
+## Before creating any new production video
+
+1. Query the **production library** (NOT discovery references):
+   ```powershell
+   python scripts/production_library_cli.py check-reuse --source-url "..." --transcript "..."
+   python scripts/production_library_cli.py list
+   ```
+2. Reuse info is **advisory** by default — previously used sources/speakers/topics are allowed. Pick a different timestamp segment when reusing the same YouTube source. Only enforce unused-only when the user says "unused", "never used", or "do not reuse" (`--reuse-policy require_new`).
+3. Run toolchain check before downloads — API/Cursor subprocesses need merged PATH + optional `FFMPEG_DIR` in `scripts/.env`.
+4. Do **not** put discovery reference IDs into `content/used.json`.
+5. Discovery metadata stays separate from production assets.
+
+## After every completed production video
+
+Pipelines auto-register via `discovery.auto_register.sync_register_best_effort()` when the discovery DB exists.
+
+Manual/extra registration still works:
+```powershell
+python scripts/register_production_video.py `
+  --title "..." `
+  --final-path downloads/.../final.mp4 `
+  --speaker "..." `
+  --topic "..." `
+  --source-url "..." `
+  --source-start 2520 --source-end 2568 `
+  --transcript "..." `
+  --component '{"component_type":"audio","local_path":"downloads/.../speech.mp3"}'
+```
+
+## Versions — never overwrite originals
+
+When modifying an existing video, create a new library entry:
+```powershell
+python scripts/register_production_video.py ... --parent-video-id 47 --version-label v2 --change-summary "same audio, new visuals"
+```
+
+## Use existing tooling
+
+- Motivation montage: `python scripts/build_motivation_job.py --slug ... --broll-query ... --reuse-policy allow`
+- Stills: `python scripts/build_stills_slideshow.py ...`
+- Stories: existing story pipelines in `scripts/`
+- Do not reimplement FFmpeg, download, caption, or montage logic in the API or web app.
+
+## Modular components
+
+Preserve reusable parts when possible: source, audio, transcript, scenes, visuals, captions, music, final render.
+
+## Architecture boundaries
+
+- Production library = `production_library_videos` + `production_video_components` in SQLite
+- Discovery = `reference_videos`, `concepts` (metadata only, never auto-promoted to production)
+- Legacy reuse ledger = `content/used.json` (Python montage/stills pipelines only)

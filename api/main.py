@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import os
+import tempfile
+from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+
+from api.deps import get_store  # noqa: F401 — scripts path + load_env before discovery imports
+from api.internal_auth import require_internal_key
 
 from api.converters import (
     analysis_to_item,
@@ -18,7 +23,6 @@ from api.converters import (
     top_to_reference_item,
     visual_to_item,
 )
-from api.deps import get_store  # noqa: F401 — sets scripts path before discovery imports
 from api.schemas import (
     AnalysisResponse,
     AnalyzeRequest,
@@ -95,6 +99,17 @@ from discovery.production_projects import (
     render_project,
     send_project_to_review,
 )
+from discovery.command_jobs import get_command_job, list_command_jobs, submit_command
+from discovery.cursor_bridge import agent_available
+from discovery.motivation_build import build_defaults, read_job, start_motivation_build
+from discovery.combination_render import render_combination
+from discovery.combinations import (
+    catalog_payload,
+    combination_status,
+    import_usage_from_videos,
+    sync_visual_packs,
+)
+from discovery.production_library import check_reuse, get_video, import_uploaded_video, list_videos
 from discovery.site_videos import import_videos_to_site
 from discovery.video_library import build_video_library, library_summary
 from discovery.publishing.accounts import (
@@ -154,6 +169,19 @@ app.add_middleware(
 
 _root = project_root()
 app.mount("/media", StaticFiles(directory=str(_root)), name="media")
+
+
+@app.on_event("startup")
+def _configure_stdio_utf8() -> None:
+    import sys
+
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
 
 
 def _provider():
@@ -803,6 +831,238 @@ def import_videos_endpoint(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return payload
+
+
+@app.get("/api/shorts/build/defaults")
+def shorts_build_defaults_endpoint():
+    return build_defaults(project_root())
+
+
+@app.post("/api/shorts/build")
+def shorts_build_endpoint(body: dict):
+    slug = str(body.get("slug") or "").strip()
+    if slug and not body.get("rerender"):
+        existing = project_root() / "downloads" / "motivational" / slug / "output" / f"{slug}-motivation.mp4"
+        if existing.is_file():
+            raise HTTPException(status_code=409, detail=f"Short already exists for slug '{slug}'. Use rerender=true to rebuild.")
+    try:
+        return start_motivation_build(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/shorts/build/{job_id}")
+def shorts_build_status_endpoint(job_id: str):
+    job = read_job(job_id, project_root())
+    if not job:
+        raise HTTPException(status_code=404, detail="Build job not found")
+    return job
+
+
+@app.get("/api/commands/status")
+def commands_status_endpoint():
+    return {"cursor_agent_available": agent_available()}
+
+
+@app.get("/api/commands")
+def list_commands_endpoint(
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    _: Annotated[None, Depends(require_internal_key)],
+    limit: int = Query(50, ge=1, le=200),
+):
+    return {"items": list_command_jobs(store, limit=limit)}
+
+
+@app.post("/api/commands")
+def submit_command_endpoint(
+    body: dict,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    _: Annotated[None, Depends(require_internal_key)],
+):
+    command = str(body.get("command") or body.get("user_command") or "").strip()
+    if not command:
+        raise HTTPException(status_code=422, detail="command is required")
+    try:
+        return submit_command(
+            store,
+            user_command=command,
+            video_id=body.get("video_id"),
+            parent_video_id=body.get("parent_video_id"),
+            session_id=body.get("session_id"),
+            batch_count=body.get("batch_count"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/commands/{job_key}")
+def get_command_endpoint(
+    job_key: str,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    _: Annotated[None, Depends(require_internal_key)],
+):
+    job = get_command_job(store, job_key)
+    if not job:
+        raise HTTPException(status_code=404, detail="Command job not found")
+    return job
+
+
+@app.get("/api/library/videos")
+def library_videos_endpoint(
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    limit: int = Query(100, ge=1, le=500),
+    speaker: str | None = None,
+    topic: str | None = None,
+    status: str | None = None,
+):
+    return {"items": list_videos(store, limit=limit, speaker=speaker, topic=topic, status=status)}
+
+
+@app.get("/api/library/videos/{video_id}")
+def library_video_detail_endpoint(
+    video_id: int,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+):
+    video = get_video(store, video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Production video not found")
+    return video
+
+
+@app.post("/api/library/check-reuse")
+def library_check_reuse_endpoint(
+    body: dict,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+):
+    return check_reuse(
+        store,
+        source_url=body.get("source_url"),
+        source_external_id=body.get("source_external_id") or body.get("source_id"),
+        source_platform=body.get("source_platform"),
+        source_start_sec=body.get("source_start_sec"),
+        source_end_sec=body.get("source_end_sec"),
+        transcript=body.get("transcript"),
+        speaker=body.get("speaker"),
+        topic=body.get("topic"),
+    )
+
+
+@app.post("/api/library/import")
+async def library_import_endpoint(
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    _: Annotated[None, Depends(require_internal_key)],
+    file: UploadFile = File(...),
+    title: str | None = Form(default=None),
+    speaker: str | None = Form(default=None),
+    topic: str | None = Form(default=None),
+    extract_audio: bool = Form(default=True),
+    transcribe: bool = Form(default=False),
+):
+    suffix = Path(file.filename or "upload.mp4").suffix or ".mp4"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(await file.read())
+        tmp_path = Path(tmp.name)
+    try:
+        video = import_uploaded_video(
+            store,
+            upload_path=tmp_path,
+            title=title,
+            speaker=speaker,
+            topic=topic,
+            extract_audio=extract_audio,
+            transcribe=transcribe,
+        )
+    finally:
+        tmp_path.unlink(missing_ok=True)
+    return video
+
+
+@app.get("/api/library/combinations/catalog")
+def combinations_catalog_endpoint(
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    owner: str | None = None,
+):
+    try:
+        return catalog_payload(store, owner=owner)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/library/combinations/sync-catalog")
+def combinations_sync_catalog_endpoint(
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+):
+    synced = sync_visual_packs(store)
+    return {"synced": len(synced)}
+
+
+@app.post("/api/library/combinations/status")
+def combinations_status_endpoint(
+    body: dict,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+):
+    owner = body.get("owner")
+    audio_id = body.get("audio_component_id")
+    if not owner or audio_id is None:
+        raise HTTPException(status_code=400, detail="owner and audio_component_id are required")
+    try:
+        return combination_status(store, owner=str(owner), audio_component_id=int(audio_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/library/combinations/render")
+def combinations_render_endpoint(
+    body: dict,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+):
+    owner = body.get("owner")
+    audio_id = body.get("audio_component_id")
+    pack_id = body.get("visual_pack_id")
+    if not owner or audio_id is None or pack_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="owner, audio_component_id, and visual_pack_id are required",
+        )
+    try:
+        return render_combination(
+            store,
+            owner=str(owner),
+            audio_component_id=int(audio_id),
+            visual_pack_id=int(pack_id),
+            audio_start_sec=body.get("audio_start_sec"),
+            audio_end_sec=body.get("audio_end_sec"),
+            segment_length=float(body.get("segment_length") or 8.0),
+            grade=body.get("apply_grade", True) is not False,
+            version_label=body.get("version_label"),
+            change_summary=body.get("change_summary"),
+            force_usage=bool(body.get("force") or body.get("use_anyway")),
+            slug=body.get("slug"),
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/library/combinations/import-usage")
+def combinations_import_usage_endpoint(
+    body: dict,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+):
+    owner = body.get("owner")
+    if not owner:
+        raise HTTPException(status_code=400, detail="owner is required")
+    try:
+        return import_usage_from_videos(
+            store,
+            owner=str(owner),
+            video_ids=body.get("video_ids"),
+            all_videos=bool(body.get("all_videos")),
+            dry_run=bool(body.get("dry_run")),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/production/projects/{project_id}")

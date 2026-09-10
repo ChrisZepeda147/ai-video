@@ -3,7 +3,9 @@
   "private": true,
   "description": "Root scripts proxy to the Next.js dashboard in web/",
   "scripts": {
-    "dev": "npm run dev --prefix web",
+    "dev": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-dashboard.ps1",
+    "dev:web": "npm run dev --prefix web",
+    "restart:dev": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/restart-dev.ps1",
     "build": "npm run build --prefix web",
     "start": "npm run start --prefix web",
     "lint": "npm run lint --prefix web",

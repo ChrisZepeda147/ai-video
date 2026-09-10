@@ -315,6 +315,211 @@ export type VideoLibraryResponse = {
   };
 };
 
+export type ShortBuildVisualStyle = {
+  id: string;
+  label: string;
+  query?: string;
+};
+
+export type ShortPoolAsset = {
+  youtube_id: string;
+  title: string;
+  url?: string;
+  query?: string;
+  kind?: string;
+  local_path?: string;
+  duration_sec?: number | null;
+  use_count?: number;
+  available?: boolean;
+};
+
+export type ShortPoolResponse = {
+  summary: {
+    speech_count: number;
+    broll_count: number;
+    combinations_used: number;
+    updated_at?: string;
+  };
+  speech: ShortPoolAsset[];
+  broll: ShortPoolAsset[];
+  combinations: Array<{
+    key?: string;
+    speech_youtube_id: string;
+    broll_youtube_ids: string[];
+    slug: string;
+    created_at: string;
+  }>;
+};
+
+export type ShortBuildDefaults = {
+  speaker?: string;
+  speech_query: string;
+  broll_query: string;
+  min_seconds: number;
+  max_seconds: number;
+  segment_length: number;
+  visual_styles: ShortBuildVisualStyle[];
+  config_path?: string;
+};
+
+export type ShortBuildJob = {
+  job_id: string;
+  slug: string;
+  status: string;
+  visual_style?: string;
+  broll_query?: string;
+  target_seconds?: number;
+  output_path?: string | null;
+  preview_url?: string | null;
+  poll_url?: string;
+  error?: string | null;
+  duration_sec?: number | null;
+  speech_youtube_id?: string | null;
+  broll_youtube_ids?: string[] | null;
+};
+
+export type CommandJob = {
+  job_key: string;
+  job_id?: number;
+  status: string;
+  user_command: string;
+  batch?: boolean;
+  batch_count?: number;
+  jobs?: CommandJob[];
+  cursor_session_id?: string | null;
+  production_video_id?: number | null;
+  parent_video_id?: number | null;
+  agent_result?: string | null;
+  stdout_log?: string | null;
+  stderr_log?: string | null;
+  error_message?: string | null;
+  final_output_path?: string | null;
+  poll_url?: string;
+  cursor_available?: boolean;
+  created_at?: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+};
+
+export type ProductionVideoComponent = {
+  id: number;
+  video_id: number;
+  component_type: string;
+  label?: string | null;
+  sort_order?: number;
+  local_path?: string | null;
+  url?: string | null;
+  text_content?: string | null;
+  start_sec?: number | null;
+  end_sec?: number | null;
+};
+
+export type ProductionLibraryVideo = {
+  id: number;
+  video_key: string;
+  slug?: string | null;
+  title: string;
+  speaker?: string | null;
+  podcast_source?: string | null;
+  source_url?: string | null;
+  topic?: string | null;
+  hook?: string | null;
+  status: string;
+  version?: number;
+  parent_video_id?: number | null;
+  version_label?: string | null;
+  final_output_path?: string | null;
+  thumbnail_path?: string | null;
+  duration_sec?: number | null;
+  created_at: string;
+  metadata?: Record<string, unknown> | null;
+  components?: ProductionVideoComponent[];
+  versions?: Array<{
+    id: number;
+    video_key: string;
+    version?: number;
+    version_label?: string | null;
+    status?: string;
+    final_output_path?: string | null;
+    created_at?: string;
+  }>;
+};
+
+export type CombinationAudioItem = {
+  component_id: number;
+  video_id: number;
+  display_id: string;
+  speaker: string;
+  label?: string;
+  local_path?: string | null;
+  duration_sec?: number | null;
+  source_url?: string | null;
+  transcript_excerpt?: string;
+  video_title?: string;
+};
+
+export type CombinationVisualPack = {
+  id: number;
+  pack_key?: string;
+  display_id?: string | null;
+  category: string;
+  label: string;
+  clips_root_path?: string | null;
+  preview_clip_path?: string | null;
+  clip_count?: number;
+  broll_ids?: string[];
+};
+
+export type CombinationCatalog = {
+  owners: string[];
+  selected_owner?: string | null;
+  audio_by_speaker: Record<string, CombinationAudioItem[]>;
+  visual_packs: CombinationVisualPack[];
+  audio_count: number;
+  visual_pack_count: number;
+};
+
+export type CombinationVisualStatus = {
+  visual_pack_id: number;
+  display_id?: string | null;
+  category?: string;
+  label?: string;
+  preview_clip_path?: string | null;
+  clip_count?: number;
+  status: "available" | "used_by_selected_owner" | "used_by_other_owner";
+  available: boolean;
+  used_by_selected_owner: boolean;
+  used_by_other_owner: boolean;
+  other_owner?: string | null;
+  rendered_video_ids?: number[];
+};
+
+export type CombinationStatusResponse = {
+  owner: string;
+  audio_component_id: number;
+  audio: {
+    display_id?: string | null;
+    speaker?: string | null;
+    local_path?: string | null;
+    transcript_excerpt?: string;
+    duration_sec?: number | null;
+    source_url?: string | null;
+  };
+  visuals: CombinationVisualStatus[];
+  advisory_reuse?: {
+    prior_usage_detected?: boolean;
+    summary?: string;
+  };
+};
+
+export type CombinationRenderResponse = {
+  video: ProductionLibraryVideo;
+  usage: Record<string, unknown>;
+  output_path: string;
+  slug: string;
+  owner: string;
+};
+
 export type VideoImportResponse = {
   results: Array<{
     slug: string;

@@ -20,6 +20,16 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000). See [web/README.md](web/README.md) for details.
 
+### Command Cursor from the site
+
+Private `/command` page sends plain-English requests to **Cursor Agent CLI** (`agent -p`). Cursor runs in this repo using existing Python tools. Completed videos register via:
+
+```powershell
+python scripts/register_production_video.py --title "..." --final-path downloads/.../final.mp4
+```
+
+Production library: `/library` · Reuse checks: `python scripts/production_library_cli.py check-reuse ...`
+
 ## Setup
 
 ```powershell

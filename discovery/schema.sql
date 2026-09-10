@@ -509,3 +509,149 @@ CREATE TABLE IF NOT EXISTS pilot_batch_items (
 
 CREATE INDEX IF NOT EXISTS idx_pilot_items_batch
     ON pilot_batch_items (batch_id, sort_order);
+
+-- Production content library (NOT discovery references — never write discovery IDs to content/used.json).
+CREATE TABLE IF NOT EXISTS production_library_videos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_key TEXT NOT NULL UNIQUE,
+    slug TEXT,
+    title TEXT NOT NULL,
+    internal_name TEXT,
+    speaker TEXT,
+    podcast_source TEXT,
+    source_url TEXT,
+    source_platform TEXT,
+    source_external_id TEXT,
+    source_start_sec REAL,
+    source_end_sec REAL,
+    transcript_segment TEXT,
+    transcript_hash TEXT,
+    topic TEXT,
+    hook TEXT,
+    tags_json TEXT,
+    scene_plan_json TEXT,
+    creation_prompt TEXT,
+    creation_command_job_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'draft',
+    version INTEGER NOT NULL DEFAULT 1,
+    parent_video_id INTEGER,
+    version_label TEXT,
+    change_summary TEXT,
+    posted INTEGER NOT NULL DEFAULT 0,
+    platform_ids_json TEXT,
+    thumbnail_path TEXT,
+    final_output_path TEXT,
+    duration_sec REAL,
+    production_project_id INTEGER,
+    metadata_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT,
+    FOREIGN KEY (parent_video_id) REFERENCES production_library_videos (id) ON DELETE SET NULL,
+    FOREIGN KEY (production_project_id) REFERENCES production_projects (id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_production_library_speaker
+    ON production_library_videos (speaker, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_production_library_source
+    ON production_library_videos (source_platform, source_external_id);
+
+CREATE INDEX IF NOT EXISTS idx_production_library_transcript_hash
+    ON production_library_videos (transcript_hash);
+
+CREATE INDEX IF NOT EXISTS idx_production_library_parent
+    ON production_library_videos (parent_video_id, version);
+
+CREATE TABLE IF NOT EXISTS production_video_components (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id INTEGER NOT NULL,
+    component_type TEXT NOT NULL,
+    label TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    local_path TEXT,
+    url TEXT,
+    text_content TEXT,
+    start_sec REAL,
+    end_sec REAL,
+    metadata_json TEXT,
+    file_sha256 TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (video_id) REFERENCES production_library_videos (id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_production_components_video
+    ON production_video_components (video_id, component_type, sort_order);
+
+-- Reusable visual packs derived from existing clip folders / broll_ids (no duplicate media).
+CREATE TABLE IF NOT EXISTS production_visual_packs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pack_key TEXT NOT NULL UNIQUE,
+    display_id TEXT,
+    category TEXT NOT NULL DEFAULT 'Custom',
+    label TEXT NOT NULL,
+    clips_root_path TEXT,
+    broll_ids_json TEXT,
+    preview_clip_path TEXT,
+    source_video_id INTEGER,
+    metadata_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (source_video_id) REFERENCES production_library_videos (id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_visual_packs_category
+    ON production_visual_packs (category, label);
+
+-- Exact audio + visual pairing usage per owner (Chris / Stephen).
+CREATE TABLE IF NOT EXISTS production_combination_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner TEXT NOT NULL,
+    audio_component_id INTEGER NOT NULL,
+    visual_pack_id INTEGER NOT NULL,
+    rendered_video_id INTEGER,
+    audio_start_sec REAL,
+    audio_end_sec REAL,
+    visual_start_sec REAL,
+    visual_end_sec REAL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (audio_component_id) REFERENCES production_video_components (id) ON DELETE CASCADE,
+    FOREIGN KEY (visual_pack_id) REFERENCES production_visual_packs (id) ON DELETE CASCADE,
+    FOREIGN KEY (rendered_video_id) REFERENCES production_library_videos (id) ON DELETE SET NULL,
+    UNIQUE (owner, audio_component_id, visual_pack_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_combination_usage_owner_audio
+    ON production_combination_usage (owner, audio_component_id);
+
+CREATE INDEX IF NOT EXISTS idx_combination_usage_pack
+    ON production_combination_usage (visual_pack_id, owner);
+
+-- Website natural-language commands handed to Cursor Agent CLI.
+CREATE TABLE IF NOT EXISTS cursor_command_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_key TEXT NOT NULL UNIQUE,
+    user_command TEXT NOT NULL,
+    enriched_prompt TEXT,
+    status TEXT NOT NULL DEFAULT 'queued',
+    cursor_session_id TEXT,
+    cursor_request_id TEXT,
+    production_video_id INTEGER,
+    parent_video_id INTEGER,
+    production_project_id INTEGER,
+    stdout_log TEXT,
+    stderr_log TEXT,
+    agent_messages_json TEXT,
+    agent_result TEXT,
+    error_message TEXT,
+    final_output_path TEXT,
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    completed_at TEXT,
+    FOREIGN KEY (production_video_id) REFERENCES production_library_videos (id) ON DELETE SET NULL,
+    FOREIGN KEY (parent_video_id) REFERENCES production_library_videos (id) ON DELETE SET NULL,
+    FOREIGN KEY (production_project_id) REFERENCES production_projects (id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_cursor_command_jobs_status
+    ON cursor_command_jobs (status, created_at DESC);

@@ -499,6 +499,21 @@ class PilotApiTests(unittest.TestCase):
         self.assertIn("imported_count", payload)
         self.assertIn("results", payload)
 
+    def test_shorts_build_defaults(self) -> None:
+        response = self.client.get("/api/shorts/build/defaults")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("speech_query", payload)
+        self.assertIn("visual_styles", payload)
+        self.assertGreaterEqual(len(payload["visual_styles"]), 3)
+
+    def test_shorts_pool_list(self) -> None:
+        response = self.client.get("/api/shorts/pool")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("speech", payload)
+        self.assertIn("broll", payload)
+
 
 class AnalyticsApiTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -529,6 +544,53 @@ class AnalyticsApiTests(unittest.TestCase):
             response = self.client.get(path)
             self.assertEqual(response.status_code, 200)
             self.assertIn("items", response.json())
+
+
+class ProductionLibraryApiTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.tmp.name) / "library_api.sqlite"
+        os.environ["DISCOVERY_DB_PATH"] = str(self.db_path)
+        DiscoveryStore(self.db_path).close()
+        from api.main import app  # noqa: E402
+
+        self.client = TestClient(app)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+        os.environ.pop("DISCOVERY_DB_PATH", None)
+
+    def test_library_list_empty(self) -> None:
+        response = self.client.get("/api/library/videos")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["items"], [])
+
+    def test_command_submit_dry_run(self) -> None:
+        os.environ["CURSOR_BRIDGE_DRY_RUN"] = "1"
+        try:
+            response = self.client.post(
+                "/api/commands",
+                json={"command": "Reply with exactly: PONG"},
+            )
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertIn("job_key", payload)
+            self.assertIn(payload["status"], {"queued", "running", "completed"})
+        finally:
+            os.environ.pop("CURSOR_BRIDGE_DRY_RUN", None)
+
+    def test_commands_status(self) -> None:
+        response = self.client.get("/api/commands/status")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("cursor_agent_available", response.json())
+
+    def test_combinations_catalog_empty(self) -> None:
+        response = self.client.get("/api/library/combinations/catalog")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("audio_by_speaker", payload)
+        self.assertIn("visual_packs", payload)
+        self.assertIn("chris", payload["owners"])
 
 
 if __name__ == "__main__":

@@ -130,6 +130,26 @@ def generation_jobs_dir() -> Path:
     return path
 
 
+def production_library_dir() -> Path:
+    path = project_root() / "downloads" / "production_library"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def cursor_command_jobs_dir() -> Path:
+    path = project_root() / "data" / "cursor_command_jobs"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def internal_api_key() -> str:
+    return os.environ.get("AI_VIDEO_INTERNAL_KEY", "").strip()
+
+
+def cursor_api_key() -> str:
+    return os.environ.get("CURSOR_API_KEY", "").strip()
+
+
 def source_media_dir() -> Path:
     path = discovery_data_dir() / "source_media"
     path.mkdir(parents=True, exist_ok=True)
