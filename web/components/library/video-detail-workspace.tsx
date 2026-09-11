@@ -105,7 +105,7 @@ export function VideoDetailWorkspace({ videoId }: { videoId: number }) {
 
   if (!video) {
     return backendOnline === false ? (
-      <BackendOfflineBanner message="Start the API, then refresh." />
+      <BackendOfflineBanner message="From repo root run npm run dev, then refresh." />
     ) : (
       <p className="text-sm text-zinc-500">Video not found.</p>
     );
