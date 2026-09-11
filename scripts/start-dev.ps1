@@ -1,4 +1,5 @@
 # Start full dev stack: FastAPI (8000) + Next.js dashboard (3000).
+# Dashboard starts immediately - do not block on API health (site works with offline banner).
 $Root = Split-Path -Parent $PSScriptRoot
 $Scripts = $PSScriptRoot
 
@@ -11,15 +12,6 @@ function Test-ApiHealthy {
     }
 }
 
-function Wait-ApiHealthy {
-    param([int]$Seconds = 45)
-    for ($i = 0; $i -lt $Seconds; $i++) {
-        if (Test-ApiHealthy) { return $true }
-        Start-Sleep -Seconds 1
-    }
-    return $false
-}
-
 Set-Location $Root
 
 if (Test-ApiHealthy) {
@@ -30,13 +22,8 @@ if (Test-ApiHealthy) {
         "-NoExit", "-ExecutionPolicy", "Bypass",
         "-File", (Join-Path $Scripts "start-api.ps1")
     ) -WorkingDirectory $Root
-
-    Write-Host "Waiting for API health..."
-    if (-not (Wait-ApiHealthy)) {
-        Write-Error "API did not become ready on port 8000. Check the API terminal for errors."
-        exit 1
-    }
-    Write-Host "Discovery API is ready."
+    Write-Host "API still starting on http://127.0.0.1:8000 - dashboard will open now."
+    Write-Host "If API terminal shows errors, fix Python/deps there; the site still loads."
 }
 
 & (Join-Path $Scripts "start-dashboard.ps1")

@@ -13,13 +13,9 @@ function Resolve-PythonExe {
     if ($env:AI_VIDEO_PYTHON -and (Test-Path -LiteralPath $env:AI_VIDEO_PYTHON)) {
         return $env:AI_VIDEO_PYTHON
     }
-    foreach ($candidate in @("python", "python3", "py")) {
-        $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
-        if ($cmd -and $cmd.Source -and (Test-Path -LiteralPath $cmd.Source)) {
-            return $cmd.Source
-        }
-    }
     $fallback = @(
+        "$env:LOCALAPPDATA\Python\bin\python.exe",
+        "$env:LOCALAPPDATA\Programs\Python\Python314\python.exe",
         "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe",
         "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
         "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
@@ -28,6 +24,13 @@ function Resolve-PythonExe {
     )
     foreach ($path in $fallback) {
         if ($path -and (Test-Path -LiteralPath $path)) { return $path }
+    }
+    foreach ($candidate in @("python", "python3", "py")) {
+        $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
+        if ($cmd -and $cmd.Source -and (Test-Path -LiteralPath $cmd.Source)) {
+            if ($cmd.Source -match '\\WindowsApps\\') { continue }
+            return $cmd.Source
+        }
     }
     $storeMatches = Get-ChildItem -Path "$env:LOCALAPPDATA\Microsoft\WindowsApps" -Filter "python.exe" -Recurse -Depth 2 -ErrorAction SilentlyContinue |
         Where-Object { $_.FullName -match 'PythonSoftwareFoundation' } |
@@ -38,13 +41,6 @@ function Resolve-PythonExe {
     return $null
 }
 
-$Python = Resolve-PythonExe
-if (-not $Python) {
-    Write-Error "Python not found. Install Python 3.11+ or set AI_VIDEO_PYTHON to your python.exe path."
-    exit 1
-}
-
-Write-Host "Using Python: $Python"
 $envFile = Join-Path $Root "scripts\.env"
 if (Test-Path $envFile) {
     Get-Content $envFile | ForEach-Object {
@@ -58,6 +54,14 @@ if (Test-Path $envFile) {
         }
     }
 }
+
+$Python = Resolve-PythonExe
+if (-not $Python) {
+    Write-Error "Python not found. Install Python 3.11+ or set AI_VIDEO_PYTHON to your python.exe path."
+    exit 1
+}
+
+Write-Host "Using Python: $Python"
 $env:PYTHONIOENCODING = "utf-8"
 $env:PYTHONUTF8 = "1"
 & $Python -m pip install -r requirements-api.txt -q

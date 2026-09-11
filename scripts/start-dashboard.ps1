@@ -14,7 +14,16 @@ if (-not (Test-Path $EnvFile) -and (Test-Path $Example)) {
     Write-Host "Created web/.env.local from .env.example"
 }
 
-npm install
+$NodeModules = Join-Path $Web "node_modules"
+$LockFile = Join-Path $Web "package-lock.json"
+if (-not (Test-Path $NodeModules)) {
+    Write-Host "Installing dashboard dependencies (first run)..."
+    npm install
+} elseif ((Test-Path $LockFile) -and (Get-Item $LockFile).LastWriteTime -gt (Get-Item $NodeModules).LastWriteTime) {
+    Write-Host "package-lock.json changed - refreshing dashboard dependencies..."
+    npm install
+}
 
-Write-Host "Starting dashboard at http://localhost:$Port"
+Write-Host "Starting dashboard at http://localhost:${Port}"
+Write-Host "Open http://localhost:${Port}/create for Make Short"
 npx next dev -p $Port
