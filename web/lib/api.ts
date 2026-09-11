@@ -92,6 +92,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<ApiResult<
       cache: "no-store",
     });
     if (!response.ok) {
+      console.error(`Discovery API ${response.status} ${url}`);
       let message = `Discovery backend returned ${response.status}`;
       try {
         const err = (await response.json()) as { detail?: unknown };
