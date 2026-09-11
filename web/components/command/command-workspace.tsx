@@ -101,7 +101,7 @@ export function CommandWorkspace({
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       {backendOnline === false ? (
-        <BackendOfflineBanner message="Start the API, then refresh." />
+        <BackendOfflineBanner message="From repo root run npm run dev, then refresh." />
       ) : null}
 
       {cursorAvailable === false ? (

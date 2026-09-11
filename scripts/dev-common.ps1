@@ -106,17 +106,17 @@ function Start-ApiServer {
 }
 
 function Wait-ApiHealthySoft {
-    param([int]$Seconds = 12)
+    param([int]$Seconds = 30)
     for ($i = 1; $i -le $Seconds; $i++) {
         if (Test-ApiHealthy) {
             Write-Host "Discovery API ready on http://127.0.0.1:8000"
             return $true
         }
         if ($i -eq 1) {
-            Write-Host "Waiting for API (dashboard starts either way)..."
+            Write-Host "Waiting for API (up to ${Seconds}s)..."
         }
         Start-Sleep -Seconds 1
     }
-    Write-Host "API still starting - refresh the dashboard in a few seconds if pages look offline."
+    Write-Host "API still starting - dashboard will load; refresh if you see an offline banner."
     return $false
 }

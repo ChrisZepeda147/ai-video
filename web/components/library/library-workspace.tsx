@@ -123,7 +123,7 @@ export function LibraryWorkspace() {
 
   return (
     <div className="space-y-6">
-      {backendOnline === false ? <BackendOfflineBanner message="Start the API, then refresh." /> : null}
+      {backendOnline === false ? <BackendOfflineBanner message="From repo root run npm run dev, then refresh." /> : null}
 
       <section className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">

@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { BackendOfflineBanner } from "@/components/backend-banner";
+import { BackendStatusBanner } from "@/components/backend-banner";
 import { DiscoverActions } from "@/components/discover/discover-actions";
 import { DiscoverFilters } from "@/components/discover/discover-filters";
 import { ReferenceListInteractive } from "@/components/discover/reference-list-interactive";
@@ -9,7 +9,9 @@ import {
   fetchDiscoveryNiches,
   fetchDiscoveryReferences,
   fetchDiscoveryStats,
+  fetchHealth,
 } from "@/lib/api";
+import { resolveBackendProbe } from "@/lib/backend-status";
 
 type DiscoverPageProps = {
   searchParams: Promise<{
@@ -29,6 +31,7 @@ export default async function DiscoverPage({ searchParams }: DiscoverPageProps) 
   const minScore = Number(params.min_score ?? "0");
   const limit = Number(params.limit ?? "25");
 
+  const health = await fetchHealth();
   const [statsResult, referencesResult, nichesResult] = await Promise.all([
     fetchDiscoveryStats(),
     fetchDiscoveryReferences({
@@ -41,11 +44,8 @@ export default async function DiscoverPage({ searchParams }: DiscoverPageProps) 
     fetchDiscoveryNiches(),
   ]);
 
-  const offline = !statsResult.ok || !referencesResult.ok;
-  const offlineMessage =
-    (!statsResult.ok && statsResult.message) ||
-    (!referencesResult.ok && referencesResult.message) ||
-    "Discovery backend is offline.";
+  const backend = resolveBackendProbe(health, statsResult, referencesResult);
+  const pageBlocked = !backend.online || Boolean(backend.dataError);
 
   const stats = statsResult.ok ? statsResult.data : null;
   const references = referencesResult.ok ? referencesResult.data.items : [];
@@ -58,9 +58,13 @@ export default async function DiscoverPage({ searchParams }: DiscoverPageProps) 
         description="Scan YouTube for viral reference metadata, analyze Creative DNA, and generate original concept ideas. References are never production assets."
       />
 
-      {offline ? <BackendOfflineBanner message={offlineMessage} /> : null}
+      {!backend.online ? (
+        <BackendStatusBanner kind="offline" message={health.ok ? "Health check failed." : health.message} />
+      ) : backend.dataError ? (
+        <BackendStatusBanner kind="error" message={backend.dataError} />
+      ) : null}
 
-      {!offline ? <DiscoverActions niches={niches} /> : null}
+      {!pageBlocked ? <DiscoverActions niches={niches} /> : null}
 
       {stats ? (
         <section className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

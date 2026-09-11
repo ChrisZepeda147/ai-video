@@ -62,9 +62,11 @@ class DiscoveryStore:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(db_path))
+        # FastAPI runs sync routes in a thread pool — allow cross-thread use of this connection.
+        self._conn = sqlite3.connect(str(db_path), check_same_thread=False, timeout=30.0)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
+        self._conn.execute("PRAGMA journal_mode = WAL")
         self.init_schema()
 
     def close(self) -> None:

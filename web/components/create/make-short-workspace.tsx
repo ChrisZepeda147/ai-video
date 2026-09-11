@@ -99,7 +99,7 @@ export function MakeShortWorkspace() {
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       {backendOnline === false ? (
-        <BackendOfflineBanner message="Start the API in a second terminal, then refresh this page." />
+        <BackendOfflineBanner message="From repo root run npm run dev, then refresh this page." />
       ) : null}
 
       {cursorAvailable === false ? (

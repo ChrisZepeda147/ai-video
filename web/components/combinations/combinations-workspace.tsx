@@ -171,7 +171,7 @@ export function CombinationsWorkspace() {
   }
 
   if (backendOnline === false) {
-    return <BackendOfflineBanner message="Start the API, then refresh." />;
+    return <BackendOfflineBanner message="From repo root run npm run dev, then refresh." />;
   }
 
   return (

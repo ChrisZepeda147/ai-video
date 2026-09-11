@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { BackendOfflineBanner } from "@/components/backend-banner";
+import { BackendStatusBanner } from "@/components/backend-banner";
 import { PageHeader } from "@/components/page-header";
 import { PlatformBadge } from "@/components/platform-badge";
 import { SectionHeader } from "@/components/section-header";
 import { StatCard } from "@/components/stat-card";
 import { StatusBadge } from "@/components/status-badge";
-import { fetchDiscoveryStats, fetchDiscoveryTop } from "@/lib/api";
+import { fetchDiscoveryStats, fetchDiscoveryTop, fetchHealth } from "@/lib/api";
+import { resolveBackendProbe } from "@/lib/backend-status";
 import { buildDashboardStats, formatReferenceViews } from "@/lib/dashboard-stats";
 import { accountChannels, productionQueue } from "@/lib/demo-data";
 import type { ReferenceItem } from "@/lib/types";
@@ -92,12 +93,13 @@ function ReferenceTable({ items }: { items: ReferenceItem[] }) {
 }
 
 export default async function DashboardPage() {
+  const health = await fetchHealth();
   const [statsResult, topResult] = await Promise.all([
     fetchDiscoveryStats(),
     fetchDiscoveryTop({ min_score: 0, limit: 5 }),
   ]);
 
-  const discoveryOffline = !statsResult.ok;
+  const backend = resolveBackendProbe(health, statsResult, topResult);
   const stats = statsResult.ok ? statsResult.data : null;
   const topReferences = topResult.ok ? topResult.data.items : [];
   const dashboardStats = buildDashboardStats(stats);
@@ -119,14 +121,13 @@ export default async function DashboardPage() {
         </Link>
       </div>
 
-      {discoveryOffline ? (
-        <BackendOfflineBanner
-          message={
-            statsResult.ok === false
-              ? statsResult.message
-              : "Discovery backend is offline."
-          }
+      {!backend.online ? (
+        <BackendStatusBanner
+          kind="offline"
+          message={health.ok ? "Health check failed." : health.message}
         />
+      ) : backend.dataError ? (
+        <BackendStatusBanner kind="error" message={backend.dataError} />
       ) : null}
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
