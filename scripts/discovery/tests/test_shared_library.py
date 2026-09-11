@@ -13,10 +13,13 @@ from unittest.mock import patch
 from discovery.config import project_root
 from discovery.shared_library import (
     build_manifest_from_job,
+    build_sync_health,
     export_manifest_package,
+    export_owner_existing,
     export_stephen_after_register,
     export_stephen_existing,
     find_video_by_manifest_id,
+    import_all_shared_packages,
     import_all_stephen_packages,
     import_manifest,
     manifest_id_for,
@@ -150,6 +153,35 @@ class SharedLibraryTests(unittest.TestCase):
         self.assertTrue((self.root / "shared_library" / "stephen" / self.slug / "manifest.json").is_file())
 
     @patch("discovery.shared_library.project_root")
+    def test_import_chris_packages(self, mock_root) -> None:
+        mock_root.return_value = self.root
+        chris_slug = f"chris-test-{uuid.uuid4().hex[:8]}"
+        chris_job = self.root / "downloads" / "motivational" / chris_slug
+        (chris_job / "audio").mkdir(parents=True)
+        (chris_job / "output").mkdir(parents=True)
+        (chris_job / "audio" / "speech.mp3").write_bytes(b"chris-speech")
+        (chris_job / "output" / f"{chris_slug}-motivation.mp4").write_bytes(b"\x00\x00\x00\x20ftypmp42chrisfinal")
+        (chris_job / "job.json").write_text(
+            json.dumps({"speaker": "Andrew Tate", "speech_title": "Chris Test", "visual_style": "luxury car"}),
+            encoding="utf-8",
+        )
+        export_owner_existing(self.store, owner="chris", root=self.root)
+        result = import_all_shared_packages(self.store, root=self.root)
+        chris_items = [
+            item
+            for item in result["items"]
+            if item.get("status") == "imported" and str(item.get("manifest_id", "")).startswith("chris:")
+        ]
+        self.assertGreaterEqual(len(chris_items), 1)
+        imported = next(item for item in chris_items if item.get("slug") == chris_slug)
+        video = self.store._conn.execute(
+            "SELECT metadata_json FROM production_library_videos WHERE id = ?",
+            (imported["video_id"],),
+        ).fetchone()
+        meta = json.loads(video["metadata_json"])
+        self.assertEqual(meta["owner"], "chris")
+
+    @patch("discovery.shared_library.project_root")
     def test_chris_library_unchanged_when_no_packages(self, mock_root) -> None:
         mock_root.return_value = self.root
         before = self.store._conn.execute("SELECT COUNT(*) AS n FROM production_library_videos").fetchone()["n"]
@@ -161,6 +193,41 @@ class SharedLibraryTests(unittest.TestCase):
     def test_manifest_id_stable(self) -> None:
         mid = manifest_id_for(owner="stephen", slug="demo", final_hash="abc123")
         self.assertTrue(mid.startswith("stephen:demo:"))
+
+    def test_sync_health_ok_when_even(self) -> None:
+        health = build_sync_health(
+            {
+                "pending_import": 0,
+                "git": {"commits_behind": 0, "commits_ahead": 0},
+            }
+        )
+        self.assertTrue(health["ok"])
+        self.assertEqual(health["label"], "synced")
+
+    def test_sync_health_code_ahead(self) -> None:
+        health = build_sync_health(
+            {
+                "pending_import": 0,
+                "git": {"commits_behind": 0, "commits_ahead": 3},
+            }
+        )
+        self.assertFalse(health["ok"])
+        self.assertEqual(health["label"], "code_ahead")
+
+    def test_sync_health_code_behind(self) -> None:
+        health = build_sync_health(
+            {
+                "pending_import": 0,
+                "git": {"commits_behind": 2, "commits_ahead": 0},
+            }
+        )
+        self.assertFalse(health["ok"])
+        self.assertEqual(health["label"], "code_behind")
+
+    def test_sync_health_library_behind(self) -> None:
+        health = build_sync_health({"pending_import": 3, "git": {"commits_behind": 0}})
+        self.assertFalse(health["ok"])
+        self.assertEqual(health["label"], "library_behind")
 
     def test_sync_is_due_when_never_synced(self) -> None:
         from discovery.shared_library import _sync_is_due

@@ -526,10 +526,30 @@ export type SharedSyncGitStatus = {
   commits_behind?: number | null;
   commits_ahead?: number | null;
   code_sync_hint?: string | null;
+  conflict?: boolean;
+};
+
+export type SharedSyncOwnerStats = {
+  packages_on_disk: number;
+  imports_recorded: number;
+  pending_import: number;
+};
+
+export type SharedSyncHealth = {
+  ok: boolean;
+  label: string;
+  library_ok: boolean;
+  code_ok: boolean;
+  pending_import?: number;
+  commits_behind?: number | null;
+  commits_ahead?: number | null;
+  summary: string;
 };
 
 export type SharedSyncStatus = {
   owner: string;
+  export_owner?: string | null;
+  owners?: Record<string, SharedSyncOwnerStats>;
   packages_on_disk: number;
   imports_recorded: number;
   pending_import?: number;
@@ -540,8 +560,10 @@ export type SharedSyncStatus = {
   last_auto_sync_at?: string | null;
   auto_sync_enabled?: boolean;
   auto_sync_interval_minutes?: number;
+  auto_push_enabled?: boolean;
   export_enabled: boolean;
   git?: SharedSyncGitStatus;
+  health?: SharedSyncHealth;
 };
 
 export type SharedSyncPullImportResult = {

@@ -10,8 +10,11 @@ from discovery.config import project_root
 
 ALLOWED_PUSH_PREFIXES = (
     "shared_library/stephen/",
+    "shared_library/chris/",
     ".gitattributes",
 )
+SHARED_LIBRARY_OWNERS = ("stephen", "chris")
+PUSH_REMOTES = ("origin", "chris")
 SCOPED_PULL_PATHS = (
     "shared_library",
     ".gitattributes",
@@ -66,10 +69,12 @@ def _resolve_remote_ref() -> str:
 def stage_shared_library() -> list[str]:
     root = project_root()
     staged: list[str] = []
-    stephen = root / "shared_library" / "stephen"
-    if stephen.is_dir():
-        _run_git(["add", "shared_library/stephen"])
-        staged.append("shared_library/stephen")
+    for owner in SHARED_LIBRARY_OWNERS:
+        owner_dir = root / "shared_library" / owner
+        if owner_dir.is_dir() and any(owner_dir.glob("*/manifest.json")):
+            rel = f"shared_library/{owner}"
+            _run_git(["add", rel])
+            staged.append(rel)
     attrs = root / ".gitattributes"
     if attrs.is_file():
         _run_git(["add", ".gitattributes"])
@@ -109,14 +114,25 @@ def commit_and_push(message: str, *, dry_run: bool = False) -> dict[str, Any]:
             return {"ok": True, "committed": False, "pushed": False, "message": "Nothing to commit."}
         raise RuntimeError(commit.stderr.strip() or commit.stdout.strip() or "git commit failed")
 
-    push = _run_git(["push"], check=False)
-    if push.returncode != 0:
-        raise RuntimeError(push.stderr.strip() or push.stdout.strip() or "git push failed")
+    pushed_remotes: list[str] = []
+    push_errors: list[str] = []
+    for remote in PUSH_REMOTES:
+        probe = _run_git(["remote", "get-url", remote], check=False)
+        if probe.returncode != 0:
+            continue
+        push = _run_git(["push", remote], check=False)
+        if push.returncode != 0:
+            push_errors.append(push.stderr.strip() or push.stdout.strip() or f"git push {remote} failed")
+        else:
+            pushed_remotes.append(remote)
+    if not pushed_remotes:
+        raise RuntimeError(push_errors[0] if push_errors else "git push failed")
 
     return {
         "ok": True,
         "committed": True,
         "pushed": True,
+        "pushed_remotes": pushed_remotes,
         "commit_message": message,
         "files": diff.stdout.strip().splitlines(),
     }
@@ -126,6 +142,7 @@ def git_repo_status(*, fetch: bool = False) -> dict[str, Any]:
     """Local repo HEAD + how far behind/ahead of upstream (for code/search sync visibility)."""
     if fetch:
         _run_git(["fetch", "origin"], check=False)
+        _run_git(["fetch", "chris"], check=False)
 
     head = _run_git(["rev-parse", "--short", "HEAD"], check=False)
     branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], check=False)

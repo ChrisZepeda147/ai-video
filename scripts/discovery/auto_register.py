@@ -379,9 +379,9 @@ def sync_register_best_effort(**kwargs: Any) -> dict[str, Any] | None:
                 video = auto_register_final_output(store, **kwargs)
             if video:
                 try:
-                    from discovery.shared_library import export_stephen_after_register
+                    from discovery.shared_library import export_after_register
 
-                    export_stephen_after_register(slug=slug or video.get("slug"), video=video, store=store)
+                    export_after_register(slug=slug or video.get("slug"), video=video, store=store)
                 except Exception as export_exc:
                     logger.warning("Shared library export skipped: %s", export_exc)
             return video

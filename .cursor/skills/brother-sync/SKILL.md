@@ -79,12 +79,42 @@ Do not leave one GitHub copy stale.
 
 ## Check
 
+One line — synced or not:
+
+```powershell
+python scripts/shared_library_sync.py health
+```
+
+Full dump:
+
 ```powershell
 python scripts/shared_library_sync.py status
 ```
 
+Or open `/library` — green **Synced** / amber **Not synced**.
+
 Stephen: `packages_on_disk` > 0, `export_enabled` true after `.env` load.  
 Chris after import: same package slugs on disk, imports recorded.
+
+## Periodic (set and forget)
+
+Both machines, once:
+
+```powershell
+python scripts/shared_library_sync.py install
+```
+
+Windows task `AiVideoBrotherSync` every 5 min:
+1. Auto-commits safe source (`scripts/`, `web/`, `api/`, `.cursor/`)
+2. Pulls `--rebase` from `origin` + `chris` if behind
+3. Pushes **both** remotes
+4. Imports shared video packages
+
+Never force-push. Never commits `.env`, `downloads/`, `data/`, or `content/used.json`. Conflict → stop and report.
+
+```powershell
+python scripts/shared_library_sync.py uninstall
+```
 
 ```powershell
 dir shared_library\stephen

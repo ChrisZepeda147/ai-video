@@ -44,7 +44,7 @@ export function LibraryWorkspace() {
     const imp = result.data.import;
     if (imp && imp.imported > 0) {
       setMessage(
-        `Stephen auto-sync: ${imp.imported} new video(s) imported (${imp.skipped} already in library).`,
+        `Shared library auto-sync: ${imp.imported} new video(s) imported (${imp.skipped} already in library).`,
       );
       await load();
     }
@@ -59,13 +59,13 @@ export function LibraryWorkspace() {
     void runAutoSync();
   }, [backendOnline, runAutoSync]);
 
-  async function handleSyncStephen() {
+  async function handleSyncShared() {
     setSyncBusy(true);
     setMessage(null);
     const result = await postSharedSyncPullImport();
     setSyncBusy(false);
     if (!result.ok) {
-      setMessage(typeof result.message === "string" ? result.message : "Stephen sync failed.");
+      setMessage(typeof result.message === "string" ? result.message : "Shared library sync failed.");
       return;
     }
     const imp = result.data.import;
@@ -78,17 +78,32 @@ export function LibraryWorkspace() {
     const pullNote = result.data.pull_warning ? ` Pull note: ${result.data.pull_warning}.` : "";
     if (imp.found === 0) {
       setMessage(
-        `No Stephen packages on disk yet.${pullNote} Stephen runs export-stephen-existing then push-stephen from downloads/motivational/*/output/.`,
+        `No shared packages on disk yet.${pullNote} Each machine exports with SHARED_LIBRARY_EXPORT_OWNER then push-shared.`,
       );
     } else {
       setMessage(
-        `Stephen sync: ${imp.imported} imported, ${imp.skipped} already in library, ${imp.found} packages found` +
+        `Shared sync: ${imp.imported} imported, ${imp.skipped} already in library, ${imp.found} packages found (Stephen + Chris)` +
           (imp.errors ? `, ${imp.errors} errors` : "") +
           pullNote,
       );
     }
     await load();
   }
+
+  const ownerSummary = syncStatus?.owners
+    ? Object.entries(syncStatus.owners)
+        .filter(([, stats]) => stats.packages_on_disk > 0)
+        .map(([name, stats]) => `${name}: ${stats.packages_on_disk}`)
+        .join(" · ")
+    : null;
+
+  const Sync_Health = syncStatus?.health
+    ? {
+        Health_Ok: Boolean(syncStatus.health.ok),
+        Health_Label: syncStatus.health.label ?? "unknown",
+        Health_Summary: syncStatus.health.summary ?? "",
+      }
+    : null;
 
   async function handleUpload(file: File) {
     setBusy(true);
@@ -113,26 +128,45 @@ export function LibraryWorkspace() {
       <section className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <h3 className="text-sm font-semibold text-zinc-100">Stephen shared library</h3>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-semibold text-zinc-100">Brother sync (code + videos)</h3>
+              {Sync_Health ? (
+                <span
+                  className={
+                    Sync_Health.Health_Ok
+                      ? "rounded-full border border-emerald-700 bg-emerald-600/20 px-2 py-0.5 text-[11px] font-medium text-emerald-100"
+                      : "rounded-full border border-amber-700 bg-amber-600/20 px-2 py-0.5 text-[11px] font-medium text-amber-100"
+                  }
+                >
+                  {Sync_Health.Health_Ok ? "Synced" : "Not synced"}
+                </span>
+              ) : null}
+            </div>
             <p className="text-xs text-zinc-500">
-              {syncStatus
-                ? `${syncStatus.packages_on_disk} packages on disk · ${syncStatus.imports_recorded} in library` +
-                  (syncStatus.pending_import ? ` · ${syncStatus.pending_import} pending import` : "")
-                : "Pull Stephen packages from GitHub and import into this library."}
+              {Sync_Health?.Health_Summary
+                ? Sync_Health.Health_Summary
+                : syncStatus
+                  ? `${syncStatus.packages_on_disk} packages on disk · ${syncStatus.imports_recorded} in library` +
+                    (syncStatus.pending_import ? ` · ${syncStatus.pending_import} pending import` : "") +
+                    (ownerSummary ? ` · ${ownerSummary}` : "")
+                  : "Pull Stephen + Chris packages from GitHub and import into this library."}
               {syncStatus?.last_import_at
                 ? ` · Last import ${new Date(syncStatus.last_import_at).toLocaleString()}`
                 : ""}
             </p>
             {syncStatus?.auto_sync_enabled ? (
               <p className="mt-1 text-xs text-emerald-600/90">
-                Auto-sync every {syncStatus.auto_sync_interval_minutes ?? 10} min (API + this page when stale).
+                Auto-sync every {syncStatus.auto_sync_interval_minutes ?? 5} min — source to both GitHubs, then videos.
+                {syncStatus.export_enabled && syncStatus.auto_push_enabled
+                  ? " New videos on this machine auto-export + push."
+                  : ""}
               </p>
             ) : null}
             {syncStatus?.git?.commit ? (
               <p className="mt-1 text-xs text-zinc-500">
                 Code: {syncStatus.git.branch ?? "branch"} @ {syncStatus.git.commit}
                 {syncStatus.git.commits_behind != null && syncStatus.git.commits_behind > 0
-                  ? ` · ${syncStatus.git.commits_behind} commit(s) behind remote — git pull for Stephen's search/script updates`
+                  ? ` · ${syncStatus.git.commits_behind} commit(s) behind remote — git pull for brother's script updates`
                   : " · up to date with remote code"}
               </p>
             ) : null}
@@ -140,7 +174,7 @@ export function LibraryWorkspace() {
           <button
             type="button"
             disabled={syncBusy || backendOnline === false}
-            onClick={handleSyncStephen}
+            onClick={handleSyncShared}
             className="rounded-xl border border-violet-700 bg-violet-600/20 px-4 py-2 text-sm font-medium text-violet-100 hover:bg-violet-600/30 disabled:opacity-40"
           >
             {syncBusy ? "Syncing…" : "Sync now"}

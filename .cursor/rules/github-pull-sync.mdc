@@ -32,13 +32,13 @@ git stash pop
 
 If stash pop conflicts, stop and resolve before continuing.
 
-**Chris machine** (no `SHARED_LIBRARY_EXPORT_OWNER=stephen` in `scripts/.env`):
+**Both machines** — pull shared library packages (Stephen + Chris):
 
 ```powershell
 python scripts/shared_library_sync.py pull-import
 ```
 
-**Stephen machine** — skip `pull-import`; use `push-stephen` after finished videos (see `brother-sync` rule).
+Or `python scripts/shared_library_sync.py install` once — Windows timer every 5 min pulls + pushes source on both remotes.
 
 ## Before every commit
 

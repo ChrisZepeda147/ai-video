@@ -1,0 +1,24 @@
+---
+description: After every video or photo, deliver a social description plus hashtags.
+alwaysApply: true
+---
+
+# Post copy after media
+
+After every generated or finished **video** or **photo**, include post-ready copy in the same reply. Do not wait to be asked.
+
+## Required block
+
+1. **Description** — 1–3 short lines. Name the subject, the vibe, and the on-screen line if there is one. Write it so it can paste into TikTok / Reels / Shorts.
+2. **Hashtags** — one line, 8–15 tags. Mix subject + mood + format. No filler spam.
+
+```
+# ❌ BAD
+Saved the mp4. Open it when you want.
+
+# ✅ GOOD
+**Description:** Cabin POV. Tunnel lights. One line on screen: I will own a Porsche.
+**Hashtags:** #Porsche #911 #LuxuryCars #Motivation #Manifest #DarkLuxury #CarTok #Reels #Shorts
+```
+
+Skip this block only when no media was produced (debug, script-only, failed render).

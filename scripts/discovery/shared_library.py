@@ -1,4 +1,4 @@
-"""Shared library packages — Stephen → GitHub → Chris import path."""
+"""Shared library packages — Stephen + Chris export via GitHub, both sides import."""
 
 from __future__ import annotations
 
@@ -29,15 +29,39 @@ logger = logging.getLogger(__name__)
 
 MANIFEST_VERSION = 1
 SHARED_OWNER = "stephen"
+SHARED_LIBRARY_OWNERS = ("stephen", "chris")
 SKIP_JOB_NAMES = frozenset({"config.json"})
+
+
+def export_owner() -> str | None:
+    raw = os.environ.get("SHARED_LIBRARY_EXPORT_OWNER", "").strip().lower()
+    if raw in SHARED_LIBRARY_OWNERS:
+        return raw
+    return None
+
+
+def auto_push_enabled() -> bool:
+    return os.environ.get("SHARED_LIBRARY_AUTO_PUSH", "1").strip().lower() not in ("0", "false", "no")
 
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
-def shared_library_root(root: Path | None = None) -> Path:
-    return (root or project_root()) / "shared_library" / SHARED_OWNER
+def shared_library_root(owner: str | None = None, root: Path | None = None) -> Path:
+    resolved = owner or export_owner() or SHARED_OWNER
+    return (root or project_root()) / "shared_library" / resolved
+
+
+def shared_library_owners_on_disk(root: Path | None = None) -> list[str]:
+    base = (root or project_root()) / "shared_library"
+    if not base.is_dir():
+        return []
+    owners: list[str] = []
+    for child in sorted(base.iterdir()):
+        if child.is_dir() and child.name in SHARED_LIBRARY_OWNERS:
+            owners.append(child.name)
+    return owners
 
 
 def sync_state_path(root: Path | None = None) -> Path:
@@ -45,7 +69,7 @@ def sync_state_path(root: Path | None = None) -> Path:
 
 
 def export_enabled() -> bool:
-    return os.environ.get("SHARED_LIBRARY_EXPORT_OWNER", "").strip().lower() == SHARED_OWNER
+    return export_owner() is not None
 
 
 def _sha256_file(path: Path) -> str:
@@ -389,13 +413,15 @@ def find_stephen_job_slugs(root: Path | None = None) -> list[str]:
     return slugs
 
 
-def export_stephen_existing(
+def export_owner_existing(
     store=None,
     *,
+    owner: str | None = None,
     root: Path | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     root = root or project_root()
+    owner = owner or export_owner() or SHARED_OWNER
     slugs = find_stephen_job_slugs(root)
     exported: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
@@ -403,15 +429,16 @@ def export_stephen_existing(
 
     state = load_sync_state(root)
     known_ids = set(state.get("exports", {}).keys())
+    owner_root = shared_library_root(owner, root)
 
     for slug in slugs:
         try:
-            manifest = build_manifest_from_job(slug, root=root)
+            manifest = build_manifest_from_job(slug, root=root, owner=owner)
             if not manifest:
                 errors.append({"slug": slug, "error": "no_manifest"})
                 continue
             mid = manifest["manifest_id"]
-            existing_manifest = shared_library_root(root) / slug / "manifest.json"
+            existing_manifest = owner_root / slug / "manifest.json"
             if mid in known_ids and existing_manifest.is_file():
                 on_disk = _load_json(existing_manifest)
                 if on_disk.get("hashes", {}).get("final") == manifest["hashes"].get("final"):
@@ -425,8 +452,42 @@ def export_stephen_existing(
         except Exception as exc:  # noqa: BLE001
             errors.append({"slug": slug, "error": str(exc)})
 
+    if store is not None:
+        rows = store._conn.execute(
+            """
+            SELECT id, slug, final_output_path, metadata_json
+            FROM production_library_videos
+            WHERE final_output_path IS NOT NULL AND final_output_path != ''
+            ORDER BY id ASC
+            """
+        ).fetchall()
+        for row in rows:
+            try:
+                meta = _parse_json(row["metadata_json"])
+                shared = meta.get("shared_library") or {}
+                if shared.get("manifest_id"):
+                    continue
+                manifest = build_manifest_from_video(store, int(row["id"]), root=root, owner=owner)
+                if not manifest:
+                    continue
+                mid = manifest["manifest_id"]
+                slug = str(row["slug"] or manifest["slug"])
+                existing_manifest = owner_root / slug / "manifest.json"
+                if mid in known_ids and existing_manifest.is_file():
+                    on_disk = _load_json(existing_manifest)
+                    if on_disk.get("hashes", {}).get("final") == manifest["hashes"].get("final"):
+                        skipped.append({"slug": slug, "manifest_id": mid, "reason": "already_exported"})
+                        continue
+                if dry_run:
+                    exported.append({"slug": slug, "manifest_id": mid, "dry_run": True, "source": "production_library"})
+                    continue
+                result = export_manifest_package(manifest, root=root)
+                exported.append({**result, "source": "production_library"})
+            except Exception as exc:  # noqa: BLE001
+                errors.append({"slug": row["slug"], "error": str(exc), "source": "production_library"})
+
     return {
-        "owner": SHARED_OWNER,
+        "owner": owner,
         "scanned": len(slugs),
         "exported": len(exported),
         "skipped": len(skipped),
@@ -437,7 +498,33 @@ def export_stephen_existing(
     }
 
 
-def export_stephen_after_register(
+def export_stephen_existing(store=None, *, root: Path | None = None, dry_run: bool = False) -> dict[str, Any]:
+    return export_owner_existing(store, owner=SHARED_OWNER, root=root, dry_run=dry_run)
+
+
+def maybe_push_shared_library(*, owner: str | None = None, root: Path | None = None) -> dict[str, Any] | None:
+    """Best-effort git commit+push for shared_library only — never raises."""
+    if not export_enabled() or not auto_push_enabled():
+        return None
+    owner = owner or export_owner()
+    if not owner:
+        return None
+    try:
+        from discovery.shared_library_git import commit_and_push
+
+        message = f"shared library: {owner} auto sync"
+        result = commit_and_push(message, dry_run=False)
+        if result.get("ok") and result.get("committed"):
+            state = load_sync_state(root)
+            state["last_push_at"] = now_iso()
+            save_sync_state(state, root)
+        return result
+    except Exception as exc:
+        logger.warning("Shared library auto-push skipped: %s", exc)
+        return None
+
+
+def export_after_register(
     *,
     slug: str | None = None,
     video: dict[str, Any] | None = None,
@@ -445,22 +532,35 @@ def export_stephen_after_register(
     root: Path | None = None,
 ) -> dict[str, Any] | None:
     """Best-effort export hook — never raises."""
-    if not export_enabled():
+    owner = export_owner()
+    if not owner:
         return None
     try:
         root = root or project_root()
         slug = slug or (video or {}).get("slug")
         if not slug:
             return None
-        manifest = build_manifest_from_job(str(slug), root=root)
+        manifest = build_manifest_from_job(str(slug), root=root, owner=owner)
         if not manifest and store and video and video.get("id"):
-            manifest = build_manifest_from_video(store, int(video["id"]), root=root)
+            manifest = build_manifest_from_video(store, int(video["id"]), root=root, owner=owner)
         if not manifest:
             return None
-        return export_manifest_package(manifest, root=root)
+        result = export_manifest_package(manifest, root=root)
+        maybe_push_shared_library(owner=owner, root=root)
+        return result
     except Exception as exc:
         logger.warning("Shared library export skipped: %s", exc)
         return None
+
+
+def export_stephen_after_register(
+    *,
+    slug: str | None = None,
+    video: dict[str, Any] | None = None,
+    store=None,
+    root: Path | None = None,
+) -> dict[str, Any] | None:
+    return export_after_register(slug=slug, video=video, store=store, root=root)
 
 
 def validate_manifest(manifest: dict[str, Any], package_dir: Path) -> list[str]:
@@ -593,7 +693,8 @@ def import_manifest(
         existing_meta = _parse_json(slug_row["metadata_json"])
         existing_mid = (existing_meta.get("shared_library") or {}).get("manifest_id")
         if existing_mid != manifest_id:
-            slug = f"{slug}-stephen"
+            owner_suffix = str(manifest.get("owner") or SHARED_OWNER)
+            slug = f"{slug}-{owner_suffix}"
 
     job_dir = _materialize_job_from_package(manifest, package_dir, root)
     rel_output = _rel(job_dir / "output" / f"{slug}-motivation.mp4", root)
@@ -669,20 +770,27 @@ def import_manifest(
     }
 
 
-def import_all_stephen_packages(
+def import_all_shared_packages(
     store,
     *,
     root: Path | None = None,
     dry_run: bool = False,
+    owners: list[str] | None = None,
 ) -> dict[str, Any]:
     root = root or project_root()
-    base = shared_library_root(root)
-    if not base.is_dir():
-        return {"found": 0, "imported": 0, "skipped": 0, "errors": [], "items": []}
+    owners = owners or shared_library_owners_on_disk(root) or list(SHARED_LIBRARY_OWNERS)
 
     imported = skipped = errors = 0
     items: list[dict[str, Any]] = []
-    manifest_paths = sorted(base.glob("*/manifest.json"))
+    manifest_paths: list[Path] = []
+    for owner in owners:
+        base = root / "shared_library" / owner
+        if not base.is_dir():
+            continue
+        manifest_paths.extend(sorted(base.glob("*/manifest.json")))
+
+    if not manifest_paths:
+        return {"found": 0, "imported": 0, "skipped": 0, "errors": [], "items": [], "owners": owners}
 
     for manifest_path in manifest_paths:
         manifest = _load_json(manifest_path)
@@ -712,7 +820,24 @@ def import_all_stephen_packages(
     if not dry_run and imported:
         sync_visual_packs(store)
         new_ids = [item["video_id"] for item in items if item.get("status") == "imported" and item.get("video_id")]
-        usage = import_usage_from_videos(store, owner=SHARED_OWNER, video_ids=new_ids)
+        imported_owners = {
+            str((item.get("manifest_id") or "").split(":", 1)[0])
+            for item in items
+            if item.get("status") == "imported" and item.get("manifest_id")
+        }
+        usage = {"imported": 0, "skipped": 0}
+        for pack_owner in imported_owners:
+            owner_ids = [
+                item["video_id"]
+                for item in items
+                if item.get("status") == "imported"
+                and item.get("video_id")
+                and str(item.get("manifest_id", "")).startswith(f"{pack_owner}:")
+            ]
+            if owner_ids:
+                part = import_usage_from_videos(store, owner=pack_owner, video_ids=owner_ids)
+                usage["imported"] += int(part.get("imported", 0) or 0)
+                usage["skipped"] += int(part.get("skipped", 0) or 0)
         new_slugs = [str(item["slug"]) for item in items if item.get("status") == "imported" and item.get("slug")]
         if new_slugs:
             try:
@@ -735,8 +860,18 @@ def import_all_stephen_packages(
         "errors": errors,
         "combination_usage": usage,
         "items": items,
+        "owners": owners,
         "dry_run": dry_run,
     }
+
+
+def import_all_stephen_packages(
+    store,
+    *,
+    root: Path | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    return import_all_shared_packages(store, root=root, dry_run=dry_run, owners=[SHARED_OWNER])
 
 
 def auto_sync_enabled() -> bool:
@@ -791,7 +926,7 @@ def pull_and_import(
         except RuntimeError as exc:
             pull_warning = str(exc)
 
-    import_result = import_all_stephen_packages(store, dry_run=dry_run)
+    import_result = import_all_shared_packages(store, dry_run=dry_run)
     git_status = git_repo_status(fetch=fetch_git and not dry_run)
 
     return {
@@ -819,12 +954,90 @@ def maybe_auto_pull_import(store, *, force: bool = False) -> dict[str, Any] | No
     return result
 
 
+def _owner_sync_stats(root: Path, state: dict[str, Any]) -> dict[str, dict[str, int]]:
+    stats: dict[str, dict[str, int]] = {}
+    imports = state.get("imports") or {}
+    for owner in SHARED_LIBRARY_OWNERS:
+        base = root / "shared_library" / owner
+        manifests = list(base.glob("*/manifest.json")) if base.is_dir() else []
+        imports_for_owner = sum(1 for mid in imports if str(mid).startswith(f"{owner}:"))
+        stats[owner] = {
+            "packages_on_disk": len(manifests),
+            "imports_recorded": imports_for_owner,
+            "pending_import": max(0, len(manifests) - imports_for_owner),
+        }
+    return stats
+
+
+def build_sync_health(status: dict[str, Any] | None = None) -> dict[str, Any]:
+    """One-glance verdict: videos imported + code not behind remote."""
+    status = status or {}
+    git = status.get("git") or {}
+    pending = int(status.get("pending_import") or 0)
+    behind = git.get("commits_behind")
+    ahead = git.get("commits_ahead")
+    library_ok = pending == 0
+    code_behind = isinstance(behind, int) and behind > 0
+    code_ahead = isinstance(ahead, int) and ahead > 0
+    code_ok = not code_behind and not code_ahead
+    if git.get("conflict"):
+        label = "conflict"
+        summary = str(git.get("code_sync_hint") or "code conflict — fix then re-sync")
+    elif not library_ok and not code_ok:
+        label = "behind"
+        extra = f"code {behind} behind" if code_behind else f"code {ahead} not pushed"
+        summary = f"{pending} video(s) waiting · {extra}"
+    elif not library_ok:
+        label = "library_behind"
+        summary = f"{pending} shared video(s) not imported yet"
+    elif code_behind:
+        label = "code_behind"
+        summary = f"code {behind} commit(s) behind GitHub"
+    elif code_ahead:
+        label = "code_ahead"
+        summary = f"code {ahead} commit(s) not pushed to GitHub"
+    else:
+        label = "synced"
+        summary = "code even on both GitHubs · videos imported"
+    return {
+        "ok": library_ok and code_ok and not git.get("conflict"),
+        "label": label,
+        "library_ok": library_ok,
+        "code_ok": code_ok,
+        "pending_import": pending,
+        "commits_behind": behind,
+        "commits_ahead": ahead,
+        "summary": summary,
+    }
+
+
+def sync_health_path(root: Path | None = None) -> Path:
+    return (root or project_root()) / "data" / "shared_library" / "sync_health.json"
+
+
+def write_sync_health(status: dict[str, Any], *, root: Path | None = None) -> Path:
+    health = status.get("health") or build_sync_health(status)
+    path = sync_health_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "checked_at": now_iso(),
+        **health,
+        "last_import_at": status.get("last_import_at"),
+        "last_pull_at": status.get("last_pull_at"),
+        "last_auto_sync_at": status.get("last_auto_sync_at"),
+        "owners": status.get("owners"),
+    }
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
+
+
 def sync_status(root: Path | None = None, *, git: dict[str, Any] | None = None) -> dict[str, Any]:
     root = root or project_root()
-    base = shared_library_root(root)
-    manifests = list(base.glob("*/manifest.json")) if base.is_dir() else []
     state = load_sync_state(root)
-    pending_import = max(0, len(manifests) - len(state.get("imports", {})))
+    owners = _owner_sync_stats(root, state)
+    packages_on_disk = sum(item["packages_on_disk"] for item in owners.values())
+    imports_recorded = len(state.get("imports", {}))
+    pending_import = sum(item["pending_import"] for item in owners.values())
     if git is None:
         try:
             from discovery.shared_library_git import git_repo_status
@@ -832,10 +1045,12 @@ def sync_status(root: Path | None = None, *, git: dict[str, Any] | None = None) 
             git = git_repo_status(fetch=False)
         except Exception:
             git = {}
-    return {
-        "owner": SHARED_OWNER,
-        "packages_on_disk": len(manifests),
-        "imports_recorded": len(state.get("imports", {})),
+    status = {
+        "owner": export_owner() or SHARED_OWNER,
+        "export_owner": export_owner(),
+        "owners": owners,
+        "packages_on_disk": packages_on_disk,
+        "imports_recorded": imports_recorded,
         "pending_import": pending_import,
         "exports_recorded": len(state.get("exports", {})),
         "last_import_at": state.get("last_import_at"),
@@ -844,6 +1059,9 @@ def sync_status(root: Path | None = None, *, git: dict[str, Any] | None = None) 
         "last_auto_sync_at": state.get("last_auto_sync_at"),
         "auto_sync_enabled": auto_sync_enabled(),
         "auto_sync_interval_minutes": auto_sync_interval_minutes(),
+        "auto_push_enabled": auto_push_enabled(),
         "export_enabled": export_enabled(),
         "git": git,
     }
+    status["health"] = build_sync_health(status)
+    return status

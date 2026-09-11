@@ -12,8 +12,9 @@ Two people. Two GitHub copies. One shared video library (Stephen → Chris).
 - `chris` = `https://github.com/ChrisZepeda147/ai-video.git`
 
 **Which machine**
-- `SHARED_LIBRARY_EXPORT_OWNER=stephen` in `scripts/.env` → Stephen. After a new video, export + `push-stephen`, then push both remotes.
-- No that env → Chris. After `git pull`, run `pull-import`. Do not set the env to stephen. Do not `push-stephen`.
+- Stephen: `SHARED_LIBRARY_EXPORT_OWNER=stephen` in `scripts/.env`. New videos auto-export + push when `SHARED_LIBRARY_AUTO_PUSH=1`.
+- Chris: `SHARED_LIBRARY_EXPORT_OWNER=chris` in `scripts/.env`. Same auto-export + push. Never set `stephen` on Chris.
+- **Both machines:** `python scripts/shared_library_sync.py install` once. Timer every 5 min: auto-commit safe source, rebase, push **both** GitHubs, import videos. Check: `python scripts/shared_library_sync.py health`.
 
 **After any commit that should be shared**
 ```powershell

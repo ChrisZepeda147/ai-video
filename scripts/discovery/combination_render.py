@@ -348,9 +348,9 @@ def render_combination(
         pass
 
     try:
-        from discovery.shared_library import export_stephen_after_register
+        from discovery.shared_library import export_after_register
 
-        export_stephen_after_register(slug=slug, video=video, store=store)
+        export_after_register(slug=slug, video=video, store=store)
     except Exception:
         pass
 
