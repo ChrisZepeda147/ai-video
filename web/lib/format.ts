@@ -16,6 +16,17 @@ export function formatDuration(totalSeconds: number | null | undefined): string 
   return parts.join(" ");
 }
 
+/** Repo-relative path for display (downloads/…). */
+export function displayMediaPath(path: string | null | undefined): string | null {
+  if (!path) return null;
+  const normalized = path.replace(/\\/g, "/").replace(/^\/+/, "");
+  for (const marker of ["downloads/", "shared_library/", "prompts/"]) {
+    const idx = normalized.indexOf(marker);
+    if (idx >= 0) return normalized.slice(idx);
+  }
+  return normalized;
+}
+
 /** Compact clock, e.g. "1:07". */
 export function formatTimecode(totalSeconds: number | null | undefined): string {
   if (totalSeconds == null || !Number.isFinite(totalSeconds) || totalSeconds < 0) {

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from discovery.config import project_root
+from discovery.media_paths import display_media_path, file_exists_rel
 from discovery.production_library import check_reuse, get_video, now_iso
 from discovery.reuse_detection import transcript_hash
 from discovery.speaker_identity import get_correction, infer_speaker
@@ -488,6 +489,9 @@ def list_audio_catalog(store) -> list[dict[str, Any]]:
         display_id = f"{sp_num}{_letter(idx)}"
         excerpt = (data.get("transcript_segment") or "")[:240]
         duration_sec = _effective_audio_duration(data)
+        local_path = str(data.get("local_path") or "")
+        if local_path and not file_exists_rel(project_root(), local_path):
+            continue
         items.append(
             {
                 "component_id": int(data["id"]),
@@ -495,7 +499,9 @@ def list_audio_catalog(store) -> list[dict[str, Any]]:
                 "display_id": display_id,
                 "speaker": speaker,
                 "label": data.get("label") or "Speech audio",
-                "local_path": data.get("local_path"),
+                "local_path": local_path or None,
+                "display_path": display_media_path(local_path),
+                "preview_available": bool(local_path and file_exists_rel(project_root(), local_path)),
                 "start_sec": data.get("start_sec"),
                 "end_sec": data.get("end_sec"),
                 "duration_sec": duration_sec,
@@ -526,8 +532,62 @@ def list_visual_packs(store) -> list[dict[str, Any]]:
                     clip_count = len(list(path.glob("*_part*.mp4")))
             pack["clip_count"] = clip_count
             pack["duration_sec"] = _visual_pack_duration(store, pack, root)
+            preview = str(pack.get("preview_clip_path") or "")
+            broll_ids = pack.get("broll_ids") or []
+            has_preview = bool(preview and file_exists_rel(root, preview))
+            has_clips = clip_count > 0
+            has_broll = bool(broll_ids)
+            if not has_preview and not has_clips and not has_broll:
+                continue
+            pack["display_path"] = display_media_path(preview or clips_root)
+            pack["preview_available"] = has_preview
             packs.append(pack)
     return packs
+
+
+def prune_stale_combination_catalog(store) -> dict[str, int]:
+    """Remove combination rows whose media files no longer exist."""
+    root = project_root()
+    removed_audio = 0
+    removed_packs = 0
+
+    audio_rows = store._conn.execute(
+        """
+        SELECT id, local_path FROM production_video_components
+        WHERE component_type = 'audio' AND local_path IS NOT NULL
+        """
+    ).fetchall()
+    for row in audio_rows:
+        path = str(row["local_path"] or "")
+        if path and not file_exists_rel(root, path):
+            store._conn.execute(
+                "DELETE FROM production_video_components WHERE id = ?",
+                (int(row["id"]),),
+            )
+            removed_audio += 1
+
+    pack_rows = store._conn.execute("SELECT * FROM production_visual_packs").fetchall()
+    for row in pack_rows:
+        pack = get_visual_pack(store, int(row["id"])) or {}
+        preview = str(pack.get("preview_clip_path") or "")
+        clips_root = str(pack.get("clips_root_path") or "")
+        broll_ids = pack.get("broll_ids") or []
+        clip_count = 0
+        if clips_root:
+            clip_dir = root / clips_root
+            if clip_dir.is_dir():
+                clip_count = len(list(clip_dir.glob("*_part*.mp4")))
+        has_preview = bool(preview and file_exists_rel(root, preview))
+        if not has_preview and clip_count == 0 and not broll_ids:
+            store._conn.execute(
+                "DELETE FROM production_visual_packs WHERE id = ?",
+                (int(row["id"]),),
+            )
+            removed_packs += 1
+
+    if removed_audio or removed_packs:
+        store._conn.commit()
+    return {"removed_audio": removed_audio, "removed_visual_packs": removed_packs}
 
 
 def _usage_for_pair(
@@ -804,7 +864,9 @@ def import_usage_from_videos(
     }
 
 
-def catalog_payload(store, *, owner: str | None = None) -> dict[str, Any]:
+def catalog_payload(store, *, owner: str | None = None, prune_missing: bool = False) -> dict[str, Any]:
+    if prune_missing:
+        prune_stale_combination_catalog(store)
     sync_visual_packs(store)
     audio_items = list_audio_catalog(store)
     packs = list_visual_packs(store)
@@ -812,11 +874,17 @@ def catalog_payload(store, *, owner: str | None = None) -> dict[str, Any]:
     for item in audio_items:
         grouped.setdefault(item["speaker"], []).append(item)
 
+    visual_by_category: dict[str, list[dict[str, Any]]] = {}
+    for pack in packs:
+        category = str(pack.get("category") or "Custom")
+        visual_by_category.setdefault(category, []).append(pack)
+
     return {
         "owners": sorted(OWNERS),
         "selected_owner": normalize_owner(owner) if owner else None,
         "audio_by_speaker": grouped,
         "visual_packs": packs,
+        "visual_by_category": visual_by_category,
         "audio_count": len(audio_items),
         "visual_pack_count": len(packs),
     }

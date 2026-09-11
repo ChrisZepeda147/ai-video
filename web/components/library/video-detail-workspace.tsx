@@ -5,13 +5,41 @@ import { useCallback, useEffect, useState } from "react";
 import { CommandWorkspace } from "@/components/command/command-workspace";
 import { BackendOfflineBanner } from "@/components/backend-banner";
 import {
+  CollapsibleMediaSection,
+  MediaPreviewCard,
+  type MediaPreviewItem,
+} from "@/components/shared/media-preview-card";
+import {
   fetchHealth,
   fetchLibrarySpeakers,
   fetchProductionVideo,
   postUpdateVideoSpeaker,
   productionMediaUrl,
 } from "@/lib/api";
-import type { ProductionLibraryVideo } from "@/lib/types";
+import { displayMediaPath } from "@/lib/format";
+import type { ProductionLibraryVideo, ProductionVideoComponent } from "@/lib/types";
+
+function componentSections(components: ProductionVideoComponent[]) {
+  const audio: MediaPreviewItem[] = [];
+  const video: MediaPreviewItem[] = [];
+  const other: MediaPreviewItem[] = [];
+  for (const comp of components) {
+    const kind = comp.media_kind || comp.component_type;
+    const item: MediaPreviewItem = { ...comp, id: comp.id };
+    if (kind === "audio" || comp.component_type === "audio" || comp.component_type === "caption") {
+      audio.push(item);
+    } else if (
+      kind === "video" ||
+      comp.component_type === "visual" ||
+      comp.component_type === "final"
+    ) {
+      video.push(item);
+    } else {
+      other.push(item);
+    }
+  }
+  return { audio, video, other };
+}
 
 function searchIntent(video: ProductionLibraryVideo): string | null {
   const meta = video.metadata;
@@ -84,12 +112,8 @@ export function VideoDetailWorkspace({ videoId }: { videoId: number }) {
   }
 
   const intent = searchIntent(video);
-  const grouped = (video.components ?? []).reduce<Record<string, typeof video.components>>((acc, comp) => {
-    const key = comp.component_type || "other";
-    acc[key] = acc[key] || [];
-    acc[key].push(comp);
-    return acc;
-  }, {});
+  const sections = componentSections(video.components ?? []);
+  const finalPath = displayMediaPath(video.final_output_path);
 
   return (
     <div className="space-y-8">
@@ -103,6 +127,9 @@ export function VideoDetailWorkspace({ videoId }: { videoId: number }) {
         <p className="mt-1 text-sm text-zinc-400">
           {[video.video_key, video.topic, video.status, video.version_label].filter(Boolean).join(" · ")}
         </p>
+        {finalPath ? (
+          <p className="mt-1 break-all font-mono text-xs text-violet-300/90">{finalPath}</p>
+        ) : null}
       </div>
 
       <section className="max-w-xl rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
@@ -177,11 +204,23 @@ export function VideoDetailWorkspace({ videoId }: { videoId: number }) {
       </section>
 
       {video.final_output_path ? (
-        <video
-          src={productionMediaUrl(video.final_output_path) ?? undefined}
-          controls
-          className="aspect-[9/16] w-full max-w-[280px] rounded-xl bg-zinc-950"
-        />
+        <div>
+          <video
+            src={productionMediaUrl(video.final_output_path) ?? undefined}
+            controls
+            className="aspect-[9/16] w-full max-w-[280px] rounded-xl bg-zinc-950"
+          />
+          {productionMediaUrl(video.final_output_path) ? (
+            <a
+              href={productionMediaUrl(video.final_output_path)!}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-2 inline-block text-sm text-violet-300 hover:underline"
+            >
+              Open final render
+            </a>
+          ) : null}
+        </div>
       ) : null}
 
       <section className="max-w-3xl">
@@ -192,32 +231,36 @@ export function VideoDetailWorkspace({ videoId }: { videoId: number }) {
         />
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-2">
-        {Object.entries(grouped).map(([type, items]) => (
-          <div key={type} className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">{type}</h3>
-            <ul className="mt-3 space-y-2 text-sm text-zinc-300">
-              {(items ?? []).map((item) => (
-                <li key={item.id} className="rounded-lg bg-zinc-950 px-3 py-2">
-                  <p>{item.label || item.local_path || item.url || "text segment"}</p>
-                  {item.text_content ? (
-                    <p className="mt-1 line-clamp-4 text-xs text-zinc-500">{item.text_content}</p>
-                  ) : null}
-                  {item.local_path ? (
-                    <a
-                      href={productionMediaUrl(item.local_path) ?? undefined}
-                      className="mt-1 inline-block text-xs text-violet-300 hover:underline"
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Open file
-                    </a>
-                  ) : null}
-                </li>
+      <section className="space-y-4">
+        <CollapsibleMediaSection title="Audio" count={sections.audio.length}>
+          <ul className="space-y-2">
+            {sections.audio.length === 0 ? (
+              <li className="text-xs text-zinc-500">No audio components</li>
+            ) : (
+              sections.audio.map((item) => <MediaPreviewCard key={item.id} item={item} />)
+            )}
+          </ul>
+        </CollapsibleMediaSection>
+
+        <CollapsibleMediaSection title="Video / visuals" count={sections.video.length}>
+          <ul className="space-y-2">
+            {sections.video.length === 0 ? (
+              <li className="text-xs text-zinc-500">No video components</li>
+            ) : (
+              sections.video.map((item) => <MediaPreviewCard key={item.id} item={item} />)
+            )}
+          </ul>
+        </CollapsibleMediaSection>
+
+        {sections.other.length > 0 ? (
+          <CollapsibleMediaSection title="Other" count={sections.other.length} defaultOpen={false}>
+            <ul className="space-y-2">
+              {sections.other.map((item) => (
+                <MediaPreviewCard key={item.id} item={item} />
               ))}
             </ul>
-          </div>
-        ))}
+          </CollapsibleMediaSection>
+        ) : null}
       </section>
 
       {video.versions && video.versions.length > 1 ? (

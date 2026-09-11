@@ -280,8 +280,9 @@ export type ProductionProjectsResponse = {
 
 export type VideoLibraryItem = {
   key: string;
-  source: "production" | "legacy";
+  source: "production" | "legacy" | "library";
   project_id?: number | null;
+  library_id?: number | null;
   legacy_id?: string | null;
   slug: string;
   title: string;
@@ -293,6 +294,10 @@ export type VideoLibraryItem = {
   output_paths: string[];
   preview_available: boolean;
   missing_paths: string[];
+  media_kind?: "audio" | "video" | "other";
+  speaker?: string | null;
+  display_path?: string | null;
+  editable?: boolean;
   duration_sec?: number | null;
   created_at?: string | null;
   rendered_at?: string | null;
@@ -309,7 +314,10 @@ export type VideoLibraryResponse = {
   summary: {
     total: number;
     production: number;
+    library?: number;
     legacy: number;
+    audio?: number;
+    video?: number;
     preview_ready: number;
     missing_files: number;
   };
@@ -408,6 +416,9 @@ export type ProductionVideoComponent = {
   label?: string | null;
   sort_order?: number;
   local_path?: string | null;
+  display_path?: string | null;
+  preview_available?: boolean;
+  media_kind?: "audio" | "video" | "other";
   url?: string | null;
   text_content?: string | null;
   start_sec?: number | null;
@@ -452,6 +463,8 @@ export type CombinationAudioItem = {
   speaker: string;
   label?: string;
   local_path?: string | null;
+  display_path?: string | null;
+  preview_available?: boolean;
   start_sec?: number | null;
   end_sec?: number | null;
   duration_sec?: number | null;
@@ -468,6 +481,8 @@ export type CombinationVisualPack = {
   label: string;
   clips_root_path?: string | null;
   preview_clip_path?: string | null;
+  display_path?: string | null;
+  preview_available?: boolean;
   clip_count?: number;
   duration_sec?: number | null;
   broll_ids?: string[];
@@ -478,6 +493,7 @@ export type CombinationCatalog = {
   selected_owner?: string | null;
   audio_by_speaker: Record<string, CombinationAudioItem[]>;
   visual_packs: CombinationVisualPack[];
+  visual_by_category?: Record<string, CombinationVisualPack[]>;
   audio_count: number;
   visual_pack_count: number;
 };

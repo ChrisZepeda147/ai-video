@@ -7,9 +7,10 @@ import {
   fetchCombinationCatalog,
   fetchCombinationStatus,
   postCombinationRender,
+  postSyncCombinationCatalog,
   productionMediaUrl,
 } from "@/lib/api";
-import { formatDuration, formatTimecode } from "@/lib/format";
+import { displayMediaPath, formatDuration, formatTimecode } from "@/lib/format";
 import type {
   CombinationCatalog,
   CombinationStatusResponse,
@@ -43,9 +44,13 @@ export function CombinationsWorkspace() {
   const [forceRender, setForceRender] = useState(false);
   const [trimStart, setTrimStart] = useState("");
   const [trimEnd, setTrimEnd] = useState("");
+  const [selectedVisualCategory, setSelectedVisualCategory] = useState<string | null>(null);
 
-  const loadCatalog = useCallback(async () => {
-    const result = await fetchCombinationCatalog(owner);
+  const loadCatalog = useCallback(async (opts?: { prune?: boolean }) => {
+    if (opts?.prune) {
+      await postSyncCombinationCatalog({ prune_missing: true });
+    }
+    const result = await fetchCombinationCatalog(owner, opts?.prune);
     if (result.ok) {
       setBackendOnline(true);
       setCatalog(result.data);
@@ -62,6 +67,34 @@ export function CombinationsWorkspace() {
     () => Object.keys(catalog?.audio_by_speaker ?? {}).sort(),
     [catalog],
   );
+
+  const visualCategories = useMemo(() => {
+    const grouped = catalog?.visual_by_category;
+    if (grouped && Object.keys(grouped).length > 0) {
+      return Object.keys(grouped).sort();
+    }
+    const cats = new Set((catalog?.visual_packs ?? []).map((p) => p.category || "Custom"));
+    return Array.from(cats).sort();
+  }, [catalog]);
+
+  const visualItems = useMemo(() => {
+    if (!catalog) return [];
+    if (selectedVisualCategory && catalog.visual_by_category?.[selectedVisualCategory]) {
+      return catalog.visual_by_category[selectedVisualCategory];
+    }
+    if (selectedVisualCategory) {
+      return catalog.visual_packs.filter((p) => (p.category || "Custom") === selectedVisualCategory);
+    }
+    return catalog.visual_packs;
+  }, [catalog, selectedVisualCategory]);
+
+  const pairingByPackId = useMemo(() => {
+    const map = new Map<number, CombinationVisualStatus>();
+    for (const item of pairing?.visuals ?? []) {
+      map.set(item.visual_pack_id, item);
+    }
+    return map;
+  }, [pairing]);
 
   const audioItems = useMemo(() => {
     if (!catalog) return [];
@@ -167,6 +200,18 @@ export function CombinationsWorkspace() {
           <span className="text-xs text-zinc-500">
             {catalog?.audio_count ?? 0} audio · {catalog?.visual_pack_count ?? 0} visual packs
           </span>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              void loadCatalog({ prune: true }).finally(() => setBusy(false));
+              setMessage("Synced catalog and removed missing files.");
+            }}
+            className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+          >
+            Sync &amp; prune missing
+          </button>
         </div>
       </section>
 
@@ -218,7 +263,19 @@ export function CombinationsWorkspace() {
                     ) : null}
                   </div>
                   <p className="mt-1 font-medium text-zinc-100">{item.speaker}</p>
+                  {(item.display_path || item.local_path) ? (
+                    <p className="mt-1 break-all font-mono text-[11px] text-violet-300/90">
+                      {item.display_path || displayMediaPath(item.local_path)}
+                    </p>
+                  ) : null}
                   <p className="line-clamp-2 text-xs text-zinc-500">{item.transcript_excerpt || item.video_title}</p>
+                  <Link
+                    href={`/library/${item.video_id}`}
+                    onClick={(e) => e.stopPropagation()}
+                    className="mt-1 inline-block text-[11px] text-violet-400 hover:underline"
+                  >
+                    Video {item.video_id} in library
+                  </Link>
                   {item.local_path ? (
                     <div className="mt-2 space-y-1" onClick={(e) => e.stopPropagation()}>
                       <audio
@@ -241,17 +298,37 @@ export function CombinationsWorkspace() {
         </section>
 
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
-          <h2 className="text-lg font-semibold text-zinc-100">Visual packs</h2>
+          <h2 className="text-lg font-semibold text-zinc-100">Visual packs (video)</h2>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedVisualCategory(null)}
+              className={`rounded-lg px-3 py-1 text-xs ${!selectedVisualCategory ? "bg-zinc-700" : "border border-zinc-800"}`}
+            >
+              All
+            </button>
+            {visualCategories.map((category) => (
+              <button
+                key={category}
+                type="button"
+                onClick={() => setSelectedVisualCategory(category)}
+                className={`rounded-lg px-3 py-1 text-xs ${
+                  selectedVisualCategory === category ? "bg-zinc-700" : "border border-zinc-800"
+                }`}
+              >
+                {category}
+              </button>
+            ))}
+          </div>
           {!selectedAudioId ? (
-            <p className="mt-3 text-sm text-zinc-500">Select an audio clip to see pairing status.</p>
+            <p className="mt-3 text-sm text-zinc-500">Select audio to see pairing colors (green/yellow/red).</p>
+          ) : null}
+          {visualItems.length === 0 ? (
+            <p className="mt-3 text-sm text-zinc-500">No visual packs — run Sync &amp; prune or render a montage job.</p>
           ) : (
             <ul className="mt-4 max-h-[420px] space-y-2 overflow-y-auto">
-              {(pairing?.visuals ?? catalog?.visual_packs ?? []).map((item) => {
-                const visual = "status" in item ? item : null;
-                const pack = visual
-                  ? catalog?.visual_packs.find((p) => p.id === visual.visual_pack_id)
-                  : (item as CombinationCatalog["visual_packs"][number]);
-                if (!pack) return null;
+              {visualItems.map((pack) => {
+                const visual = pairingByPackId.get(pack.id);
                 const packId = pack.id;
                 const status = visual?.status ?? "available";
                 return (
@@ -265,9 +342,17 @@ export function CombinationsWorkspace() {
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-mono">{pack.display_id || pack.id}</span>
-                        <span className="text-xs">{visual ? statusLabel(visual, owner) : pack.category}</span>
+                        <span className="text-xs">
+                          {visual && selectedAudioId ? statusLabel(visual, owner) : pack.category}
+                        </span>
                       </div>
                       <p className="mt-1 font-medium">{pack.label}</p>
+                      {(pack.display_path || pack.preview_clip_path || pack.clips_root_path) ? (
+                        <p className="mt-1 break-all font-mono text-[10px] text-violet-300/80">
+                          {pack.display_path ||
+                            displayMediaPath(pack.preview_clip_path || pack.clips_root_path)}
+                        </p>
+                      ) : null}
                       <p className="text-xs opacity-80">
                         {pack.category} · {pack.clip_count ?? 0} clips
                         {(visual?.duration_sec ?? pack.duration_sec)

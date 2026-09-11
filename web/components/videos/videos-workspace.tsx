@@ -3,16 +3,23 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RiskBadge, riskLevel } from "@/components/shared/risk-badge";
+import { VideoItemEditor } from "@/components/videos/video-item-editor";
 import {
+  fetchLibrarySpeakers,
   fetchProjectAnalytics,
   fetchVideoLibrary,
   postImportVideos,
+  postPruneVideoCatalog,
   postRejectProject,
   postRenderProject,
   postSendProjectToReview,
   productionMediaUrl,
 } from "@/lib/api";
+import { displayMediaPath, formatDuration } from "@/lib/format";
 import type { ProjectAnalyticsResponse, VideoLibraryItem, VideoLibraryResponse } from "@/lib/types";
+
+type SourceFilter = "all" | "site" | "library" | "legacy";
+type MediaFilter = "all" | "video" | "audio";
 
 function formatProfileLabel(profile: string): string {
   const labels: Record<string, string> = {
@@ -25,12 +32,19 @@ function formatProfileLabel(profile: string): string {
 
 function sourceLabel(item: VideoLibraryItem): string {
   if (item.source === "legacy") return "Legacy pipeline";
+  if (item.source === "library") return "Production library";
   if (item.origin_type === "legacy") return "Imported legacy";
   return "Site pipeline";
 }
 
 function canAddToSite(item: VideoLibraryItem): boolean {
-  return item.source === "legacy" && item.preview_available;
+  return item.source === "legacy" && item.preview_available && item.media_kind !== "audio";
+}
+
+function itemHref(item: VideoLibraryItem): string | null {
+  if (item.library_id) return `/library/${item.library_id}`;
+  if (item.project_id) return `/create?project_id=${item.project_id}`;
+  return null;
 }
 
 export function VideosWorkspace() {
@@ -40,13 +54,34 @@ export function VideosWorkspace() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
+  const [mediaFilter, setMediaFilter] = useState<MediaFilter>("video");
+  const [showMissing, setShowMissing] = useState(false);
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [speakerOptions, setSpeakerOptions] = useState<string[]>([]);
 
   const readyToAdd = useMemo(() => items.filter(canAddToSite), [items]);
 
+  const filteredItems = useMemo(() => {
+    return items.filter((item) => {
+      if (!showMissing && !item.preview_available) return false;
+      if (sourceFilter === "site" && item.source !== "production") return false;
+      if (sourceFilter === "library" && item.source !== "library") return false;
+      if (sourceFilter === "legacy" && item.source !== "legacy") return false;
+      if (mediaFilter === "video" && item.media_kind === "audio") return false;
+      if (mediaFilter === "audio" && item.media_kind !== "audio") return false;
+      return true;
+    });
+  }, [items, showMissing, sourceFilter, mediaFilter]);
+
   const load = useCallback(async () => {
     setLoading(true);
-    const result = await fetchVideoLibrary({ include_missing: true, limit: 100 });
+    const [result, speakersResult] = await Promise.all([
+      fetchVideoLibrary({ include_missing: true, limit: 200 }),
+      fetchLibrarySpeakers(),
+    ]);
     setLoading(false);
+    if (speakersResult.ok) setSpeakerOptions(speakersResult.data.items);
     if (!result.ok) {
       setMessage(result.message);
       return;
@@ -96,13 +131,28 @@ export function VideosWorkspace() {
     await load();
   }
 
+  async function handlePruneMissing() {
+    setBusy(true);
+    setMessage(null);
+    const result = await postPruneVideoCatalog();
+    setBusy(false);
+    if (!result.ok) {
+      setMessage(result.message);
+      return;
+    }
+    const removed = result.data.legacy_catalog.removed;
+    setMessage(removed > 0 ? `Removed ${removed} missing legacy catalog row(s).` : "No missing legacy rows to remove.");
+    await load();
+  }
+
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-3">
         {summary ? (
           <p className="text-sm text-zinc-500">
-            {summary.preview_ready} ready to preview · {summary.production} on site · {summary.legacy} in legacy catalog
-            {summary.missing_files > 0 ? ` · ${summary.missing_files} waiting on MP4 files` : ""}
+            {summary.preview_ready} preview-ready · {summary.production ?? 0} site ·{" "}
+            {summary.library ?? 0} library · {summary.legacy} legacy
+            {summary.missing_files > 0 ? ` · ${summary.missing_files} missing files` : ""}
           </p>
         ) : null}
         <button
@@ -113,116 +163,228 @@ export function VideosWorkspace() {
         >
           {busy ? "Adding…" : readyToAdd.length > 0 ? `Add ${readyToAdd.length} ready to site` : "Add ready to site"}
         </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void handlePruneMissing()}
+          className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+        >
+          Remove missing legacy
+        </button>
       </div>
+
+      <div className="mb-4 flex flex-wrap gap-3">
+        <label className="text-xs text-zinc-500">
+          Source
+          <select
+            value={sourceFilter}
+            onChange={(e) => setSourceFilter(e.target.value as SourceFilter)}
+            className="ml-2 rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-1 text-sm text-zinc-200"
+          >
+            <option value="all">All</option>
+            <option value="site">Site pipeline</option>
+            <option value="library">Production library</option>
+            <option value="legacy">Legacy pipeline</option>
+          </select>
+        </label>
+        <label className="text-xs text-zinc-500">
+          Media
+          <select
+            value={mediaFilter}
+            onChange={(e) => setMediaFilter(e.target.value as MediaFilter)}
+            className="ml-2 rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-1 text-sm text-zinc-200"
+          >
+            <option value="all">All</option>
+            <option value="video">Video only</option>
+            <option value="audio">Audio only</option>
+          </select>
+        </label>
+        <label className="flex items-center gap-2 text-xs text-zinc-400">
+          <input type="checkbox" checked={showMissing} onChange={(e) => setShowMissing(e.target.checked)} />
+          Show missing files
+        </label>
+      </div>
+
       {message ? <p className="mb-4 text-sm text-emerald-300">{message}</p> : null}
       {loading ? (
         <p className="text-sm text-zinc-500">Loading video library…</p>
-      ) : items.length === 0 ? (
+      ) : filteredItems.length === 0 ? (
         <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">
-          No Shorts yet. Build one from <Link href="/create" className="text-violet-300 hover:underline">Create</Link>
-          {" "}or render with a legacy script, then click <strong className="text-zinc-300">Add ready to site</strong>.
+          No items match filters. Build from{" "}
+          <Link href="/create" className="text-violet-300 hover:underline">
+            Make Short
+          </Link>{" "}
+          or{" "}
+          <Link href="/library" className="text-violet-300 hover:underline">
+            Library
+          </Link>
+          , then refresh.
         </div>
       ) : (
         <div className="space-y-4">
-          {items.map((item) => {
-            const previewUrl = item.preview_available ? productionMediaUrl(item.output_path) : null;
+          {filteredItems.map((item) => {
+            const path = item.display_path || displayMediaPath(item.output_path);
+            const previewUrl =
+              item.preview_available && item.media_kind !== "audio"
+                ? productionMediaUrl(item.output_path)
+                : null;
+            const audioUrl =
+              item.preview_available && item.media_kind === "audio"
+                ? productionMediaUrl(item.output_path)
+                : null;
             const projectId = item.project_id ?? null;
             const addable = canAddToSite(item);
-            return (
-              <article key={item.key} className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+            const href = itemHref(item);
+            const isEditing = editingKey === item.key;
+            const displayTitle = item.speaker || item.title;
+
+            const cardInner = (
+              <>
                 <div className="flex flex-wrap items-start gap-4">
                   {previewUrl ? (
-                    <video src={previewUrl} controls className="aspect-[9/16] w-[160px] shrink-0 rounded-lg bg-zinc-950 object-cover" />
+                    <video
+                      src={previewUrl}
+                      controls
+                      className="aspect-[9/16] w-[160px] shrink-0 rounded-lg bg-zinc-950 object-cover"
+                    />
+                  ) : audioUrl ? (
+                    <div className="flex w-[160px] shrink-0 flex-col gap-2 rounded-lg bg-zinc-950 p-3">
+                      <span className="text-[10px] uppercase tracking-wide text-zinc-500">Audio</span>
+                      <audio src={audioUrl} controls className="w-full" />
+                    </div>
                   ) : (
                     <div className="flex aspect-[9/16] w-[160px] shrink-0 items-center justify-center rounded-lg bg-zinc-950 px-3 text-center text-xs text-zinc-600">
-                      MP4 not on this machine
+                      File missing
                     </div>
                   )}
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="font-semibold text-zinc-100">{item.title}</h3>
+                      <h3 className="font-semibold text-zinc-100">{displayTitle}</h3>
+                      {item.speaker && item.speaker !== item.title ? (
+                        <span className="text-xs text-zinc-500">({item.title})</span>
+                      ) : null}
                       <span className="rounded-full border border-zinc-700 px-2 py-0.5 text-[10px] uppercase tracking-wide text-zinc-400">
                         {sourceLabel(item)}
                       </span>
+                      {item.media_kind ? (
+                        <span className="rounded-full border border-zinc-800 px-2 py-0.5 text-[10px] uppercase text-zinc-500">
+                          {item.media_kind}
+                        </span>
+                      ) : null}
                     </div>
+                    {path ? (
+                      <p className="mt-1 break-all font-mono text-xs text-violet-300/90">{path}</p>
+                    ) : null}
                     <p className="mt-1 text-xs text-zinc-500">
                       {formatProfileLabel(item.format_profile)} · {item.status}
                       {item.niche ? ` · ${item.niche}` : ""}
-                      {item.duration_sec ? ` · ${Math.round(item.duration_sec)}s` : ""}
+                      {item.duration_sec ? ` · ${formatDuration(item.duration_sec)}` : ""}
                     </p>
                     <p className="mt-1 text-xs text-zinc-600">
-                      {item.created_at ? `Created ${new Date(item.created_at).toLocaleString()}` : `Slug ${item.slug}`}
-                      {item.rendered_at ? ` · Rendered ${new Date(item.rendered_at).toLocaleString()}` : ""}
+                      Slug {item.slug}
+                      {item.created_at ? ` · ${new Date(item.created_at).toLocaleString()}` : ""}
                     </p>
+                    {item.reuse_confidence != null ? (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <RiskBadge
+                          label="Reuse"
+                          score={item.reuse_confidence}
+                          level={riskLevel(item.reuse_confidence, true)}
+                        />
+                      </div>
+                    ) : null}
+                    {!item.preview_available && item.missing_paths.length > 0 ? (
+                      <p className="mt-2 text-xs text-amber-300/90">
+                        Missing: {item.missing_paths.map((p) => displayMediaPath(p) || p).join(", ")}
+                      </p>
+                    ) : null}
+                    {projectId && analyticsByProject[projectId]?.latest_metrics ? (
+                      <p className="mt-2 text-xs text-zinc-400">
+                        {(analyticsByProject[projectId].latest_metrics?.views as number | undefined)?.toLocaleString() ??
+                          "—"}{" "}
+                        views
+                      </p>
+                    ) : null}
                     {item.output_paths.length > 1 ? (
                       <div className="mt-2 flex flex-wrap gap-2">
-                        {item.output_paths.map((path, index) => {
-                          const partUrl = productionMediaUrl(path);
+                        {item.output_paths.map((partPath, index) => {
+                          const partUrl = productionMediaUrl(partPath);
+                          const partLabel = displayMediaPath(partPath) || `Part ${index + 1}`;
                           return partUrl ? (
                             <a
-                              key={path}
+                              key={partPath}
                               href={partUrl}
                               target="_blank"
                               rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
                               className="rounded border border-zinc-800 px-2 py-0.5 text-[11px] text-zinc-400 hover:text-zinc-200"
                             >
-                              Part {index + 1}
+                              {partLabel}
                             </a>
                           ) : (
-                            <span key={path} className="rounded border border-zinc-900 px-2 py-0.5 text-[11px] text-zinc-600">
-                              Part {index + 1} missing
+                            <span
+                              key={partPath}
+                              className="rounded border border-zinc-900 px-2 py-0.5 text-[11px] text-zinc-600"
+                            >
+                              {partLabel} (missing)
                             </span>
                           );
                         })}
                       </div>
                     ) : null}
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {item.reuse_confidence != null ? (
-                        <RiskBadge label="Reuse" score={item.reuse_confidence} level={riskLevel(item.reuse_confidence, true)} />
-                      ) : null}
-                      {item.rights_confidence != null ? (
-                        <RiskBadge label="Rights" score={item.rights_confidence} level={riskLevel(item.rights_confidence)} />
-                      ) : null}
-                      {item.monetization_confidence != null ? (
-                        <RiskBadge label="Monetization" score={item.monetization_confidence} level={riskLevel(item.monetization_confidence)} />
-                      ) : null}
-                    </div>
-                    {!item.preview_available && item.missing_paths.length > 0 ? (
-                      <p className="mt-2 text-xs text-amber-300/90">
-                        Render or copy MP4s locally, then click <strong>Add ready to site</strong> above.
-                      </p>
-                    ) : null}
-                    {item.error_message ? (
-                      <p className="mt-2 text-xs text-red-400">{item.error_message}</p>
-                    ) : null}
-                    {projectId && analyticsByProject[projectId]?.latest_metrics ? (
-                      <div className="mt-3 rounded-lg border border-zinc-800/80 bg-zinc-950/50 p-3 text-xs text-zinc-400">
-                        <p className="font-medium text-zinc-300">
-                          Performance: {String(analyticsByProject[projectId].latest_metrics?.performance_score ?? "—")} /{" "}
-                          <span className="capitalize">{String(analyticsByProject[projectId].latest_metrics?.performance_tier ?? "—")}</span>
-                        </p>
-                        <p className="mt-1">
-                          {(analyticsByProject[projectId].latest_metrics?.views as number | undefined)?.toLocaleString() ?? "—"} views ·{" "}
-                          {String(analyticsByProject[projectId].latest_metrics?.velocity_views_per_day ?? "—")} views/day
-                        </p>
-                        {analyticsByProject[projectId].performance_signals.length > 0 ? (
-                          <ul className="mt-2 list-disc pl-4 text-zinc-500">
-                            {analyticsByProject[projectId].performance_signals.slice(0, 3).map((s) => (
-                              <li key={s}>{s}</li>
-                            ))}
-                          </ul>
-                        ) : null}
-                      </div>
+                    {isEditing ? (
+                      <VideoItemEditor
+                        item={item}
+                        speakerOptions={speakerOptions}
+                        busy={busy}
+                        onBusy={setBusy}
+                        onSaved={(updated) => {
+                          setItems((prev) => prev.map((row) => (row.key === updated.key ? updated : row)));
+                          setEditingKey(null);
+                          setMessage(`Updated ${updated.speaker || updated.title}`);
+                        }}
+                        onCancel={() => setEditingKey(null)}
+                      />
                     ) : null}
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {previewUrl ? (
-                        <a href={previewUrl} target="_blank" rel="noreferrer" className="rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-300">Preview</a>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingKey(isEditing ? null : item.key);
+                        }}
+                        className="rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+                      >
+                        Edit
+                      </button>
+                      {previewUrl || audioUrl ? (
+                        <a
+                          href={(previewUrl || audioUrl)!}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-300"
+                        >
+                          Open file
+                        </a>
+                      ) : null}
+                      {href ? (
+                        <Link
+                          href={href}
+                          onClick={(e) => e.stopPropagation()}
+                          className="rounded border border-violet-700 px-3 py-1 text-xs text-violet-300"
+                        >
+                          {item.library_id ? "Library detail" : "Open project"}
+                        </Link>
                       ) : null}
                       {addable ? (
                         <button
                           type="button"
                           disabled={busy}
-                          onClick={() => importVideos({ slug: item.slug, rebuild_catalog: false })}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void importVideos({ slug: item.slug, rebuild_catalog: false });
+                          }}
                           className="rounded bg-emerald-600 px-3 py-1 text-xs font-medium text-white disabled:opacity-50"
                         >
                           Add to site
@@ -230,24 +392,93 @@ export function VideosWorkspace() {
                       ) : null}
                       {projectId ? (
                         <>
-                          <Link href={`/create?project_id=${projectId}`} className="rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-300">Open Project</Link>
                           {["ready", "review", "rendered", "failed", "rejected"].includes(item.status) ? (
-                            <button type="button" disabled={busy} onClick={async () => { setBusy(true); await postRenderProject(projectId); setBusy(false); load(); setMessage(`Re-render started for #${projectId}`); }} className="rounded bg-violet-600 px-3 py-1 text-xs text-white disabled:opacity-50">Re-render</button>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                setBusy(true);
+                                await postRenderProject(projectId);
+                                setBusy(false);
+                                load();
+                                setMessage(`Re-render started for #${projectId}`);
+                              }}
+                              className="rounded bg-violet-600 px-3 py-1 text-xs text-white disabled:opacity-50"
+                            >
+                              Re-render
+                            </button>
                           ) : null}
                           {item.output_path && item.status !== "review" ? (
-                            <button type="button" disabled={busy} onClick={async () => { setBusy(true); await postSendProjectToReview(projectId); setBusy(false); load(); setMessage(`Project #${projectId} sent to review`); }} className="rounded border border-sky-500/40 px-3 py-1 text-xs text-sky-300 disabled:opacity-50">Send to Review</button>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                setBusy(true);
+                                await postSendProjectToReview(projectId);
+                                setBusy(false);
+                                load();
+                                setMessage(`Project #${projectId} sent to review`);
+                              }}
+                              className="rounded border border-sky-500/40 px-3 py-1 text-xs text-sky-300 disabled:opacity-50"
+                            >
+                              Send to Review
+                            </button>
                           ) : null}
                           {item.status === "review" ? (
-                            <Link href="/review" className="rounded border border-emerald-500/40 px-3 py-1 text-xs text-emerald-300">Review Queue</Link>
+                            <Link
+                              href="/review"
+                              onClick={(e) => e.stopPropagation()}
+                              className="rounded border border-emerald-500/40 px-3 py-1 text-xs text-emerald-300"
+                            >
+                              Review Queue
+                            </Link>
                           ) : null}
                           {item.status === "rejected" ? (
-                            <button type="button" disabled={busy} onClick={async () => { setBusy(true); await postRejectProject(projectId); setBusy(false); load(); }} className="rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-400 disabled:opacity-50">Archive</button>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                setBusy(true);
+                                await postRejectProject(projectId);
+                                setBusy(false);
+                                load();
+                              }}
+                              className="rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-400 disabled:opacity-50"
+                            >
+                              Archive
+                            </button>
                           ) : null}
                         </>
                       ) : null}
                     </div>
                   </div>
                 </div>
+              </>
+            );
+
+            return (
+              <article
+                key={item.key}
+                className={`rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 ${
+                  href && item.preview_available ? "cursor-pointer hover:border-zinc-700" : ""
+                }`}
+                onClick={() => {
+                  if (isEditing) return;
+                  if (href && item.preview_available) window.location.href = href;
+                }}
+                onKeyDown={(e) => {
+                  if (isEditing) return;
+                  if (href && item.preview_available && (e.key === "Enter" || e.key === " ")) {
+                    window.location.href = href;
+                  }
+                }}
+                role={href && item.preview_available && !isEditing ? "link" : undefined}
+                tabIndex={href && item.preview_available && !isEditing ? 0 : undefined}
+              >
+                {cardInner}
               </article>
             );
           })}

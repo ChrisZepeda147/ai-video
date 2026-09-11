@@ -461,9 +461,81 @@ def scan_project(root: Path | None = None) -> Catalog:
     )
 
 
-def rebuild(root: Path | None = None) -> tuple[Catalog, Path]:
+def update_catalog_video_entry(
+    entry_id: str,
+    *,
+    root: Path | None = None,
+    speaker: str | None = None,
+    title: str | None = None,
+    media_kind: str | None = None,
+) -> dict[str, Any] | None:
+    """Patch one legacy catalog video row in used.json."""
+    base = root or project_root()
+    catalog = load_persisted(base)
+    needle = str(entry_id or "").strip()
+    if not needle:
+        return None
+    updated: dict[str, Any] | None = None
+    rows: list[dict[str, Any]] = []
+    for row in catalog.videos:
+        if str(row.get("id") or "") == needle:
+            patch = dict(row)
+            if speaker is not None:
+                patch["speaker"] = speaker.strip()
+                if title is None:
+                    patch["title"] = speaker.strip()
+            if title is not None:
+                patch["title"] = title.strip()
+            if media_kind is not None:
+                kind = media_kind.strip().lower()
+                patch["media_kind"] = kind
+                if kind == "audio":
+                    patch["role"] = "speech"
+                elif patch.get("role") == "speech":
+                    patch.pop("role", None)
+            updated = patch
+            rows.append(patch)
+        else:
+            rows.append(row)
+    if not updated:
+        return None
+    catalog.videos = rows
+    save_catalog(catalog, base)
+    return updated
+
+
+def prune_missing_videos(catalog: Catalog, root: Path | None = None) -> tuple[Catalog, int]:
+    """Drop legacy catalog video rows whose files no longer exist on disk."""
+    base = root or project_root()
+    kept: list[dict[str, Any]] = []
+    removed = 0
+    for row in catalog.videos:
+        paths = list(row.get("paths") or [])
+        primary = row.get("path")
+        if primary and primary not in paths:
+            paths.insert(0, primary)
+        if not paths:
+            removed += 1
+            continue
+        if any((base / str(path)).is_file() for path in paths if path):
+            kept.append(row)
+        else:
+            removed += 1
+    if removed:
+        catalog = Catalog(
+            updated_at=now_iso(),
+            photos=catalog.photos,
+            videos=kept,
+            stories=catalog.stories,
+        )
+    return catalog, removed
+
+
+def rebuild(root: Path | None = None, *, prune_missing: bool = False) -> tuple[Catalog, Path]:
     base = root or project_root()
     catalog = current_catalog(base)
+    if prune_missing:
+        catalog, _ = prune_missing_videos(catalog, base)
     path = save_catalog(catalog, base)
     return catalog, path
 

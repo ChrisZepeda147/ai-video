@@ -410,6 +410,39 @@ export async function postImportVideos(body?: {
   });
 }
 
+export async function postPruneVideoCatalog() {
+  return fetchJson<{ legacy_catalog: { removed: number; remaining: number } }>(
+    buildUrl("/api/videos/prune"),
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
+export async function postUpdateVideoLibraryItem(body: {
+  source: "production" | "library" | "legacy";
+  library_id?: number;
+  project_id?: number;
+  legacy_id?: string;
+  speaker?: string;
+  media_kind?: "audio" | "video";
+  remember_speaker?: boolean;
+}) {
+  return fetchJson<{ item: import("@/lib/types").VideoLibraryItem }>(
+    buildUrl("/api/videos/library/update"),
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: internalHeaders(),
+    },
+  );
+}
+
+export async function postSyncCombinationCatalog(body?: { prune_missing?: boolean }) {
+  return fetchJson<{ synced: number; pruned: { removed_audio?: number; removed_visual_packs?: number } }>(
+    buildUrl("/api/library/combinations/sync-catalog"),
+    { method: "POST", body: JSON.stringify(body ?? { prune_missing: true }) },
+  );
+}
+
 export async function postCreateProject(body: Record<string, unknown>) {
   return fetchJson<ProductionProjectItem>(buildUrl("/api/production/projects"), {
     method: "POST",
@@ -637,9 +670,12 @@ export async function fetchCommandJob(jobKey: string) {
   });
 }
 
-export async function fetchCombinationCatalog(owner?: string) {
+export async function fetchCombinationCatalog(owner?: string, pruneMissing?: boolean) {
   return fetchJson<import("@/lib/types").CombinationCatalog>(
-    buildUrl("/api/library/combinations/catalog", owner ? { owner } : undefined),
+    buildUrl("/api/library/combinations/catalog", {
+      ...(owner ? { owner } : {}),
+      ...(pruneMissing ? { prune_missing: true } : {}),
+    }),
   );
 }
 

@@ -107,13 +107,25 @@ from discovery.combinations import (
     catalog_payload,
     combination_status,
     import_usage_from_videos,
+    prune_stale_combination_catalog,
     sync_visual_packs,
 )
-from discovery.production_library import check_reuse, get_video, import_uploaded_video, list_videos
+from discovery.production_library import (
+    check_reuse,
+    get_video,
+    import_uploaded_video,
+    list_videos,
+    prune_missing_components,
+)
 from discovery.speaker_identity import KNOWN_SPEAKERS, update_video_speaker
 from discovery.shared_library import maybe_auto_pull_import, pull_and_import, sync_status
 from discovery.site_videos import import_videos_to_site
-from discovery.video_library import build_video_library, library_summary
+from discovery.video_library import (
+    build_video_library,
+    library_summary,
+    prune_missing_legacy_catalog,
+    update_video_library_item,
+)
 from discovery.publishing.accounts import (
     complete_account_connect,
     disconnect_account,
@@ -871,6 +883,38 @@ def import_videos_endpoint(
     return payload
 
 
+@app.post("/api/videos/prune")
+def prune_videos_catalog_endpoint():
+    legacy = prune_missing_legacy_catalog(project_root())
+    return {"legacy_catalog": legacy}
+
+
+@app.post("/api/videos/library/update")
+def update_video_library_item_endpoint(
+    body: dict,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    _: Annotated[None, Depends(require_internal_key)],
+):
+    source = str(body.get("source") or "").strip()
+    if not source:
+        raise HTTPException(status_code=422, detail="source is required")
+    try:
+        item = update_video_library_item(
+            store,
+            root=project_root(),
+            source=source,
+            library_id=body.get("library_id"),
+            project_id=body.get("project_id"),
+            legacy_id=body.get("legacy_id"),
+            speaker=body.get("speaker"),
+            media_kind=body.get("media_kind"),
+            remember_speaker=bool(body.get("remember_speaker", True)),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"item": item.to_dict()}
+
+
 @app.get("/api/shorts/build/defaults")
 def shorts_build_defaults_endpoint():
     return build_defaults(project_root())
@@ -960,11 +1004,27 @@ def library_videos_endpoint(
 def library_video_detail_endpoint(
     video_id: int,
     store: Annotated[DiscoveryStore, Depends(get_store)],
+    prune_missing: bool = Query(False),
 ):
+    if prune_missing:
+        prune_missing_components(store, video_id)
     video = get_video(store, video_id)
     if not video:
         raise HTTPException(status_code=404, detail="Production video not found")
     return video
+
+
+@app.post("/api/library/videos/{video_id}/prune-components")
+def library_prune_components_endpoint(
+    video_id: int,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    _: Annotated[None, Depends(require_internal_key)],
+):
+    removed = prune_missing_components(store, video_id)
+    video = get_video(store, video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Production video not found")
+    return {"removed": removed, "video": video}
 
 
 @app.get("/api/library/speakers")
@@ -1048,9 +1108,10 @@ async def library_import_endpoint(
 def combinations_catalog_endpoint(
     store: Annotated[DiscoveryStore, Depends(get_store)],
     owner: str | None = None,
+    prune_missing: bool = Query(False),
 ):
     try:
-        return catalog_payload(store, owner=owner)
+        return catalog_payload(store, owner=owner, prune_missing=prune_missing)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1058,9 +1119,12 @@ def combinations_catalog_endpoint(
 @app.post("/api/library/combinations/sync-catalog")
 def combinations_sync_catalog_endpoint(
     store: Annotated[DiscoveryStore, Depends(get_store)],
+    body: dict | None = None,
 ):
+    body = body or {}
+    pruned = prune_stale_combination_catalog(store) if body.get("prune_missing", True) else {}
     synced = sync_visual_packs(store)
-    return {"synced": len(synced)}
+    return {"synced": len(synced), "pruned": pruned}
 
 
 @app.post("/api/library/combinations/status")
