@@ -556,6 +556,9 @@ export type SharedSyncStatus = {
   last_auto_sync_at?: string | null;
   auto_sync_enabled?: boolean;
   auto_sync_interval_minutes?: number;
+  brother_auto_pull_enabled?: boolean;
+  brother_auto_pull_interval_minutes?: number;
+  last_code_pull_at?: string | null;
   export_enabled: boolean;
   git?: SharedSyncGitStatus;
 };

@@ -846,4 +846,25 @@ def sync_status(root: Path | None = None, *, git: dict[str, Any] | None = None) 
         "auto_sync_interval_minutes": auto_sync_interval_minutes(),
         "export_enabled": export_enabled(),
         "git": git,
+        "last_code_pull_at": state.get("last_code_pull_at"),
+        "brother_auto_pull_enabled": _brother_auto_pull_enabled(),
+        "brother_auto_pull_interval_minutes": _brother_auto_pull_interval_minutes(),
     }
+
+
+def _brother_auto_pull_enabled() -> bool:
+    try:
+        from discovery.brother_code_sync import auto_pull_enabled
+
+        return auto_pull_enabled()
+    except Exception:
+        return False
+
+
+def _brother_auto_pull_interval_minutes() -> int:
+    try:
+        from discovery.brother_code_sync import auto_pull_interval_minutes
+
+        return auto_pull_interval_minutes()
+    except Exception:
+        return 60

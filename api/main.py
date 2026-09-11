@@ -234,6 +234,47 @@ def _start_shared_library_auto_sync() -> None:
     threading.Thread(target=_loop, name="shared-library-auto-sync", daemon=True).start()
 
 
+@app.on_event("startup")
+def _start_brother_code_auto_pull() -> None:
+    import logging
+    import threading
+    import time
+
+    from discovery.brother_code_sync import auto_pull_enabled, auto_pull_interval_minutes, maybe_auto_brother_code_pull
+    from discovery.config import default_db_path
+
+    if not auto_pull_enabled():
+        return
+
+    def _loop() -> None:
+        interval_sec = auto_pull_interval_minutes() * 60
+        time.sleep(min(30, interval_sec))
+        while True:
+            try:
+                db = default_db_path()
+                if Path(db).is_file():
+                    store = DiscoveryStore(db)
+                    try:
+                        result = maybe_auto_brother_code_pull(store)
+                        if result and result.get("pull", {}).get("pulled"):
+                            logging.getLogger("uvicorn.error").info(
+                                "Brother code auto-pull: %s",
+                                result["pull"].get("message") or "updated",
+                            )
+                        elif result and result.get("pull", {}).get("skipped"):
+                            logging.getLogger("uvicorn.error").info(
+                                "Brother code auto-pull skipped: %s",
+                                result["pull"].get("reason") or "dirty tree",
+                            )
+                    finally:
+                        store.close()
+            except Exception as exc:
+                logging.getLogger("uvicorn.error").warning("Brother code auto-pull failed: %s", exc)
+            time.sleep(interval_sec)
+
+    threading.Thread(target=_loop, name="brother-code-auto-pull", daemon=True).start()
+
+
 def _provider():
     try:
         return build_analysis_provider(provider="auto")

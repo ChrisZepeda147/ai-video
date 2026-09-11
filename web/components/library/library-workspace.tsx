@@ -125,14 +125,23 @@ export function LibraryWorkspace() {
             </p>
             {syncStatus?.auto_sync_enabled ? (
               <p className="mt-1 text-xs text-emerald-600/90">
-                Auto-sync every {syncStatus.auto_sync_interval_minutes ?? 10} min (API + this page when stale).
+                Video packages auto-sync every {syncStatus.auto_sync_interval_minutes ?? 10} min (API + this page when stale).
+              </p>
+            ) : null}
+            {syncStatus?.brother_auto_pull_enabled ? (
+              <p className="mt-1 text-xs text-emerald-600/90">
+                Code auto-pull every {syncStatus.brother_auto_pull_interval_minutes ?? 60} min while API runs
+                {syncStatus.last_code_pull_at
+                  ? ` · last ${new Date(syncStatus.last_code_pull_at).toLocaleString()}`
+                  : ""}
+                .
               </p>
             ) : null}
             {syncStatus?.git?.commit ? (
               <p className="mt-1 text-xs text-zinc-500">
                 Code: {syncStatus.git.branch ?? "branch"} @ {syncStatus.git.commit}
                 {syncStatus.git.commits_behind != null && syncStatus.git.commits_behind > 0
-                  ? ` · ${syncStatus.git.commits_behind} commit(s) behind remote — git pull for Stephen's search/script updates`
+                  ? ` · ${syncStatus.git.commits_behind} commit(s) behind remote`
                   : " · up to date with remote code"}
               </p>
             ) : null}
