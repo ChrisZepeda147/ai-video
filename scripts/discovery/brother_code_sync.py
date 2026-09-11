@@ -10,9 +10,11 @@ Conflicts abort and report — they do not get smashed.
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, IO
 
+from discovery.config import project_root
 from discovery.shared_library_git import (
     PUSH_REMOTES,
     _path_from_porcelain,
@@ -109,6 +111,51 @@ def _ref_exists(ref: str) -> bool:
     return _run_git(["rev-parse", "--verify", ref], check=False).returncode == 0
 
 
+def _lock_path() -> Path:
+    return project_root() / "data" / "shared_library" / "code_sync.lock"
+
+
+def _acquire_lock() -> IO[bytes] | None:
+    path = _lock_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = path.open("a+b")
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            handle.seek(0)
+            handle.write(b"0")
+            handle.flush()
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return None
+    return handle
+
+
+def _release_lock(handle: IO[bytes] | None) -> None:
+    if handle is None:
+        return
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        pass
+    handle.close()
+
+
 def fetch_both() -> dict[str, Any]:
     errors: list[str] = []
     fetched: list[str] = []
@@ -183,14 +230,19 @@ def _rebase_onto(ref: str) -> dict[str, Any]:
     behind = _count_range(f"HEAD..{ref}") or 0
     if behind <= 0:
         return {"ok": True, "rebased": False, "ref": ref, "behind": 0}
-    rebase = _run_git(["pull", "--rebase", *ref.split("/", 1)], check=False)
+    rebase = _run_git(["rebase", ref], check=False)
+    text = (rebase.stdout + rebase.stderr).lower()
+    if rebase.returncode != 0 and "index.lock" in text:
+        time.sleep(2)
+        rebase = _run_git(["rebase", ref], check=False)
+        text = (rebase.stdout + rebase.stderr).lower()
     if rebase.returncode != 0:
         _run_git(["rebase", "--abort"], check=False)
         return {
             "ok": False,
             "rebased": False,
             "ref": ref,
-            "conflict": True,
+            "conflict": "conflict" in text or "could not apply" in text,
             "error": rebase.stderr.strip() or rebase.stdout.strip() or f"rebase onto {ref} failed",
         }
     return {"ok": True, "rebased": True, "ref": ref, "behind": behind}
@@ -218,6 +270,17 @@ def sync_source_code(*, dry_run: bool = False) -> dict[str, Any]:
     if not code_sync_enabled():
         return {"ok": True, "skipped": True, "reason": "disabled"}
 
+    lock = _acquire_lock()
+    if lock is None:
+        return {"ok": False, "step": "lock", "error": "another brother sync is already running"}
+
+    try:
+        return _sync_source_code_locked(dry_run=dry_run)
+    finally:
+        _release_lock(lock)
+
+
+def _sync_source_code_locked(*, dry_run: bool = False) -> dict[str, Any]:
     fetch = fetch_both()
     if not fetch["ok"]:
         return {"ok": False, "step": "fetch", **fetch}
