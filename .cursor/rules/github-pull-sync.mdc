@@ -1,0 +1,70 @@
+---
+description: Pull from both GitHub remotes at session start and before commits so Stephen and Chris stay combined
+alwaysApply: true
+---
+
+# GitHub pull sync
+
+Stephen and Chris share one codebase across two GitHub copies. **Pull before you edit. Pull before you commit. Push both remotes after you commit.**
+
+## Remotes
+
+- `origin` / `stephen` = `https://github.com/StephenZepeda/ai-video.git`
+- `chris` = `https://github.com/ChrisZepeda147/ai-video.git`
+
+## Start of session (before editing shared code)
+
+Run this when the user opens the repo or asks you to work on code, web, scripts, or config:
+
+```powershell
+git fetch origin
+git fetch chris
+git status -sb
+```
+
+If `main` is behind `origin/main`:
+
+```powershell
+git stash push -u -m "WIP before pull sync"
+git pull --rebase origin main
+git stash pop
+```
+
+If stash pop conflicts, stop and resolve before continuing.
+
+**Chris machine** (no `SHARED_LIBRARY_EXPORT_OWNER=stephen` in `scripts/.env`):
+
+```powershell
+python scripts/shared_library_sync.py pull-import
+```
+
+**Stephen machine** — skip `pull-import`; use `push-stephen` after finished videos (see `brother-sync` rule).
+
+## Before every commit
+
+1. Run the pull steps above so the commit sits on latest `origin/main`.
+2. Do not commit on a branch that is behind remote without pulling first.
+
+## After every shared commit
+
+Push both remotes. Do not leave one GitHub copy stale.
+
+```powershell
+git push origin
+git push chris
+```
+
+## If remotes are missing
+
+```powershell
+git remote add stephen https://github.com/StephenZepeda/ai-video.git
+git remote add chris https://github.com/ChrisZepeda147/ai-video.git
+```
+
+## Do not
+
+- Skip pull because "we were just working here" — the other machine may have pushed.
+- Push only `origin` after a shared code commit.
+- Force-push `main` to fix sync drift.
+
+Full library + video sync: `.cursor/skills/brother-sync/SKILL.md`.
