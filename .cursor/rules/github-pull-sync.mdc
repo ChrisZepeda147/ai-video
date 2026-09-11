@@ -38,7 +38,7 @@ If stash pop conflicts, stop and resolve before continuing.
 python scripts/shared_library_sync.py pull-import
 ```
 
-Or `python scripts/shared_library_sync.py install` once — Windows timer every 5 min pulls + pushes source on both remotes.
+Or `powershell -File scripts/github_brother_sync.ps1 install` once — every 5 min `git pull` + push both remotes.
 
 ## Before every commit
 

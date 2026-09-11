@@ -101,19 +101,13 @@ Chris after import: same package slugs on disk, imports recorded.
 Both machines, once:
 
 ```powershell
-python scripts/shared_library_sync.py install
+powershell -File scripts/github_brother_sync.ps1 install
 ```
 
-Windows task `AiVideoBrotherSync` every 5 min:
-1. Auto-commits safe source (`scripts/`, `web/`, `api/`, `.cursor/`)
-2. Pulls `--rebase` from `origin` + `chris` if behind
-3. Pushes **both** remotes
-4. Imports shared video packages
-
-Never force-push. Never commits `.env`, `downloads/`, `data/`, or `content/used.json`. Conflict → stop and report.
+Windows task `AiVideoGitHubSync` every 5 min: fetch both remotes, auto-commit source, merge his commits (incoming wins on clash), push origin + chris. Both machines need `install`. Never force-push.
 
 ```powershell
-python scripts/shared_library_sync.py uninstall
+powershell -File scripts/github_brother_sync.ps1 uninstall
 ```
 
 ```powershell
