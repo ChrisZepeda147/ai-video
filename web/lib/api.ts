@@ -34,7 +34,7 @@ import type {
   PilotBatchResponse,
 } from "@/lib/types";
 
-const DEFAULT_API_URL = "http://localhost:8000";
+const DEFAULT_API_URL = "http://127.0.0.1:8000";
 const API_FETCH_TIMEOUT_MS = 5000;
 
 export function getApiBaseUrl(): string {

@@ -13,13 +13,8 @@ function Resolve-PythonExe {
     if ($env:AI_VIDEO_PYTHON -and (Test-Path -LiteralPath $env:AI_VIDEO_PYTHON)) {
         return $env:AI_VIDEO_PYTHON
     }
-    foreach ($candidate in @("python", "python3", "py")) {
-        $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
-        if ($cmd -and $cmd.Source -and (Test-Path -LiteralPath $cmd.Source)) {
-            return $cmd.Source
-        }
-    }
     $fallback = @(
+        "$env:LOCALAPPDATA\Python\bin\python.exe",
         "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe",
         "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
         "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
@@ -28,6 +23,12 @@ function Resolve-PythonExe {
     )
     foreach ($path in $fallback) {
         if ($path -and (Test-Path -LiteralPath $path)) { return $path }
+    }
+    foreach ($candidate in @("python", "python3", "py")) {
+        $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
+        if ($cmd -and $cmd.Source -and (Test-Path -LiteralPath $cmd.Source) -and ($cmd.Source -notmatch "WindowsApps")) {
+            return $cmd.Source
+        }
     }
     $storeMatches = Get-ChildItem -Path "$env:LOCALAPPDATA\Microsoft\WindowsApps" -Filter "python.exe" -Recurse -Depth 2 -ErrorAction SilentlyContinue |
         Where-Object { $_.FullName -match 'PythonSoftwareFoundation' } |
@@ -89,7 +90,8 @@ function Start-ApiServer {
     Import-ApiEnvFile -Root $Root
     Install-ApiPythonDeps -Python $Python -Root $Root
 
-    $uvicornArgs = @("-m", "uvicorn", "api.main:app", "--reload", "--port", "8000")
+    $uvicornArgs = @("-m", "uvicorn", "api.main:app", "--reload", "--host", "127.0.0.1", "--port", "8000")
+    Write-Host "$Python -m uvicorn api.main:app --reload --host 127.0.0.1 --port 8000"
     if ($Background) {
         $logDir = Join-Path $Root "data/logs"
         New-Item -ItemType Directory -Force -Path $logDir | Out-Null

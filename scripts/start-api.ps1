@@ -6,6 +6,7 @@ $Scripts = $PSScriptRoot
 
 & (Join-Path $Scripts "stop-api.ps1") -Port 8000
 Set-Location $Root
+Import-ApiEnvFile -Root $Root
 
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')

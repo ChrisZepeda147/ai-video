@@ -6,6 +6,7 @@ $Scripts = $PSScriptRoot
 . (Join-Path $Scripts "dev-common.ps1")
 
 Set-Location $Root
+Import-ApiEnvFile -Root $Root
 
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
@@ -16,6 +17,7 @@ if ($userPath -or $machinePath) {
 if (Test-ApiHealthy) {
     Write-Host "Discovery API already running on http://127.0.0.1:8000"
 } else {
+    Write-Host "Discovery API not healthy — starting uvicorn..."
     & (Join-Path $Scripts "stop-api.ps1") -Port 8000 | Out-Null
     $Python = Resolve-PythonExe
     if (-not $Python) {
@@ -23,9 +25,10 @@ if (Test-ApiHealthy) {
         exit 1
     }
     Write-Host "Using Python: $Python"
-    Write-Host "Starting Discovery API in background on http://127.0.0.1:8000 ..."
     Start-ApiServer -Root $Root -Python $Python -Background
-    Wait-ApiHealthySoft -Seconds 12 | Out-Null
+    if (-not (Wait-ApiHealthySoft -Seconds 20)) {
+        Write-Host "API did not become healthy. Check data/logs/api-dev.err"
+    }
 }
 
 & (Join-Path $Scripts "start-dashboard.ps1")
