@@ -590,7 +590,7 @@ def cmd_report(log_dir: Path, days: int) -> int:
     return 0
 
 
-def cmd_run(log_dir: Path, poll_sec: int, auto_recover: bool = True) -> int:
+def cmd_run(log_dir: Path, poll_sec: int, auto_recover: bool = False) -> int:
     log_dir.mkdir(parents=True, exist_ok=True)
     state = load_state(log_dir)
     last_record = int(state.get("last_record_id") or 0)
@@ -684,27 +684,16 @@ def start_host_running() -> bool:
 
 
 def recover_shell() -> str:
-    start_exe = str(START_HOST_EXE).replace("'", "''")
-    script = rf"""
+    """Never restart Explorer or launch Start host. Both are documented FAIL paths."""
+    script = r"""
 $ErrorActionPreference = 'SilentlyContinue'
-Get-CimInstance Win32_Process | Where-Object {{
+Get-CimInstance Win32_Process | Where-Object {
   $_.Name -eq 'NVIDIA App.exe' -or
   ($_.Name -eq 'nvcontainer.exe' -and $_.CommandLine -match 'plugins\\User|NVIDIA App')
-}} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}
+} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 $exp = Get-Process explorer
-$hung = [bool]($exp | Where-Object {{ -not $_.Responding }})
-if ($hung -or -not $exp) {{
-  taskkill /F /IM explorer.exe | Out-Null
-  Start-Sleep -Seconds 2
-  if (-not (Get-Process explorer)) {{ Start-Process explorer.exe }}
-  Start-Sleep -Seconds 2
-}}
-if (-not (Get-Process StartMenuExperienceHost)) {{
-  if (Test-Path '{start_exe}') {{ Start-Process '{start_exe}' }}
-}}
-$exp2 = Get-Process explorer
 $start = Get-Process StartMenuExperienceHost
-'explorer={{0}}/{{1}} start={{2}}' -f $(if ($exp2) {{ $exp2.Id }} else {{ 'none' }}), $(if ($exp2) {{ $exp2.Responding }} else {{ 'n/a' }}), $(if ($start) {{ $start.Id }} else {{ 'none' }})
+'explorer={0}/{1} start={2} (no explorer restart, no start launch)' -f $(if ($exp) { $exp.Id } else { 'none' }), $(if ($exp) { $exp.Responding } else { 'n/a' }), $(if ($start) { $start.Id } else { 'none' })
 """
     return run_powershell(script, timeout=40).strip()
 
@@ -751,13 +740,8 @@ def maybe_auto_recover(log_dir: Path, recover_state: dict[str, Any]) -> None:
     recover_state["strikes"] = strikes
     if hanging:
         append_log(log_dir, f"{utc_now()}  explorer-unresponsive  strikes={strikes}")
-    missing_start = (not hanging) and (not start_ok)
-    if missing_start:
-        last = float(recover_state.get("last_recover") or 0)
-        if last and (now - last) < RECOVER_COOLDOWN_SEC:
-            return
-        do_it = True
-        append_log(log_dir, f"{utc_now()}  start-host-missing")
+    if (not hanging) and (not start_ok):
+        append_log(log_dir, f"{utc_now()}  start-host-missing  (leave dead; launch is FAIL)")
     if not do_it:
         return
     try:
@@ -844,6 +828,7 @@ def run_argv(script: Path, log_dir: Path) -> list[str]:
         str(pythonw_path()),
         str(script),
         "run",
+        "--no-auto-recover",
         "--log-dir",
         str(log_dir),
         "--poll-sec",
@@ -1024,7 +1009,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("uninstall", parents=[shared], help="Remove Startup launcher and scheduled task.")
     sub.add_parser("start", parents=[shared], help="Start the watcher now.")
     sub.add_parser("status", parents=[shared], help="Show install state + recent log lines.")
-    sub.add_parser("recover", parents=[shared], help="Restart hung Explorer and Start host now.")
+    sub.add_parser("recover", parents=[shared], help="Kill NVIDIA user hook only. Never restart Explorer or Start.")
     sub.add_parser("diagnose", parents=[shared], help="Snapshot versions / NVIDIA / displays. No restart.")
     return parser
 

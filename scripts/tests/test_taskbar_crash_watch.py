@@ -146,7 +146,15 @@ class TaskbarCrashWatchTests(unittest.TestCase):
         self.assertIn("WScript.Sleep 25000", text)
         self.assertIn("taskbar_crash_watch.py", text)
         self.assertIn("TaskbarCrashWatch", text)
+        self.assertIn("--no-auto-recover", text)
         self.assertIn(", 0, False", text)
+
+    def test_run_argv_disables_auto_recover(self) -> None:
+        argv = watch.run_argv(
+            Path(r"C:\repo\scripts\taskbar_crash_watch.py"),
+            Path(r"C:\Users\Zev\AppData\Local\TaskbarCrashWatch"),
+        )
+        self.assertIn("--no-auto-recover", argv)
 
     def test_write_incident_logs_dll_names(self) -> None:
         event = _event()
