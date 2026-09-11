@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from discovery.config import default_db_path, project_root
+from discovery.media_paths import is_complete_motivation_job, is_playable_file
 from discovery.production_library import get_video, register_video
 
 logger = logging.getLogger(__name__)
@@ -198,8 +199,11 @@ def auto_register_motivation_job(
     if not output.is_file() and output_dir.is_dir():
         candidates = sorted(output_dir.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
         output = candidates[0] if candidates else output
-    if not output.is_file():
-        logger.warning("Motivation output missing: %s", output_dir)
+    if not output.is_file() or not is_playable_file(output):
+        logger.warning("Motivation output missing or stub: %s", output_dir)
+        return None
+    if not is_complete_motivation_job(root, slug, output_path=output):
+        logger.warning("Motivation job incomplete (speech, clips, or output): %s", slug)
         return None
 
     rel_output = _rel(output, root)
@@ -312,8 +316,8 @@ def auto_register_final_output(
     path = Path(final_path)
     if not path.is_absolute():
         path = root / path
-    if not path.is_file():
-        logger.warning("Final output not found: %s", path)
+    if not path.is_file() or not is_playable_file(path):
+        logger.warning("Final output missing or stub: %s", path)
         return None
 
     rel_output = _rel(path, root)

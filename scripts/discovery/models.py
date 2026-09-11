@@ -197,6 +197,7 @@ class PublishingAccount:
     id: int
     platform: str
     display_name: str
+    owner: str = "chris"
     platform_account_id: str | None = None
     username: str | None = None
     niche: str | None = None
@@ -525,6 +526,7 @@ def row_to_publishing_account(row: Any) -> PublishingAccount:
         id=int(row["id"]),
         platform=str(row["platform"]),
         display_name=str(row["display_name"]),
+        owner=str(row["owner"]) if "owner" in keys and row["owner"] else "chris",
         platform_account_id=row["platform_account_id"],
         username=row["username"],
         niche=row["niche"],

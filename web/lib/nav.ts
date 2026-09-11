@@ -66,13 +66,13 @@ export const navItems: NavItem[] = [
     href: "/accounts",
     label: "Accounts",
     icon: Users,
-    description: "TikTok and YouTube accounts",
+    description: "YouTube, TikTok, Instagram, Facebook — Stephen or Chris",
   },
   {
     href: "/analytics",
     label: "Analytics",
     icon: BarChart3,
-    description: "Performance metrics",
+    description: "Per-owner platform analytics",
   },
   {
     href: "/settings",

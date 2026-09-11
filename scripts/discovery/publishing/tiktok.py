@@ -22,14 +22,29 @@ _SCRIPTS = Path(__file__).resolve().parent.parent.parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
+import os
+
 import tiktok_upload as tt  # noqa: E402
+
+
+def _client_config() -> tuple[str, str, str]:
+    from discovery.config import publishing_oauth_redirect_uri
+
+    key = os.environ.get("TIKTOK_CLIENT_KEY", "").strip()
+    secret = os.environ.get("TIKTOK_CLIENT_SECRET", "").strip()
+    redirect = os.environ.get("TIKTOK_REDIRECT_URI", publishing_oauth_redirect_uri()).strip()
+    if not key or not secret:
+        raise RuntimeError(
+            "Missing TIKTOK_CLIENT_KEY or TIKTOK_CLIENT_SECRET in scripts/.env"
+        )
+    return key, secret, redirect
 
 
 class TikTokPublishingProvider:
     platform = "tiktok"
 
     def start_connect(self, *, redirect_uri: str, state: str) -> OAuthStart:
-        key, _secret, redirect = tt._client_credentials()
+        key, _secret, redirect = _client_config()
         verifier, challenge = tt._pkce_pair()
         params = {
             "client_key": key,
@@ -52,7 +67,7 @@ class TikTokPublishingProvider:
         )
 
     def complete_connect(self, *, redirect_uri: str, code: str, state_data: dict[str, Any]) -> dict[str, Any]:
-        key, secret, redirect = tt._client_credentials()
+        key, secret, redirect = _client_config()
         verifier = state_data.get("code_verifier") or ""
         payload = tt._http_json(
             "POST",

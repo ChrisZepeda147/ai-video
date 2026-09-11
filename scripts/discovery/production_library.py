@@ -13,6 +13,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from discovery.config import production_library_dir, project_root
+from discovery.media_paths import display_media_path, file_exists_rel, infer_media_kind
 from discovery.reuse_detection import normalize_transcript, transcript_hash
 
 
@@ -144,7 +145,7 @@ def _row_to_video(row) -> dict[str, Any]:
     return data
 
 
-def _row_to_component(row) -> dict[str, Any]:
+def _row_to_component(row, *, root: Path | None = None) -> dict[str, Any]:
     if row is None:
         return {}
     data = dict(row)
@@ -154,7 +155,51 @@ def _row_to_component(row) -> dict[str, Any]:
             data["metadata"] = json.loads(raw)
         except json.JSONDecodeError:
             data["metadata"] = raw
+    root = root or project_root()
+    local_path = str(data.get("local_path") or "")
+    comp_type = str(data.get("component_type") or "")
+    data["display_path"] = display_media_path(local_path) if local_path else None
+    data["preview_available"] = bool(local_path and file_exists_rel(root, local_path))
+    data["media_kind"] = (
+        "audio"
+        if comp_type in {"audio", "caption", "transcript", "music"}
+        else "video"
+        if comp_type in {"visual", "final", "thumbnail", "scene"}
+        else infer_media_kind(local_path)
+    )
     return data
+
+
+def prune_missing_components(store, video_id: int | None = None) -> int:
+    """Delete component rows whose local files are gone."""
+    root = project_root()
+    if video_id is not None:
+        rows = store._conn.execute(
+            """
+            SELECT id, local_path FROM production_video_components
+            WHERE video_id = ? AND local_path IS NOT NULL
+            """,
+            (video_id,),
+        ).fetchall()
+    else:
+        rows = store._conn.execute(
+            """
+            SELECT id, local_path FROM production_video_components
+            WHERE local_path IS NOT NULL
+            """
+        ).fetchall()
+    removed = 0
+    for row in rows:
+        path = str(row["local_path"] or "")
+        if path and not file_exists_rel(root, path):
+            store._conn.execute(
+                "DELETE FROM production_video_components WHERE id = ?",
+                (int(row["id"]),),
+            )
+            removed += 1
+    if removed:
+        store._conn.commit()
+    return removed
 
 
 def _next_video_id(store) -> int:
@@ -209,6 +254,26 @@ def list_videos(
     return items
 
 
+def delete_video(store, video_id: int) -> bool:
+    """Remove one production library video and its components (files on disk are kept)."""
+    row = store._conn.execute(
+        "SELECT id FROM production_library_videos WHERE id = ?",
+        (video_id,),
+    ).fetchone()
+    if not row:
+        return False
+    store._conn.execute(
+        "DELETE FROM production_video_components WHERE video_id = ?",
+        (video_id,),
+    )
+    store._conn.execute(
+        "DELETE FROM production_library_videos WHERE id = ?",
+        (video_id,),
+    )
+    store._conn.commit()
+    return True
+
+
 def get_video(store, video_id: int) -> dict[str, Any] | None:
     row = store._conn.execute(
         "SELECT * FROM production_library_videos WHERE id = ?",
@@ -225,7 +290,8 @@ def get_video(store, video_id: int) -> dict[str, Any] | None:
         """,
         (video_id,),
     ).fetchall()
-    video["components"] = [_row_to_component(c) for c in components]
+    root = project_root()
+    video["components"] = [_row_to_component(c, root=root) for c in components]
     versions = store._conn.execute(
         """
         SELECT id, video_key, version, version_label, change_summary, status, final_output_path, created_at

@@ -107,13 +107,26 @@ from discovery.combinations import (
     catalog_payload,
     combination_status,
     import_usage_from_videos,
+    prune_stale_combination_catalog,
     sync_visual_packs,
 )
-from discovery.production_library import check_reuse, get_video, import_uploaded_video, list_videos
+from discovery.production_library import (
+    check_reuse,
+    get_video,
+    import_uploaded_video,
+    list_videos,
+    prune_missing_components,
+)
 from discovery.speaker_identity import KNOWN_SPEAKERS, update_video_speaker
 from discovery.shared_library import maybe_auto_pull_import, pull_and_import, sync_status
 from discovery.site_videos import import_videos_to_site
-from discovery.video_library import build_video_library, library_summary
+from discovery.video_library import (
+    build_video_library,
+    library_summary,
+    delete_video_library_item,
+    prune_missing_legacy_catalog,
+    update_video_library_item,
+)
 from discovery.publishing.accounts import (
     complete_account_connect,
     disconnect_account,
@@ -220,6 +233,96 @@ def _start_shared_library_auto_sync() -> None:
             time.sleep(interval_sec)
 
     threading.Thread(target=_loop, name="shared-library-auto-sync", daemon=True).start()
+
+
+@app.on_event("startup")
+def _start_brother_code_auto_pull() -> None:
+    import logging
+    import threading
+    import time
+
+    from discovery.brother_code_sync import auto_pull_enabled, auto_pull_interval_minutes, maybe_auto_brother_code_pull
+    from discovery.config import default_db_path
+
+    if not auto_pull_enabled():
+        return
+
+    def _loop() -> None:
+        interval_sec = auto_pull_interval_minutes() * 60
+        time.sleep(min(30, interval_sec))
+        while True:
+            try:
+                db = default_db_path()
+                if Path(db).is_file():
+                    store = DiscoveryStore(db)
+                    try:
+                        result = maybe_auto_brother_code_pull(store)
+                        if result and result.get("pull", {}).get("pulled"):
+                            logging.getLogger("uvicorn.error").info(
+                                "Brother code auto-pull: %s",
+                                result["pull"].get("message") or "updated",
+                            )
+                        elif result and result.get("pull", {}).get("skipped"):
+                            logging.getLogger("uvicorn.error").info(
+                                "Brother code auto-pull skipped: %s",
+                                result["pull"].get("reason") or "dirty tree",
+                            )
+                    finally:
+                        store.close()
+            except Exception as exc:
+                logging.getLogger("uvicorn.error").warning("Brother code auto-pull failed: %s", exc)
+            time.sleep(interval_sec)
+
+    threading.Thread(target=_loop, name="brother-code-auto-pull", daemon=True).start()
+
+
+@app.on_event("startup")
+def _start_analytics_auto_refresh() -> None:
+    import logging
+    import os
+    import threading
+    import time
+
+    from discovery.analytics.account_summary import refresh_owner_analytics
+    from discovery.config import default_db_path, publishing_owner
+
+    if os.environ.get("ANALYTICS_AUTO_REFRESH", "1").strip().lower() in ("0", "false", "no"):
+        return
+
+    def _interval_minutes() -> int:
+        try:
+            return max(30, int(os.environ.get("ANALYTICS_AUTO_REFRESH_MINUTES", "360")))
+        except ValueError:
+            return 360
+
+    def _loop() -> None:
+        interval_sec = _interval_minutes() * 60
+        time.sleep(min(60, interval_sec))
+        while True:
+            try:
+                db = default_db_path()
+                if Path(db).is_file():
+                    store = DiscoveryStore(db)
+                    try:
+                        result = refresh_owner_analytics(
+                            store,
+                            owner=publishing_owner(),
+                            limit=50,
+                            force=False,
+                        )
+                        if result.get("refreshed"):
+                            logging.getLogger("uvicorn.error").info(
+                                "Analytics auto-refresh: %s posts for %s",
+                                result["refreshed"],
+                                result.get("owner") or "all",
+                            )
+                    finally:
+                        store.close()
+            except Exception as exc:
+                logging.getLogger("uvicorn.error").warning("Analytics auto-refresh failed: %s", exc)
+            time.sleep(interval_sec)
+
+    threading.Thread(target=_loop, name="analytics-auto-refresh", daemon=True).start()
 
 
 def _provider():
@@ -835,7 +938,7 @@ def list_projects_endpoint(
 @app.get("/api/videos/library")
 def list_video_library_endpoint(
     store: Annotated[DiscoveryStore, Depends(get_store)],
-    include_missing: bool = Query(True),
+    include_missing: bool = Query(False),
     limit: int = Query(100, ge=1, le=200),
 ):
     items = build_video_library(
@@ -869,6 +972,95 @@ def import_videos_endpoint(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return payload
+
+
+@app.post("/api/videos/prune")
+def prune_videos_catalog_endpoint():
+    legacy = prune_missing_legacy_catalog(project_root())
+    return {"legacy_catalog": legacy}
+
+
+@app.post("/api/videos/library/update")
+def update_video_library_item_endpoint(
+    body: dict,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    _: Annotated[None, Depends(require_internal_key)],
+):
+    source = str(body.get("source") or "").strip()
+    if not source:
+        raise HTTPException(status_code=422, detail="source is required")
+    try:
+        item = update_video_library_item(
+            store,
+            root=project_root(),
+            source=source,
+            library_id=body.get("library_id"),
+            project_id=body.get("project_id"),
+            legacy_id=body.get("legacy_id"),
+            speaker=body.get("speaker"),
+            media_kind=body.get("media_kind"),
+            remember_speaker=bool(body.get("remember_speaker", True)),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"item": item.to_dict()}
+
+
+@app.post("/api/videos/library/link-post")
+def link_video_post_endpoint(
+    body: dict,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    _: Annotated[None, Depends(require_internal_key)],
+):
+    from discovery.publishing.links import link_video_post
+
+    account_id = body.get("account_id")
+    platform_url = str(body.get("platform_url") or "").strip()
+    slug = str(body.get("slug") or "").strip()
+    title = str(body.get("title") or slug or "Video").strip()
+    if not account_id or not platform_url or not slug:
+        raise HTTPException(status_code=422, detail="account_id, platform_url, and slug are required")
+    try:
+        result = link_video_post(
+            store,
+            account_id=int(account_id),
+            platform_url=platform_url,
+            slug=slug,
+            title=title,
+            project_id=body.get("project_id"),
+            output_path=body.get("output_path"),
+            niche=body.get("niche"),
+            origin_type=str(body.get("origin_type") or body.get("source") or "legacy"),
+            format_profile=str(body.get("format_profile") or "source_video_visuals"),
+            refresh_analytics=bool(body.get("refresh_analytics", True)),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return result
+
+
+@app.post("/api/videos/library/delete")
+def delete_video_library_item_endpoint(
+    body: dict,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    _: Annotated[None, Depends(require_internal_key)],
+):
+    source = str(body.get("source") or "").strip()
+    if not source:
+        raise HTTPException(status_code=422, detail="source is required")
+    try:
+        deleted = delete_video_library_item(
+            store,
+            root=project_root(),
+            source=source,
+            library_id=body.get("library_id"),
+            project_id=body.get("project_id"),
+            legacy_id=body.get("legacy_id"),
+            slug=body.get("slug"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"deleted": deleted}
 
 
 @app.get("/api/shorts/build/defaults")
@@ -960,11 +1152,27 @@ def library_videos_endpoint(
 def library_video_detail_endpoint(
     video_id: int,
     store: Annotated[DiscoveryStore, Depends(get_store)],
+    prune_missing: bool = Query(False),
 ):
+    if prune_missing:
+        prune_missing_components(store, video_id)
     video = get_video(store, video_id)
     if not video:
         raise HTTPException(status_code=404, detail="Production video not found")
     return video
+
+
+@app.post("/api/library/videos/{video_id}/prune-components")
+def library_prune_components_endpoint(
+    video_id: int,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    _: Annotated[None, Depends(require_internal_key)],
+):
+    removed = prune_missing_components(store, video_id)
+    video = get_video(store, video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Production video not found")
+    return {"removed": removed, "video": video}
 
 
 @app.get("/api/library/speakers")
@@ -1048,9 +1256,10 @@ async def library_import_endpoint(
 def combinations_catalog_endpoint(
     store: Annotated[DiscoveryStore, Depends(get_store)],
     owner: str | None = None,
+    prune_missing: bool = Query(False),
 ):
     try:
-        return catalog_payload(store, owner=owner)
+        return catalog_payload(store, owner=owner, prune_missing=prune_missing)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1058,9 +1267,12 @@ def combinations_catalog_endpoint(
 @app.post("/api/library/combinations/sync-catalog")
 def combinations_sync_catalog_endpoint(
     store: Annotated[DiscoveryStore, Depends(get_store)],
+    body: dict | None = None,
 ):
+    body = body or {}
+    pruned = prune_stale_combination_catalog(store) if body.get("prune_missing", True) else {}
     synced = sync_visual_packs(store)
-    return {"synced": len(synced)}
+    return {"synced": len(synced), "pruned": pruned}
 
 
 @app.post("/api/library/combinations/status")
@@ -1251,6 +1463,7 @@ def _publishing_account_item(store: DiscoveryStore, account) -> PublishingAccoun
         id=account.id,
         platform=account.platform,
         display_name=account.display_name,
+        owner=getattr(account, "owner", None) or "chris",
         platform_account_id=account.platform_account_id,
         username=account.username,
         niche=account.niche,
@@ -1287,12 +1500,27 @@ def _publishing_job_item(store: DiscoveryStore, job) -> PublishingJobItem:
     )
 
 
+@app.get("/api/config/publishing-owner")
+def publishing_owner_endpoint():
+    from discovery.config import publishing_owner
+
+    return {"owner": publishing_owner()}
+
+
+@app.get("/api/config/publishing-setup")
+def publishing_setup_endpoint(store: Annotated[DiscoveryStore, Depends(get_store)]):
+    from discovery.publishing.setup import publishing_setup_report
+
+    return publishing_setup_report(store)
+
+
 @app.get("/api/accounts", response_model=PublishingAccountsResponse)
 def list_accounts_endpoint(
     store: Annotated[DiscoveryStore, Depends(get_store)],
     platform: str | None = None,
+    owner: str | None = None,
 ) -> PublishingAccountsResponse:
-    accounts = store.list_publishing_accounts(platform=platform)
+    accounts = store.list_publishing_accounts(platform=platform, owner=owner)
     items = [_publishing_account_item(store, a) for a in accounts]
     return PublishingAccountsResponse(items=items, count=len(items))
 
@@ -1303,16 +1531,20 @@ def connect_account_endpoint(
     body: ConnectAccountRequest,
     store: Annotated[DiscoveryStore, Depends(get_store)],
 ) -> ConnectAccountResponse:
-    if platform not in {"youtube", "tiktok", "instagram"}:
+    if platform not in {"youtube", "tiktok", "instagram", "facebook"}:
         raise HTTPException(status_code=400, detail=f"Unsupported platform: {platform}")
+    display_name = (body.display_name or "").strip() or f"{(body.owner or 'local').title()} {platform.title()}"
     try:
         result = start_account_connect(
             store,
             platform,
-            display_name=body.display_name,
+            display_name=display_name,
             niche=body.niche,
             redirect_uri=body.redirect_uri,
+            owner=body.owner,
         )
+    except SystemExit as exc:
+        raise HTTPException(status_code=400, detail=str(exc) or "Platform credentials missing") from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ConnectAccountResponse(
@@ -1520,10 +1752,22 @@ def analytics_overview(
     store: Annotated[DiscoveryStore, Depends(get_store)],
     platform: str | None = None,
     account_id: int | None = None,
+    owner: str | None = None,
     niche: str | None = None,
 ):
-    data = store.analytics_overview(platform=platform, account_id=account_id, niche=niche)
+    data = store.analytics_overview(platform=platform, account_id=account_id, owner=owner, niche=niche)
     return AnalyticsOverview(**data)
+
+
+@app.get("/api/analytics/board")
+def analytics_board_endpoint(
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    owner: str | None = None,
+    include_live: bool = Query(True),
+):
+    from discovery.analytics.account_summary import owner_analytics_board
+
+    return owner_analytics_board(store, owner=owner, include_live=include_live)
 
 
 @app.get("/api/analytics/posts", response_model=AnalyticsPostsResponse)
@@ -1531,6 +1775,7 @@ def analytics_posts(
     store: Annotated[DiscoveryStore, Depends(get_store)],
     platform: str | None = None,
     account_id: int | None = None,
+    owner: str | None = None,
     niche: str | None = None,
     limit: int = Query(50, ge=1, le=200),
 ):
@@ -1538,6 +1783,7 @@ def analytics_posts(
         niche=niche,
         account_id=account_id,
         platform=platform,
+        owner=owner,
         limit=limit,
     )
     items = [_analytics_post_item(row) for row in rows]

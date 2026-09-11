@@ -167,6 +167,75 @@ def git_repo_status(*, fetch: bool = False) -> dict[str, Any]:
     }
 
 
+def _tracked_dirty_paths() -> list[str]:
+    """Modified tracked files (ignores untracked ?? lines)."""
+    dirty: list[str] = []
+    for line in git_porcelain():
+        if line.startswith("??"):
+            continue
+        path = _path_from_porcelain(line)
+        if path:
+            dirty.append(path)
+    return dirty
+
+
+def safe_ff_pull(*, remote: str = "origin") -> dict[str, Any]:
+    """Fast-forward pull when behind. Skips if working tree has tracked edits."""
+    fetch = _run_git(["fetch", remote], check=False)
+    if fetch.returncode != 0:
+        fetch = _run_git(["fetch"], check=False)
+    if fetch.returncode != 0:
+        return {
+            "ok": False,
+            "pulled": False,
+            "error": (fetch.stderr or fetch.stdout or "git fetch failed").strip(),
+        }
+
+    status = git_repo_status(fetch=False)
+    behind = int(status.get("commits_behind") or 0)
+    if behind <= 0:
+        return {
+            "ok": True,
+            "pulled": False,
+            "reason": "up_to_date",
+            "git": status,
+        }
+
+    dirty = _tracked_dirty_paths()
+    if dirty:
+        return {
+            "ok": True,
+            "pulled": False,
+            "skipped": True,
+            "reason": "dirty_working_tree",
+            "dirty": dirty[:20],
+            "commits_behind": behind,
+            "git": status,
+            "message": f"Skipped pull — {len(dirty)} tracked file(s) modified locally",
+        }
+
+    pull = _run_git(["pull", "--ff-only", remote], check=False)
+    if pull.returncode != 0:
+        return {
+            "ok": False,
+            "pulled": False,
+            "error": (pull.stderr or pull.stdout or "git pull --ff-only failed").strip(),
+            "commits_behind": behind,
+            "git": status,
+        }
+
+    after = git_repo_status(fetch=False)
+    return {
+        "ok": True,
+        "pulled": True,
+        "reason": "fast_forward",
+        "commits_behind_before": behind,
+        "message": f"Pulled {behind} commit(s) from {remote}",
+        "git": after,
+        "output": (pull.stdout + pull.stderr).strip(),
+    }
+
+
 def pull_shared_library(*, dry_run: bool = False) -> dict[str, Any]:
     """Fetch remote and update ONLY shared_library + .gitattributes.
 

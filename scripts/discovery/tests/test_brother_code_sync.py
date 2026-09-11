@@ -1,109 +1,85 @@
-"""Tests for Stephen + Chris source sync allowlist and rebase safety."""
+"""Tests for brother code auto-pull."""
 
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from discovery.brother_code_sync import (
-    CHECKPOINT_MESSAGE,
-    is_source_path,
-    source_paths_from_porcelain,
-    sync_source_code,
+    _pull_is_due,
+    auto_pull_enabled,
+    maybe_auto_brother_code_pull,
 )
+from discovery.shared_library_git import safe_ff_pull
 
 
-class SourcePathTests(unittest.TestCase):
-    def test_allows_scripts_and_web(self) -> None:
-        self.assertTrue(is_source_path("scripts/shared_library_sync.py"))
-        self.assertTrue(is_source_path("web/lib/types.ts"))
-        self.assertTrue(is_source_path(".cursor/rules/brother-sync.mdc"))
-        self.assertTrue(is_source_path("scripts/.env.example"))
+class BrotherCodeSyncTests(unittest.TestCase):
+    def test_auto_pull_enabled_default(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertTrue(auto_pull_enabled())
+        with patch.dict("os.environ", {"BROTHER_AUTO_PULL": "0"}):
+            self.assertFalse(auto_pull_enabled())
 
-    def test_denies_secrets_and_local_data(self) -> None:
-        self.assertFalse(is_source_path("scripts/.env"))
-        self.assertFalse(is_source_path("downloads/motivational/job/output/a.mp4"))
-        self.assertFalse(is_source_path("data/shared_library/sync_state.json"))
-        self.assertFalse(is_source_path("content/used.json"))
-        self.assertFalse(is_source_path("notes/taskbar-outage.md"))
+    def test_pull_is_due_without_last(self) -> None:
+        self.assertTrue(_pull_is_due({}))
 
-    def test_porcelain_filters_to_source(self) -> None:
-        lines = [
-            " M scripts/foo.py",
-            " M scripts/.env",
-            "?? notes/x.md",
-            " M web/app/page.tsx",
-        ]
-        self.assertEqual(
-            source_paths_from_porcelain(lines),
-            ["scripts/foo.py", "web/app/page.tsx"],
-        )
+    def test_pull_is_due_recent(self) -> None:
+        from datetime import datetime, timedelta, timezone
 
+        recent = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        self.assertFalse(_pull_is_due({"last_code_pull_at": recent}, interval_minutes=60))
 
-class SyncSourceCodeTests(unittest.TestCase):
-    @patch("discovery.brother_code_sync.code_sync_enabled", return_value=False)
-    def test_disabled_skips(self, _enabled) -> None:
-        result = sync_source_code()
-        self.assertTrue(result["ok"])
-        self.assertTrue(result["skipped"])
-
-    @patch("discovery.brother_code_sync.git_repo_status")
-    @patch("discovery.brother_code_sync.source_paths_from_porcelain", return_value=["scripts/foo.py"])
-    @patch("discovery.brother_code_sync.fetch_both", return_value={"ok": True, "fetched": ["origin"], "errors": []})
-    def test_dry_run_does_not_commit(self, _fetch, _paths, mock_status) -> None:
-        mock_status.return_value = {"commits_behind": 1, "commits_ahead": 0}
-        result = sync_source_code(dry_run=True)
-        self.assertTrue(result["ok"])
-        self.assertTrue(result["dry_run"])
-        self.assertEqual(result["would_commit"], ["scripts/foo.py"])
-
-    @patch("discovery.brother_code_sync.git_repo_status")
-    @patch("discovery.brother_code_sync._push_both")
-    @patch("discovery.brother_code_sync._rebase_onto")
-    @patch("discovery.brother_code_sync._ref_exists", return_value=True)
-    @patch("discovery.brother_code_sync._stash_if_dirty")
-    @patch("discovery.brother_code_sync._auto_commit_source")
-    @patch("discovery.brother_code_sync.fetch_both", return_value={"ok": True, "fetched": ["origin", "chris"], "errors": []})
-    def test_rebase_conflict_does_not_push(
+    @patch("discovery.brother_code_sync.save_sync_state")
+    @patch("discovery.brother_code_sync.load_sync_state")
+    @patch("discovery.brother_code_sync.safe_ff_pull")
+    @patch("discovery.brother_code_sync.export_enabled", return_value=False)
+    @patch("discovery.brother_code_sync.import_all_stephen_packages")
+    def test_maybe_auto_pull_imports_on_chris(
         self,
-        _fetch,
-        mock_commit,
-        mock_stash,
-        _exists,
-        mock_rebase,
-        mock_push,
-        mock_status,
+        mock_import,
+        _export,
+        mock_pull,
+        mock_load,
+        mock_save,
     ) -> None:
-        mock_commit.return_value = {"ok": True, "committed": False}
-        mock_stash.return_value = {"ok": True, "stashed": False}
-        mock_rebase.return_value = {
-            "ok": False,
-            "conflict": True,
-            "error": "conflict in scripts/foo.py",
-        }
-        mock_status.return_value = {"commits_behind": 1}
-        result = sync_source_code()
-        self.assertFalse(result["ok"])
-        self.assertTrue(result.get("conflict"))
-        mock_push.assert_not_called()
+        mock_load.return_value = {}
+        mock_pull.return_value = {"ok": True, "pulled": True, "message": "Pulled 2 commit(s)"}
+        mock_import.return_value = {"imported": 1}
+        store = MagicMock()
+        result = maybe_auto_brother_code_pull(store, force=True)
+        self.assertIsNotNone(result)
+        assert result is not None
+        mock_import.assert_called_once_with(store)
+        mock_save.assert_called_once()
 
-    @patch("discovery.brother_code_sync._run_git")
-    @patch("discovery.brother_code_sync.source_paths_from_porcelain", return_value=["scripts/foo.py"])
-    @patch("discovery.brother_code_sync.code_auto_commit_enabled", return_value=True)
-    def test_auto_commit_uses_checkpoint_message(self, _enabled, _paths, mock_git) -> None:
-        def _git(args, **_kwargs):
-            if args[:2] == ["diff", "--cached"]:
-                return type("R", (), {"returncode": 0, "stdout": "scripts/foo.py\n", "stderr": ""})()
-            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+    @patch("discovery.shared_library_git.git_repo_status")
+    @patch("discovery.shared_library_git._run_git")
+    def test_safe_ff_pull_skips_dirty(self, mock_run, mock_status) -> None:
+        fetch = MagicMock(returncode=0, stdout="", stderr="")
+        mock_run.return_value = fetch
+        mock_status.return_value = {"commits_behind": 3, "branch": "main"}
+        with patch(
+            "discovery.shared_library_git.git_porcelain",
+            return_value=[" M scripts/foo.py"],
+        ):
+            result = safe_ff_pull()
+        self.assertTrue(result.get("skipped"))
+        self.assertEqual(result.get("reason"), "dirty_working_tree")
+        mock_run.assert_called_once()
 
-        mock_git.side_effect = _git
-        from discovery.brother_code_sync import _auto_commit_source
-
-        result = _auto_commit_source()
-        self.assertTrue(result["ok"])
-        self.assertTrue(result["committed"])
-        commit_calls = [call.args[0] for call in mock_git.call_args_list]
-        self.assertIn(["commit", "-m", CHECKPOINT_MESSAGE], commit_calls)
+    @patch("discovery.shared_library_git.git_repo_status")
+    @patch("discovery.shared_library_git._run_git")
+    def test_safe_ff_pull_up_to_date(self, mock_run, mock_status) -> None:
+        fetch = MagicMock(returncode=0, stdout="", stderr="")
+        mock_run.return_value = fetch
+        mock_status.return_value = {"commits_behind": 0}
+        with patch("discovery.shared_library_git.git_porcelain", return_value=[]):
+            result = safe_ff_pull()
+        self.assertFalse(result.get("pulled"))
+        self.assertEqual(result.get("reason"), "up_to_date")
 
 
 if __name__ == "__main__":

@@ -12,29 +12,68 @@ Two people. Two GitHub copies. One shared video library (Stephen → Chris).
 - `chris` = `https://github.com/ChrisZepeda147/ai-video.git`
 
 **Which machine**
-- Stephen: `SHARED_LIBRARY_EXPORT_OWNER=stephen` in `scripts/.env`. New videos auto-export + push when `SHARED_LIBRARY_AUTO_PUSH=1`.
-- Chris: `SHARED_LIBRARY_EXPORT_OWNER=chris` in `scripts/.env`. Same auto-export + push. Never set `stephen` on Chris.
-- **Both machines:** `python scripts/shared_library_sync.py install` once. Timer every 5 min: auto-commit safe source, rebase, push **both** GitHubs, import videos. Check: `python scripts/shared_library_sync.py health`.
+- `SHARED_LIBRARY_EXPORT_OWNER=stephen` in `scripts/.env` → Stephen. After a new video, export + `push-stephen`, then push both remotes.
+- No that env → Chris. Do not set `stephen` on Chris. Do not `push-stephen`.
 
-**After any commit that should be shared**
+## Start of every agent session (both machines)
+
+Before other work, sync brother code:
+
+```powershell
+git fetch origin
+git pull --ff-only origin main
+```
+
+**Chris only** — after pull, import Stephen video packages:
+
+```powershell
+python scripts/shared_library_sync.py pull-import --skip-pull
+```
+
+Or one shot:
+
+```powershell
+python -c "from discovery.config import default_db_path, load_env; from discovery.store import DiscoveryStore; from discovery.brother_code_sync import run_session_start_sync; load_env(); s=DiscoveryStore(default_db_path()); print(run_session_start_sync(s)); s.close()"
+```
+
+If `git pull` fails (local edits), say so — do not force. User commits or stashes first.
+
+## While API is running (automatic)
+
+With `start-api.ps1` up (default env):
+
+| Sync | Interval | What |
+|------|----------|------|
+| Stephen video packages | ~10 min | `SHARED_LIBRARY_AUTO_SYNC` — scoped library pull + import |
+| Brother **code** | ~60 min | `BROTHER_AUTO_PULL` — `git pull --ff-only` + Chris import |
+
+Skips code pull if tracked files are dirty locally.
+
+## After any commit that should be shared
+
 ```powershell
 git push origin
 git push chris
 ```
+
 Do not leave one remote behind.
 
-**After a finished motivational video (Stephen)**
+## After a finished motivational video (Stephen)
+
 ```powershell
 python scripts/shared_library_sync.py push-stephen
+git push origin
 git push chris
 ```
-`push-stephen` exports `downloads/motivational/<slug>/output/*.mp4` into `shared_library/stephen/<slug>/`, commits **only** that tree + `.gitattributes`, pushes `origin`. Dirty unrelated files → stash first, then run it.
 
-**After Stephen pushes (Chris)**
+## Manual Chris sync
+
 ```powershell
-python scripts/shared_library_sync.py pull-import
+git pull --ff-only origin main
+python scripts/shared_library_sync.py pull-import --skip-pull
 ```
-Or Sync Stephen library on `/library`.
+
+Or **Sync now** on `/library`.
 
 **Media** uses Git LFS (`git lfs install` once per machine).
 

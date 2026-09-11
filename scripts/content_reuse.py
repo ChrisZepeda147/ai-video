@@ -313,9 +313,17 @@ def youtube_id_from_name(name: str) -> str | None:
 
 
 def video_record(path: Path, root: Path, *, youtube_id: str | None = None, extra_paths: list[str] | None = None) -> dict[str, Any]:
+    from discovery.media_paths import motivation_job_slug_from_rel
+
+    rel = rel_path(path, root)
+    job_slug = motivation_job_slug_from_rel(rel)
     yt = youtube_id or youtube_id_from_name(path.name)
-    folder_label = path.parent.name if path.name.startswith("part") else path.stem
-    slug = yt or slugify(folder_label)
+    if job_slug:
+        folder_label = job_slug
+        slug = job_slug
+    else:
+        folder_label = path.parent.name if path.name.startswith("part") else path.stem
+        slug = yt or slugify(folder_label)
     video_id = f"video:{yt}" if yt else f"video:{slug}"
     title = yt or folder_label.replace("_", " ")
     return {
@@ -371,12 +379,27 @@ def scan_stories(root: Path) -> list[dict[str, Any]]:
 
 
 def scan_videos(root: Path) -> list[dict[str, Any]]:
+    from discovery.media_paths import (
+        is_complete_motivation_job,
+        is_playable_file,
+        is_previewable_output,
+        motivation_job_slug_from_rel,
+    )
+
     downloads = root / "downloads"
     if not downloads.is_dir():
         return []
     grouped: dict[str, list[Path]] = {}
     for path in sorted(downloads.rglob("*")):
         if not path.is_file() or path.suffix.lower() not in VIDEO_EXTS:
+            continue
+        if not is_playable_file(path):
+            continue
+        rel = rel_path(path, root)
+        job_slug = motivation_job_slug_from_rel(rel)
+        if job_slug and not is_complete_motivation_job(root, job_slug, output_path=path):
+            continue
+        if not job_slug and not is_previewable_output(root, rel):
             continue
         yt = youtube_id_from_name(path.name)
         key = yt or rel_path(path.parent if path.name.startswith("part") else path, root)
@@ -461,9 +484,142 @@ def scan_project(root: Path | None = None) -> Catalog:
     )
 
 
-def rebuild(root: Path | None = None) -> tuple[Catalog, Path]:
+def update_catalog_video_entry(
+    entry_id: str,
+    *,
+    root: Path | None = None,
+    speaker: str | None = None,
+    title: str | None = None,
+    media_kind: str | None = None,
+) -> dict[str, Any] | None:
+    """Patch one legacy catalog video row in used.json."""
+    base = root or project_root()
+    catalog = load_persisted(base)
+    needle = str(entry_id or "").strip()
+    if not needle:
+        return None
+    updated: dict[str, Any] | None = None
+    rows: list[dict[str, Any]] = []
+    for row in catalog.videos:
+        if str(row.get("id") or "") == needle:
+            patch = dict(row)
+            if speaker is not None:
+                patch["speaker"] = speaker.strip()
+                if title is None:
+                    patch["title"] = speaker.strip()
+            if title is not None:
+                patch["title"] = title.strip()
+            if media_kind is not None:
+                kind = media_kind.strip().lower()
+                patch["media_kind"] = kind
+                if kind == "audio":
+                    patch["role"] = "speech"
+                elif kind in {"video", "video_audio"} and patch.get("role") == "speech":
+                    patch.pop("role", None)
+            updated = patch
+            rows.append(patch)
+        else:
+            rows.append(row)
+    if not updated:
+        return None
+    catalog.videos = rows
+    save_catalog(catalog, base)
+    return updated
+
+
+def delete_catalog_video_entry(
+    entry_id: str,
+    *,
+    root: Path | None = None,
+    slug: str | None = None,
+) -> dict[str, Any] | None:
+    """Remove one legacy catalog video row from used.json (files on disk are kept)."""
+    base = root or project_root()
+    catalog = load_persisted(base)
+    needle = str(entry_id or "").strip()
+    slug_needle = str(slug or "").strip()
+    removed: dict[str, Any] | None = None
+    kept: list[dict[str, Any]] = []
+    for row in catalog.videos:
+        row_id = str(row.get("id") or "")
+        row_slug = str(row.get("slug") or "")
+        if (needle and row_id == needle) or (slug_needle and row_slug == slug_needle):
+            if removed is None:
+                removed = row
+            continue
+        kept.append(row)
+    if not removed:
+        return None
+    catalog.videos = kept
+    save_catalog(catalog, base)
+    return removed
+
+
+def _catalog_video_is_playable(row: dict[str, Any], base: Path) -> bool:
+    from discovery.media_paths import is_previewable_output
+
+    paths = list(row.get("paths") or [])
+    primary = row.get("path")
+    if primary and primary not in paths:
+        paths.insert(0, primary)
+    if not paths:
+        return False
+    role = str(row.get("role") or "")
+    return any(is_previewable_output(base, str(path), role=role) for path in paths if path)
+
+
+def prune_missing_videos(catalog: Catalog, root: Path | None = None) -> tuple[Catalog, int]:
+    """Drop legacy catalog video rows whose files no longer exist on disk."""
+    base = root or project_root()
+    kept: list[dict[str, Any]] = []
+    removed = 0
+    for row in catalog.videos:
+        paths = list(row.get("paths") or [])
+        primary = row.get("path")
+        if primary and primary not in paths:
+            paths.insert(0, primary)
+        if not paths:
+            removed += 1
+            continue
+        if any((base / str(path)).is_file() for path in paths if path):
+            kept.append(row)
+        else:
+            removed += 1
+    if removed:
+        catalog = Catalog(
+            updated_at=now_iso(),
+            photos=catalog.photos,
+            videos=kept,
+            stories=catalog.stories,
+        )
+    return catalog, removed
+
+
+def prune_unplayable_videos(catalog: Catalog, root: Path | None = None) -> tuple[Catalog, int]:
+    """Drop legacy rows with missing files, stub outputs, or incomplete motivation jobs."""
+    base = root or project_root()
+    kept: list[dict[str, Any]] = []
+    removed = 0
+    for row in catalog.videos:
+        if _catalog_video_is_playable(row, base):
+            kept.append(row)
+        else:
+            removed += 1
+    if removed:
+        catalog = Catalog(
+            updated_at=now_iso(),
+            photos=catalog.photos,
+            videos=kept,
+            stories=catalog.stories,
+        )
+    return catalog, removed
+
+
+def rebuild(root: Path | None = None, *, prune_missing: bool = False) -> tuple[Catalog, Path]:
     base = root or project_root()
     catalog = current_catalog(base)
+    if prune_missing:
+        catalog, _ = prune_missing_videos(catalog, base)
     path = save_catalog(catalog, base)
     return catalog, path
 

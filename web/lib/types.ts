@@ -161,7 +161,7 @@ export type ConceptStatusResponse = {
 
 export type ApiResult<T> =
   | { ok: true; data: T }
-  | { ok: false; error: "offline" | "malformed"; message: string };
+  | { ok: false; error: "offline" | "http" | "malformed"; message: string; status?: number };
 
 export type RiskScoresItem = {
   monetization_confidence: number;
@@ -280,8 +280,9 @@ export type ProductionProjectsResponse = {
 
 export type VideoLibraryItem = {
   key: string;
-  source: "production" | "legacy";
+  source: "production" | "legacy" | "library";
   project_id?: number | null;
+  library_id?: number | null;
   legacy_id?: string | null;
   slug: string;
   title: string;
@@ -293,6 +294,10 @@ export type VideoLibraryItem = {
   output_paths: string[];
   preview_available: boolean;
   missing_paths: string[];
+  media_kind?: import("@/lib/format").VideoMediaKind | "other";
+  speaker?: string | null;
+  display_path?: string | null;
+  editable?: boolean;
   duration_sec?: number | null;
   created_at?: string | null;
   rendered_at?: string | null;
@@ -301,6 +306,19 @@ export type VideoLibraryItem = {
   rights_confidence?: number | null;
   reuse_confidence?: number | null;
   error_message?: string | null;
+  published_to?: VideoPublishedLink[];
+};
+
+export type VideoPublishedLink = {
+  job_id: number;
+  account_id: number;
+  platform: string;
+  platform_url?: string | null;
+  platform_post_id?: string | null;
+  published_at?: string | null;
+  account_display_name?: string | null;
+  account_owner?: string | null;
+  account_username?: string | null;
 };
 
 export type VideoLibraryResponse = {
@@ -309,7 +327,11 @@ export type VideoLibraryResponse = {
   summary: {
     total: number;
     production: number;
+    library?: number;
     legacy: number;
+    audio?: number;
+    video?: number;
+    video_audio?: number;
     preview_ready: number;
     missing_files: number;
   };
@@ -408,6 +430,9 @@ export type ProductionVideoComponent = {
   label?: string | null;
   sort_order?: number;
   local_path?: string | null;
+  display_path?: string | null;
+  preview_available?: boolean;
+  media_kind?: "audio" | "video" | "other";
   url?: string | null;
   text_content?: string | null;
   start_sec?: number | null;
@@ -452,6 +477,8 @@ export type CombinationAudioItem = {
   speaker: string;
   label?: string;
   local_path?: string | null;
+  display_path?: string | null;
+  preview_available?: boolean;
   start_sec?: number | null;
   end_sec?: number | null;
   duration_sec?: number | null;
@@ -468,6 +495,8 @@ export type CombinationVisualPack = {
   label: string;
   clips_root_path?: string | null;
   preview_clip_path?: string | null;
+  display_path?: string | null;
+  preview_available?: boolean;
   clip_count?: number;
   duration_sec?: number | null;
   broll_ids?: string[];
@@ -478,6 +507,7 @@ export type CombinationCatalog = {
   selected_owner?: string | null;
   audio_by_speaker: Record<string, CombinationAudioItem[]>;
   visual_packs: CombinationVisualPack[];
+  visual_by_category?: Record<string, CombinationVisualPack[]>;
   audio_count: number;
   visual_pack_count: number;
 };
@@ -560,7 +590,9 @@ export type SharedSyncStatus = {
   last_auto_sync_at?: string | null;
   auto_sync_enabled?: boolean;
   auto_sync_interval_minutes?: number;
-  auto_push_enabled?: boolean;
+  brother_auto_pull_enabled?: boolean;
+  brother_auto_pull_interval_minutes?: number;
+  last_code_pull_at?: string | null;
   export_enabled: boolean;
   git?: SharedSyncGitStatus;
   health?: SharedSyncHealth;
@@ -608,10 +640,13 @@ export type VideoImportResponse = {
   skipped: VideoImportResponse["results"];
 };
 
+export type PublishingOwner = "stephen" | "chris";
+
 export type PublishingAccountItem = {
   id: number;
   platform: string;
   display_name: string;
+  owner?: PublishingOwner | string;
   platform_account_id?: string | null;
   username?: string | null;
   niche?: string | null;
@@ -690,6 +725,32 @@ export type AnalyticsPostsResponse = {
   count: number;
 };
 
+export type AnalyticsAccountBoard = {
+  account: PublishingAccountItem;
+  overview: AnalyticsOverview;
+  recent_posts: AnalyticsPostItem[];
+  live_metrics?: Record<string, unknown> | null;
+};
+
+export type AnalyticsBoardResponse = {
+  owner?: string | null;
+  accounts: AnalyticsAccountBoard[];
+  account_count: number;
+};
+
+export type VideoLinkPostResponse = {
+  duplicate: boolean;
+  job_id: number;
+  production_project_id: number;
+  platform: string;
+  platform_post_id: string;
+  platform_url: string;
+  account_id: number;
+  account_display_name?: string | null;
+  account_owner?: string | null;
+  refresh?: Record<string, unknown> | null;
+};
+
 export type AnalyticsPatternItem = {
   label: string;
   post_count: number;
@@ -708,6 +769,29 @@ export type PreflightCheckItem = {
   status: string;
   detail: string;
   fix_hint?: string | null;
+};
+
+export type PublishingSetupPlatform = {
+  label: string;
+  portal_url: string;
+  env_ready: boolean;
+  env_keys: string[];
+  redirect_uri: string;
+  notes: string;
+};
+
+export type PublishingSetupResponse = {
+  machine_owner: string;
+  oauth_redirect_uri: string;
+  mock_provider: boolean;
+  dry_run: boolean;
+  internal_key_configured: boolean;
+  target_accounts_per_owner: number;
+  owners: string[];
+  platforms: Record<string, PublishingSetupPlatform>;
+  account_matrix: Record<string, Record<string, { connected: number; total: number; target: number }>>;
+  gaps: string[];
+  brother_note: string;
 };
 
 export type PreflightResponse = {

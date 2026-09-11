@@ -275,6 +275,15 @@ def render_combination(
         subject=str(pack.get("label") or pack.get("category") or ""),
     )
 
+    from discovery.media_paths import is_complete_motivation_job, is_playable_file
+
+    if not is_playable_file(output):
+        raise ValueError(f"Combination render produced invalid output for {slug}")
+    if not is_complete_motivation_job(root, slug, output_path=output):
+        raise ValueError(
+            f"Combination job {slug} is incomplete — needs speech audio, visual clips, and a real output file"
+        )
+
     rel_output = output.relative_to(root).as_posix()
     speaker = _resolve_speaker(audio, store)
     if speaker == "Unknown":

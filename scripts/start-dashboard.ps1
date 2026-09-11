@@ -14,14 +14,11 @@ if (-not (Test-Path $EnvFile) -and (Test-Path $Example)) {
     Write-Host "Created web/.env.local from .env.example"
 }
 
-$NodeModules = Join-Path $Web "node_modules"
-$LockFile = Join-Path $Web "package-lock.json"
-if (-not (Test-Path $NodeModules)) {
-    Write-Host "Installing dashboard dependencies (first run)..."
+if (-not (Test-Path "node_modules") -or $env:AI_VIDEO_FORCE_NPM_INSTALL -eq "1") {
+    Write-Host "Installing dashboard npm deps..."
     npm install
-} elseif ((Test-Path $LockFile) -and (Get-Item $LockFile).LastWriteTime -gt (Get-Item $NodeModules).LastWriteTime) {
-    Write-Host "package-lock.json changed - refreshing dashboard dependencies..."
-    npm install
+} else {
+    Write-Host "Dashboard npm deps OK (skipping npm install)."
 }
 
 Write-Host "Starting dashboard at http://localhost:${Port}"

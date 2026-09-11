@@ -405,6 +405,7 @@ class PublishingAccountItem(BaseModel):
     id: int
     platform: str
     display_name: str
+    owner: str = "chris"
     platform_account_id: str | None = None
     username: str | None = None
     niche: str | None = None
@@ -423,9 +424,10 @@ class PublishingAccountsResponse(BaseModel):
 
 
 class ConnectAccountRequest(BaseModel):
-    display_name: str
+    display_name: str = ""
     niche: str | None = None
     redirect_uri: str | None = None
+    owner: str | None = None
 
 
 class ConnectAccountResponse(BaseModel):
@@ -486,6 +488,19 @@ class AnalyticsOverview(BaseModel):
     breakout_count: int = 0
     underperforming_count: int = 0
     posts_with_metrics: int = 0
+
+
+class VideoLinkPostResponse(BaseModel):
+    duplicate: bool = False
+    job_id: int
+    production_project_id: int
+    platform: str
+    platform_post_id: str
+    platform_url: str
+    account_id: int
+    account_display_name: str | None = None
+    account_owner: str | None = None
+    refresh: dict[str, Any] | None = None
 
 
 class AnalyticsPostItem(BaseModel):

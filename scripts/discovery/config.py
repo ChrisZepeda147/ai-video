@@ -156,6 +156,17 @@ def source_media_dir() -> Path:
     return path
 
 
+def publishing_owner() -> str:
+    """Local operator for connected social accounts: stephen | chris."""
+    explicit = os.environ.get("PUBLISHING_OWNER", "").strip().lower()
+    if explicit in {"stephen", "chris"}:
+        return explicit
+    export_owner = os.environ.get("SHARED_LIBRARY_EXPORT_OWNER", "").strip().lower()
+    if export_owner == "stephen":
+        return "stephen"
+    return "chris"
+
+
 def publishing_data_dir() -> Path:
     path = project_root() / "data" / "publishing"
     path.mkdir(parents=True, exist_ok=True)
@@ -172,6 +183,12 @@ def publishing_oauth_states_dir() -> Path:
     path = publishing_data_dir() / "oauth_states"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def publishing_oauth_redirect_uri() -> str:
+    """Dashboard callback URL registered with each OAuth provider."""
+    base = os.environ.get("PUBLISHING_OAUTH_REDIRECT_BASE", "http://localhost:3000").strip().rstrip("/")
+    return f"{base}/accounts/callback"
 
 
 def publish_dry_run() -> bool:

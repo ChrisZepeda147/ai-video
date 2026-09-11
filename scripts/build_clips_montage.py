@@ -564,7 +564,7 @@ def build_silent_montage(
 def build_montage(
     *,
     clips_dir: Path,
-    audio: Path,
+    audio: Path | None,
     output: Path,
     segment_length: float,
     layout: str,
@@ -577,15 +577,18 @@ def build_montage(
     subject: str = "",
     playback_speed: float = DEFAULT_PLAYBACK_SPEED,
     use_vision: bool = True,
+    include_audio: bool = True,
 ) -> set[Path]:
     clips = sorted(clips_dir.glob("*.mp4"))
     if not clips:
         raise FileNotFoundError(f"No .mp4 clips in {clips_dir}")
-    if not audio.is_file():
+    if include_audio and (audio is None or not audio.is_file()):
         raise FileNotFoundError(f"Audio not found: {audio}")
 
     target_duration = audio_duration
     if target_duration is None:
+        if audio is None or not audio.is_file():
+            raise ValueError("audio_duration is required when audio file is missing")
         target_duration = probe_duration(audio) - audio_start
     if target_duration <= 0:
         raise ValueError("audio_duration must be positive")
@@ -683,13 +686,21 @@ def build_montage(
         _concat_segments(segments, silent_video)
         fitted_video = tmp_dir / "montage_fitted.mp4"
         _pad_video_to_duration(silent_video, fitted_video, target_duration=target_duration)
-        _mux_audio(
-            fitted_video,
-            audio,
-            output,
-            audio_start=audio_start,
-            audio_duration=target_duration,
-        )
+        if include_audio:
+            assert audio is not None
+            _mux_audio(
+                fitted_video,
+                audio,
+                output,
+                audio_start=audio_start,
+                audio_duration=target_duration,
+            )
+        else:
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", str(fitted_video), "-c", "copy", "-an", str(output)],
+                check=True,
+                capture_output=True,
+            )
     return picker.used_clips()
 
 

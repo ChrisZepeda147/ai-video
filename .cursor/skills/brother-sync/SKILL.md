@@ -35,6 +35,44 @@ git remote add chris https://github.com/ChrisZepeda147/ai-video.git
 
 One-time per machine: `git lfs install`.
 
+## Start of every agent session (both machines)
+
+Before other work:
+
+```powershell
+git fetch origin
+git pull --ff-only origin main
+```
+
+**Chris only** — import Stephen packages (skip second pull if you just pulled):
+
+```powershell
+python scripts/shared_library_sync.py pull-import --skip-pull
+```
+
+If pull fails due to local edits, tell the user — do not force. Stash or commit first.
+
+## While API is running (automatic)
+
+With `.\scripts\start-api.ps1` (defaults on):
+
+| What | Env | Interval |
+|------|-----|----------|
+| Stephen video packages | `SHARED_LIBRARY_AUTO_SYNC=1` | ~10 min |
+| Brother **code** | `BROTHER_AUTO_PULL=1` | ~60 min |
+
+Code pull uses `git pull --ff-only` and **skips** when tracked files are dirty. Chris auto-imports Stephen packages after a successful code pull.
+
+Disable: `BROTHER_AUTO_PULL=0` in `scripts/.env`. Change interval: `BROTHER_AUTO_PULL_MINUTES=60`.
+
+Check status:
+
+```powershell
+python scripts/shared_library_sync.py status
+```
+
+Shows `last_code_pull_at`, `commits_behind`, `brother_auto_pull_enabled`.
+
 ## After a finished video (Stephen)
 
 Render as normal. Env flag auto-exports into `shared_library/stephen/<slug>/`. Then:
@@ -62,11 +100,11 @@ Want `"exported": N` with `N > 0` (or skipped because already packaged).
 ## After Stephen pushes (Chris)
 
 ```powershell
-git pull
-python scripts/shared_library_sync.py pull-import
+git pull --ff-only origin main
+python scripts/shared_library_sync.py pull-import --skip-pull
 ```
 
-Or **Sync Stephen library** on `/library`.
+Or **Sync Stephen library** on `/library` (packages only). Code still needs `git pull` unless API hourly auto-pull already ran.
 
 ## After any shared code commit (both)
 
