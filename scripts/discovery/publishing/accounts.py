@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from discovery.config import publishing_oauth_states_dir
+from discovery.config import publishing_oauth_redirect_uri, publishing_oauth_states_dir, publishing_owner
 from discovery.publishing.credentials import delete_credentials, load_credentials, save_credentials
 from discovery.publishing.factory import build_publishing_provider
 
@@ -21,6 +21,13 @@ class ConnectStart:
     instructions: str
 
 
+def _normalize_owner(owner: str | None) -> str:
+    value = (owner or publishing_owner()).strip().lower()
+    if value not in {"stephen", "chris"}:
+        raise ValueError(f"Invalid owner: {owner!r} — use stephen or chris")
+    return value
+
+
 def start_account_connect(
     store,
     platform: str,
@@ -28,10 +35,12 @@ def start_account_connect(
     display_name: str,
     niche: str | None = None,
     redirect_uri: str | None = None,
+    owner: str | None = None,
 ) -> ConnectStart:
     provider = build_publishing_provider(platform)
     state = secrets.token_urlsafe(24)
-    default_redirect = redirect_uri or _default_redirect(platform)
+    default_redirect = redirect_uri or publishing_oauth_redirect_uri()
+    account_owner = _normalize_owner(owner)
     oauth = provider.start_connect(redirect_uri=default_redirect, state=state)
     state_path = publishing_oauth_states_dir() / f"{state}.json"
     verifier = ""
@@ -51,6 +60,7 @@ def start_account_connect(
                 "platform": platform,
                 "display_name": display_name,
                 "niche": niche,
+                "owner": account_owner,
                 "redirect_uri": default_redirect,
                 "code_verifier": verifier,
             },
@@ -85,6 +95,7 @@ def complete_account_connect(store, *, state: str, code: str) -> int:
         platform_account_id=verification.platform_account_id,
         username=verification.username,
         niche=state_data.get("niche"),
+        owner=_normalize_owner(state_data.get("owner")),
         auth_status=verification.auth_status,
         posting_available=verification.posting_available,
         capabilities_json=json.dumps(verification.capabilities),
@@ -121,6 +132,7 @@ def import_mock_account(
         platform_account_id=verification.platform_account_id,
         username=username,
         niche=niche,
+        owner=publishing_owner(),
         auth_status="connected",
         posting_available=True,
         capabilities_json=json.dumps(verification.capabilities),
@@ -181,8 +193,4 @@ def disconnect_account(store, account_id: int) -> None:
 
 
 def _default_redirect(platform: str) -> str:
-    if platform == "tiktok":
-        return "http://127.0.0.1:8787/callback"
-    if platform == "youtube":
-        return "http://127.0.0.1:8788/callback"
-    return "http://127.0.0.1:8790/callback"
+    return publishing_oauth_redirect_uri()

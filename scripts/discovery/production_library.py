@@ -254,6 +254,26 @@ def list_videos(
     return items
 
 
+def delete_video(store, video_id: int) -> bool:
+    """Remove one production library video and its components (files on disk are kept)."""
+    row = store._conn.execute(
+        "SELECT id FROM production_library_videos WHERE id = ?",
+        (video_id,),
+    ).fetchone()
+    if not row:
+        return False
+    store._conn.execute(
+        "DELETE FROM production_video_components WHERE video_id = ?",
+        (video_id,),
+    )
+    store._conn.execute(
+        "DELETE FROM production_library_videos WHERE id = ?",
+        (video_id,),
+    )
+    store._conn.commit()
+    return True
+
+
 def get_video(store, video_id: int) -> dict[str, Any] | None:
     row = store._conn.execute(
         "SELECT * FROM production_library_videos WHERE id = ?",

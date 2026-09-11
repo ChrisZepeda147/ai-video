@@ -6,7 +6,7 @@ export default function AnalyticsPage() {
     <>
       <PageHeader
         title="Analytics"
-        description="Track published Short performance, winning patterns, and learning signals — advisory only, not auto-creative control."
+        description="Stephen and Chris — separate YouTube, TikTok, and Instagram analytics. Link live posts from Videos; in-app upload comes later."
       />
       <AnalyticsWorkspace />
     </>

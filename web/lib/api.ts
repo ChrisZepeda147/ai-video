@@ -100,7 +100,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<ApiResult<
       } catch {
         /* ignore */
       }
-      return { ok: false, error: "offline", message };
+      return { ok: false, error: "http", message, status: response.status };
     }
     const data = (await response.json()) as T;
     return { ok: true, data };
@@ -108,7 +108,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<ApiResult<
     return {
       ok: false,
       error: "offline",
-      message: "Discovery backend is offline.",
+      message: "Discovery backend is offline. Start it with npm run dev from the repo root.",
     };
   }
 }
@@ -423,11 +423,59 @@ export async function postUpdateVideoLibraryItem(body: {
   project_id?: number;
   legacy_id?: string;
   speaker?: string;
-  media_kind?: "audio" | "video";
+  media_kind?: import("@/lib/format").VideoMediaKind;
   remember_speaker?: boolean;
 }) {
   return fetchJson<{ item: import("@/lib/types").VideoLibraryItem }>(
     buildUrl("/api/videos/library/update"),
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: internalHeaders(),
+    },
+  );
+}
+
+export async function postLinkVideoPost(body: {
+  account_id: number;
+  platform_url: string;
+  slug: string;
+  title?: string;
+  project_id?: number;
+  output_path?: string | null;
+  niche?: string | null;
+  source?: string;
+  origin_type?: string;
+  format_profile?: string;
+  refresh_analytics?: boolean;
+}) {
+  return fetchJson<import("@/lib/types").VideoLinkPostResponse>(
+    buildUrl("/api/videos/library/link-post"),
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: internalHeaders(),
+    },
+  );
+}
+
+export async function fetchPublishingSetup() {
+  return fetchJson<import("@/lib/types").PublishingSetupResponse>(buildUrl("/api/config/publishing-setup"));
+}
+
+export async function fetchPublishingOwner() {
+  return fetchJson<{ owner: string }>(buildUrl("/api/config/publishing-owner"));
+}
+
+export async function postDeleteVideoLibraryItem(body: {
+  source: "production" | "library" | "legacy";
+  library_id?: number;
+  project_id?: number;
+  legacy_id?: string;
+  slug?: string;
+}) {
+  return fetchJson<{ deleted: Record<string, unknown> }>(
+    buildUrl("/api/videos/library/delete"),
     {
       method: "POST",
       body: JSON.stringify(body),
@@ -473,13 +521,23 @@ export async function postSendProjectToReview(projectId: number) {
   return fetchJson(buildUrl(`/api/production/projects/${projectId}/send-to-review`), { method: "POST", body: "{}" });
 }
 
-export async function fetchPublishingAccounts(params?: { platform?: string }) {
+export async function fetchPublishingAccounts(params?: { platform?: string; owner?: string }) {
   return fetchJson<PublishingAccountsResponse>(buildUrl("/api/accounts", params));
 }
 
-export async function postConnectAccount(platform: string, body: { display_name: string; niche?: string }) {
+export async function postConnectAccount(
+  platform: string,
+  body: { display_name?: string; niche?: string; owner?: string; redirect_uri?: string },
+) {
   return fetchJson<{ auth_url: string; state: string; instructions: string }>(
     buildUrl(`/api/accounts/${platform}/connect`),
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+export async function postCompleteAccountConnect(body: { state: string; code: string }) {
+  return fetchJson<import("@/lib/types").PublishingAccountItem>(
+    buildUrl("/api/accounts/connect/complete"),
     { method: "POST", body: JSON.stringify(body) },
   );
 }
@@ -552,14 +610,22 @@ export function getMediaUrl(path: string | null | undefined): string | null {
 export async function fetchAnalyticsOverview(params?: {
   platform?: string;
   account_id?: number;
+  owner?: string;
   niche?: string;
 }) {
   return fetchJson<AnalyticsOverview>(buildUrl("/api/analytics/overview", params));
 }
 
+export async function fetchAnalyticsBoard(params?: { owner?: string; include_live?: boolean }) {
+  return fetchJson<import("@/lib/types").AnalyticsBoardResponse>(
+    buildUrl("/api/analytics/board", params),
+  );
+}
+
 export async function fetchAnalyticsPosts(params?: {
   platform?: string;
   account_id?: number;
+  owner?: string;
   niche?: string;
   limit?: number;
 }) {

@@ -26,9 +26,11 @@ DEFAULT_SCOPES = f"{YOUTUBE_UPLOAD_SCOPE} {YOUTUBE_READONLY_SCOPE}"
 
 
 def _client_config() -> tuple[str, str, str]:
+    from discovery.config import publishing_oauth_redirect_uri
+
     client_id = os.environ.get("YOUTUBE_CLIENT_ID", "").strip()
     client_secret = os.environ.get("YOUTUBE_CLIENT_SECRET", "").strip()
-    redirect = os.environ.get("YOUTUBE_REDIRECT_URI", "http://127.0.0.1:8788/callback").strip()
+    redirect = os.environ.get("YOUTUBE_REDIRECT_URI", publishing_oauth_redirect_uri()).strip()
     if not client_id or not client_secret:
         raise RuntimeError(
             "Missing YOUTUBE_CLIENT_ID or YOUTUBE_CLIENT_SECRET in scripts/.env"

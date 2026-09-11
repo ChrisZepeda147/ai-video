@@ -84,6 +84,16 @@ def import_video_entry(
             "missing_paths": missing or source_paths,
         }
 
+    from discovery.media_paths import is_previewable_output
+
+    if not is_previewable_output(root, primary_path):
+        return {
+            "slug": slug,
+            "status": "skipped",
+            "reason": "unplayable_or_incomplete",
+            "missing_paths": missing or source_paths,
+        }
+
     existing = store.get_production_project_by_slug(slug)
     if existing and existing.output_path:
         return {

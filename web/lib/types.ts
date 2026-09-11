@@ -161,7 +161,7 @@ export type ConceptStatusResponse = {
 
 export type ApiResult<T> =
   | { ok: true; data: T }
-  | { ok: false; error: "offline" | "malformed"; message: string };
+  | { ok: false; error: "offline" | "http" | "malformed"; message: string; status?: number };
 
 export type RiskScoresItem = {
   monetization_confidence: number;
@@ -294,7 +294,7 @@ export type VideoLibraryItem = {
   output_paths: string[];
   preview_available: boolean;
   missing_paths: string[];
-  media_kind?: "audio" | "video" | "other";
+  media_kind?: import("@/lib/format").VideoMediaKind | "other";
   speaker?: string | null;
   display_path?: string | null;
   editable?: boolean;
@@ -306,6 +306,19 @@ export type VideoLibraryItem = {
   rights_confidence?: number | null;
   reuse_confidence?: number | null;
   error_message?: string | null;
+  published_to?: VideoPublishedLink[];
+};
+
+export type VideoPublishedLink = {
+  job_id: number;
+  account_id: number;
+  platform: string;
+  platform_url?: string | null;
+  platform_post_id?: string | null;
+  published_at?: string | null;
+  account_display_name?: string | null;
+  account_owner?: string | null;
+  account_username?: string | null;
 };
 
 export type VideoLibraryResponse = {
@@ -318,6 +331,7 @@ export type VideoLibraryResponse = {
     legacy: number;
     audio?: number;
     video?: number;
+    video_audio?: number;
     preview_ready: number;
     missing_files: number;
   };
@@ -605,10 +619,13 @@ export type VideoImportResponse = {
   skipped: VideoImportResponse["results"];
 };
 
+export type PublishingOwner = "stephen" | "chris";
+
 export type PublishingAccountItem = {
   id: number;
   platform: string;
   display_name: string;
+  owner?: PublishingOwner | string;
   platform_account_id?: string | null;
   username?: string | null;
   niche?: string | null;
@@ -687,6 +704,32 @@ export type AnalyticsPostsResponse = {
   count: number;
 };
 
+export type AnalyticsAccountBoard = {
+  account: PublishingAccountItem;
+  overview: AnalyticsOverview;
+  recent_posts: AnalyticsPostItem[];
+  live_metrics?: Record<string, unknown> | null;
+};
+
+export type AnalyticsBoardResponse = {
+  owner?: string | null;
+  accounts: AnalyticsAccountBoard[];
+  account_count: number;
+};
+
+export type VideoLinkPostResponse = {
+  duplicate: boolean;
+  job_id: number;
+  production_project_id: number;
+  platform: string;
+  platform_post_id: string;
+  platform_url: string;
+  account_id: number;
+  account_display_name?: string | null;
+  account_owner?: string | null;
+  refresh?: Record<string, unknown> | null;
+};
+
 export type AnalyticsPatternItem = {
   label: string;
   post_count: number;
@@ -705,6 +748,29 @@ export type PreflightCheckItem = {
   status: string;
   detail: string;
   fix_hint?: string | null;
+};
+
+export type PublishingSetupPlatform = {
+  label: string;
+  portal_url: string;
+  env_ready: boolean;
+  env_keys: string[];
+  redirect_uri: string;
+  notes: string;
+};
+
+export type PublishingSetupResponse = {
+  machine_owner: string;
+  oauth_redirect_uri: string;
+  mock_provider: boolean;
+  dry_run: boolean;
+  internal_key_configured: boolean;
+  target_accounts_per_owner: number;
+  owners: string[];
+  platforms: Record<string, PublishingSetupPlatform>;
+  account_matrix: Record<string, Record<string, { connected: number; total: number; target: number }>>;
+  gaps: string[];
+  brother_note: string;
 };
 
 export type PreflightResponse = {

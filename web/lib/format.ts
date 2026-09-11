@@ -27,6 +27,22 @@ export function displayMediaPath(path: string | null | undefined): string | null
   return normalized;
 }
 
+export type VideoMediaKind = "audio" | "video" | "video_audio";
+
+/** Videos tab category label. */
+export function formatMediaKind(kind: string | null | undefined): string {
+  if (kind === "video_audio") return "Video / Audio";
+  if (kind === "audio") return "Audio";
+  if (kind === "video") return "Video";
+  return kind || "Video";
+}
+
+export function normalizeVideoMediaKind(kind: string | null | undefined): VideoMediaKind {
+  if (kind === "audio") return "audio";
+  if (kind === "video_audio") return "video_audio";
+  return "video";
+}
+
 /** Compact clock, e.g. "1:07". */
 export function formatTimecode(totalSeconds: number | null | undefined): string {
   if (totalSeconds == null || !Number.isFinite(totalSeconds) || totalSeconds < 0) {

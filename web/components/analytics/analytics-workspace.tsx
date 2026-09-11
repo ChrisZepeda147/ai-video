@@ -2,47 +2,98 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { PlatformBadge } from "@/components/platform-badge";
 import {
-  fetchAnalyticsOverview,
-  fetchAnalyticsPatterns,
-  fetchAnalyticsPosts,
+  fetchAnalyticsBoard,
+  fetchPublishingOwner,
   postAnalyticsRefresh,
 } from "@/lib/api";
-import type {
-  AnalyticsOverview,
-  AnalyticsPatternItem,
-  AnalyticsPostItem,
-} from "@/lib/types";
+import type { AnalyticsAccountBoard, AnalyticsBoardResponse, PublishingOwner } from "@/lib/types";
 
-function TierBadge({ tier }: { tier?: string | null }) {
-  if (!tier) return null;
-  const tone =
-    tier === "breakout"
-      ? "bg-emerald-500/15 text-emerald-300"
-      : tier === "strong"
-        ? "bg-violet-500/15 text-violet-300"
-        : tier === "underperforming"
-          ? "bg-red-500/15 text-red-300"
-          : "bg-zinc-500/15 text-zinc-300";
+const OWNERS: PublishingOwner[] = ["stephen", "chris"];
+const PLATFORMS = ["youtube", "tiktok", "instagram", "facebook"] as const;
+
+function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <span className={`rounded px-2 py-0.5 text-xs capitalize ${tone}`}>{tier}</span>
+    <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2">
+      <p className="text-[10px] uppercase tracking-wide text-zinc-500">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-zinc-100">{value}</p>
+    </div>
   );
 }
 
-function PatternTable({ title, items }: { title: string; items: AnalyticsPatternItem[] }) {
+function AccountPanel({ board }: { board: AnalyticsAccountBoard }) {
+  const { account, overview, recent_posts, live_metrics } = board;
+  const live = live_metrics && !live_metrics.error ? live_metrics : null;
   return (
     <section className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
-      <h3 className="text-sm font-semibold text-zinc-200">{title}</h3>
-      {items.length === 0 ? (
-        <p className="mt-2 text-xs text-zinc-500">No data yet — publish Shorts and refresh analytics.</p>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <PlatformBadge platform={account.platform} />
+        <h3 className="text-sm font-semibold text-zinc-100">{account.display_name}</h3>
+        {account.username ? <span className="text-xs text-zinc-500">@{account.username}</span> : null}
+        <span className="rounded-full border border-zinc-700 px-2 py-0.5 text-[10px] uppercase text-zinc-500">
+          {account.owner || "chris"}
+        </span>
+        <span
+          className={`rounded-full px-2 py-0.5 text-[10px] uppercase ${
+            account.auth_status === "connected"
+              ? "bg-emerald-500/15 text-emerald-300"
+              : "bg-zinc-800 text-zinc-400"
+          }`}
+        >
+          {account.auth_status}
+        </span>
+      </div>
+
+      {live ? (
+        <div className="mb-3 grid gap-2 sm:grid-cols-3">
+          {"follower_count" in live && live.follower_count != null ? (
+            <Stat label="Followers" value={Number(live.follower_count).toLocaleString()} />
+          ) : null}
+          {"total_views" in live && live.total_views != null ? (
+            <Stat label="Channel views" value={Number(live.total_views).toLocaleString()} />
+          ) : null}
+          {"video_count" in live && live.video_count != null ? (
+            <Stat label="Videos" value={String(live.video_count)} />
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat label="Linked posts" value={String(overview.total_published_posts)} />
+        <Stat label="Total views" value={overview.total_views.toLocaleString()} />
+        <Stat label="Avg score" value={overview.average_performance_score?.toFixed(1) ?? "—"} />
+        <Stat label="Breakouts" value={String(overview.breakout_count)} />
+      </div>
+
+      {recent_posts.length === 0 ? (
+        <p className="mt-3 text-xs text-zinc-500">
+          No linked posts yet — use <Link href="/videos" className="text-sky-300 underline">Videos → Link post</Link>.
+        </p>
       ) : (
         <ul className="mt-3 space-y-2">
-          {items.slice(0, 8).map((item) => (
-            <li key={item.label} className="flex items-center justify-between gap-2 text-xs">
-              <span className="truncate text-zinc-300">{item.label}</span>
-              <span className="shrink-0 text-zinc-500">
-                score {item.avg_performance_score} · {item.post_count} posts
-              </span>
+          {recent_posts.slice(0, 5).map((post) => (
+            <li
+              key={post.publishing_job_id}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-800/80 px-3 py-2 text-xs"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-medium text-zinc-200">{post.title ?? `Job #${post.publishing_job_id}`}</p>
+                {post.platform_url ? (
+                  <a
+                    href={post.platform_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="truncate text-sky-400/90 hover:underline"
+                  >
+                    {post.platform_url}
+                  </a>
+                ) : null}
+              </div>
+              <div className="text-right text-zinc-400">
+                <p>{(post.views ?? 0).toLocaleString()} views</p>
+                <p>score {post.performance_score?.toFixed(1) ?? "—"}</p>
+              </div>
             </li>
           ))}
         </ul>
@@ -52,185 +103,120 @@ function PatternTable({ title, items }: { title: string; items: AnalyticsPattern
 }
 
 export function AnalyticsWorkspace() {
-  const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
-  const [posts, setPosts] = useState<AnalyticsPostItem[]>([]);
-  const [hooks, setHooks] = useState<AnalyticsPatternItem[]>([]);
-  const [topics, setTopics] = useState<AnalyticsPatternItem[]>([]);
-  const [formats, setFormats] = useState<AnalyticsPatternItem[]>([]);
-  const [visuals, setVisuals] = useState<AnalyticsPatternItem[]>([]);
-  const [niche, setNiche] = useState("");
-  const [platform, setPlatform] = useState("");
+  const [owner, setOwner] = useState<PublishingOwner>("chris");
+  const [localOwner, setLocalOwner] = useState<PublishingOwner>("chris");
+  const [board, setBoard] = useState<AnalyticsBoardResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchPublishingOwner().then((result) => {
+      if (result.ok && (result.data.owner === "stephen" || result.data.owner === "chris")) {
+        setLocalOwner(result.data.owner);
+        setOwner(result.data.owner);
+      }
+    });
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const params = {
-      niche: niche || undefined,
-      platform: platform || undefined,
-    };
-    const [ov, postRes, hookRes, topicRes, formatRes, visualRes] = await Promise.all([
-      fetchAnalyticsOverview(params),
-      fetchAnalyticsPosts({ ...params, limit: 20 }),
-      fetchAnalyticsPatterns("hooks", params),
-      fetchAnalyticsPatterns("topics", params),
-      fetchAnalyticsPatterns("formats", params),
-      fetchAnalyticsPatterns("visuals", params),
-    ]);
+    const result = await fetchAnalyticsBoard({ owner, include_live: true });
     setLoading(false);
-    if (ov.ok) setOverview(ov.data);
-    if (postRes.ok) setPosts(postRes.data.items);
-    if (hookRes.ok) setHooks(hookRes.data.items);
-    if (topicRes.ok) setTopics(topicRes.data.items);
-    if (formatRes.ok) setFormats(formatRes.data.items);
-    if (visualRes.ok) setVisuals(visualRes.data.items);
-  }, [niche, platform]);
+    if (!result.ok) {
+      setMessage(result.message);
+      return;
+    }
+    setBoard(result.data);
+  }, [owner]);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
-  const onRefresh = async () => {
+  async function onRefresh() {
     setRefreshing(true);
-    const result = await postAnalyticsRefresh({ force: true, limit: 50 });
+    const result = await postAnalyticsRefresh({ force: true, limit: 100 });
     setRefreshing(false);
     if (!result.ok) {
       setMessage(result.message);
       return;
     }
-    setMessage(`Refreshed ${result.data.refreshed} posts (${result.data.skipped} skipped, ${result.data.errors} errors)`);
-    load();
-  };
+    setMessage(
+      `Refreshed ${result.data.refreshed} posts (${result.data.skipped} skipped, ${result.data.errors} errors)`,
+    );
+    await load();
+  }
 
-  const underperformers = posts.filter((p) => p.performance_tier === "underperforming");
-  const breakouts = posts.filter((p) => p.performance_tier === "breakout");
+  const byPlatform = (platform: string) =>
+    (board?.accounts ?? []).filter((entry) => entry.account.platform === platform);
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-3">
-        <input
-          value={niche}
-          onChange={(e) => setNiche(e.target.value)}
-          placeholder="Filter niche"
-          className="rounded border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm text-zinc-200"
-        />
-        <select
-          value={platform}
-          onChange={(e) => setPlatform(e.target.value)}
-          className="rounded border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm text-zinc-200"
-        >
-          <option value="">All platforms</option>
-          <option value="youtube">YouTube</option>
-          <option value="tiktok">TikTok</option>
-          <option value="instagram">Instagram</option>
-        </select>
+        <div className="flex rounded-lg border border-zinc-800 p-1">
+          {OWNERS.map((name) => (
+            <button
+              key={name}
+              type="button"
+              onClick={() => setOwner(name)}
+              className={`rounded-md px-3 py-1.5 text-sm capitalize ${
+                owner === name ? "bg-violet-600 text-white" : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
         <button
           type="button"
           disabled={refreshing}
-          onClick={onRefresh}
+          onClick={() => void onRefresh()}
           className="rounded bg-violet-600 px-3 py-1.5 text-sm text-white disabled:opacity-50"
         >
           {refreshing ? "Refreshing…" : "Refresh analytics"}
         </button>
+        {owner !== localOwner ? (
+          <p className="text-xs text-zinc-500">
+            Viewing {owner}&apos;s board — connect accounts on {owner}&apos;s machine for live OAuth.
+          </p>
+        ) : (
+          <p className="text-xs text-zinc-500">
+            This machine: <span className="capitalize text-zinc-300">{localOwner}</span> ·{" "}
+            <Link href="/accounts" className="text-violet-300 underline">
+              Accounts
+            </Link>
+          </p>
+        )}
       </div>
 
       {message ? <p className="text-sm text-amber-300">{message}</p> : null}
       {loading ? <p className="text-sm text-zinc-500">Loading analytics…</p> : null}
 
-      {overview && overview.total_published_posts < 5 ? (
-        <div className="rounded-xl border border-amber-900/40 bg-amber-950/20 px-4 py-3 text-sm text-amber-200">
-          LOW DATA CONFIDENCE — performance profiles and recommendations are advisory until more posts are published.
+      {!loading && board && board.account_count === 0 ? (
+        <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">
+          No accounts for {owner} yet.{" "}
+          <Link href="/accounts" className="text-violet-300 underline">
+            Connect YouTube, TikTok, and Instagram
+          </Link>
+          , then link posts from Videos.
         </div>
       ) : null}
 
-      {overview ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard label="Published posts" value={String(overview.total_published_posts)} />
-          <StatCard label="Total views" value={overview.total_views.toLocaleString()} />
-          <StatCard label="Views (7d)" value={overview.views_last_7_days.toLocaleString()} />
-          <StatCard label="Avg score" value={overview.average_performance_score?.toFixed(1) ?? "—"} />
-          <StatCard label="Views (30d)" value={overview.views_last_30_days.toLocaleString()} />
-          <StatCard label="Breakouts" value={String(overview.breakout_count)} />
-          <StatCard label="Underperformers" value={String(overview.underperforming_count)} />
-          <StatCard label="With metrics" value={String(overview.posts_with_metrics)} />
-        </div>
-      ) : null}
-
-      <section className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
-        <h3 className="text-sm font-semibold text-zinc-200">Top Performing Shorts</h3>
-        {posts.length === 0 ? (
-          <p className="mt-2 text-xs text-zinc-500">No published Shorts with analytics yet.</p>
-        ) : (
-          <div className="mt-3 space-y-3">
-            {posts.slice(0, 10).map((post) => (
-              <article key={post.publishing_job_id} className="flex flex-wrap items-center gap-3 rounded-lg border border-zinc-800/80 p-3">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-zinc-100">{post.title ?? `Job #${post.publishing_job_id}`}</p>
-                  <p className="text-xs text-zinc-500">
-                    {post.platform} · account #{post.account_id}
-                    {post.niche ? ` · ${post.niche}` : ""}
-                  </p>
-                </div>
-                <div className="text-right text-xs text-zinc-400">
-                  <p>{(post.views ?? 0).toLocaleString()} views</p>
-                  <p>score {post.performance_score?.toFixed(1) ?? "—"}</p>
-                  <p>{post.velocity_views_per_day?.toFixed(0) ?? "—"} views/day</p>
-                </div>
-                <TierBadge tier={post.performance_tier} />
-                <Link
-                  href={`/videos?project=${post.production_project_id}`}
-                  className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300"
-                >
-                  Details
-                </Link>
-              </article>
-            ))}
+      {PLATFORMS.map((platform) => {
+        const panels = byPlatform(platform);
+        if (panels.length === 0) return null;
+        return (
+          <div key={platform} className="space-y-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">{platform}</h2>
+            <div className="grid gap-4 lg:grid-cols-2">
+              {panels.map((entry) => (
+                <AccountPanel key={entry.account.id} board={entry} />
+              ))}
+            </div>
           </div>
-        )}
-      </section>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <PatternTable title="Winning Hooks" items={hooks} />
-        <PatternTable title="Winning Topics" items={topics} />
-        <PatternTable title="Winning Formats" items={formats} />
-        <PatternTable title="Winning Visual Styles" items={visuals} />
-      </div>
-
-      {breakouts.length > 0 ? (
-        <section className="rounded-xl border border-emerald-900/40 bg-emerald-950/20 p-4">
-          <h3 className="text-sm font-semibold text-emerald-200">Breakout Shorts</h3>
-          <ul className="mt-2 space-y-1 text-xs text-emerald-100/80">
-            {breakouts.map((p) => (
-              <li key={p.publishing_job_id}>
-                {p.title} — {p.views?.toLocaleString()} views (score {p.performance_score})
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
-      {underperformers.length > 0 ? (
-        <section className="rounded-xl border border-red-900/40 bg-red-950/20 p-4">
-          <h3 className="text-sm font-semibold text-red-200">Recent Underperformers</h3>
-          <ul className="mt-2 space-y-1 text-xs text-red-100/80">
-            {underperformers.slice(0, 5).map((p) => (
-              <li key={p.publishing_job_id}>
-                {p.title} — score {p.performance_score} (review creative ingredients on Videos page)
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-    </div>
-  );
-}
-
-function StatCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
-      <p className="text-xs text-zinc-500">{label}</p>
-      <p className="mt-1 text-xl font-semibold text-zinc-100">{value}</p>
+        );
+      })}
     </div>
   );
 }

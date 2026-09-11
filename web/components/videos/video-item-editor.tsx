@@ -2,7 +2,14 @@
 
 import { useState, type MouseEvent } from "react";
 import { postUpdateVideoLibraryItem } from "@/lib/api";
+import {
+  formatMediaKind,
+  normalizeVideoMediaKind,
+  type VideoMediaKind,
+} from "@/lib/format";
 import type { VideoLibraryItem } from "@/lib/types";
+
+const MEDIA_KIND_OPTIONS: VideoMediaKind[] = ["video", "video_audio", "audio"];
 
 export function VideoItemEditor({
   item,
@@ -20,8 +27,8 @@ export function VideoItemEditor({
   onCancel: () => void;
 }) {
   const [speaker, setSpeaker] = useState(item.speaker || item.title || "");
-  const [mediaKind, setMediaKind] = useState<"audio" | "video">(
-    item.media_kind === "audio" ? "audio" : "video",
+  const [mediaKind, setMediaKind] = useState<VideoMediaKind>(
+    normalizeVideoMediaKind(item.media_kind),
   );
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -72,11 +79,14 @@ export function VideoItemEditor({
         Category
         <select
           value={mediaKind}
-          onChange={(e) => setMediaKind(e.target.value as "audio" | "video")}
+          onChange={(e) => setMediaKind(e.target.value as VideoMediaKind)}
           className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100"
         >
-          <option value="video">Video (visual montage)</option>
-          <option value="audio">Audio (speech clip)</option>
+          {MEDIA_KIND_OPTIONS.map((kind) => (
+            <option key={kind} value={kind}>
+              {formatMediaKind(kind)}
+            </option>
+          ))}
         </select>
       </label>
       {item.source === "library" ? (

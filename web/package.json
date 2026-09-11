@@ -3,8 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "predev": "powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/stop-dashboard.ps1",
-    "dev": "next dev -p 3000",
+    "dev": "powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/start-dev.ps1",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"

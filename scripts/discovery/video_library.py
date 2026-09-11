@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import json
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 from pathlib import Path
 from typing import Any
 
 from discovery.config import project_root
-from discovery.media_paths import display_media_path, file_exists_rel, infer_media_kind
+from discovery.media_paths import (
+    VIDEO_MEDIA_KINDS,
+    display_media_path,
+    file_exists_rel,
+    infer_media_kind,
+    is_playable_media,
+    is_previewable_output,
+)
 
 _SCRIPTS = Path(__file__).resolve().parent.parent
 if str(_SCRIPTS) not in sys.path:
@@ -101,6 +108,7 @@ class VideoLibraryItem:
     rights_confidence: float | None = None
     reuse_confidence: float | None = None
     error_message: str | None = None
+    published_to: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -109,7 +117,7 @@ class VideoLibraryItem:
 def production_to_library_item(project, *, root: Path) -> VideoLibraryItem:
     output_path = project.output_path
     output_paths = [output_path] if output_path else []
-    preview_available = bool(output_path and file_exists(root, output_path))
+    preview_available = bool(output_path and is_previewable_output(root, output_path))
     missing_paths = [] if preview_available else ([output_path] if output_path else [])
     return VideoLibraryItem(
         key=f"production:{project.id}",
@@ -139,7 +147,7 @@ def production_to_library_item(project, *, root: Path) -> VideoLibraryItem:
 
 
 def _resolved_media_kind(*, path: str | None, role: str = "", override: str | None = None) -> str:
-    if override in {"audio", "video", "other"}:
+    if override in VIDEO_MEDIA_KINDS:
         return override
     return infer_media_kind(path, role=role)
 
@@ -147,7 +155,7 @@ def _resolved_media_kind(*, path: str | None, role: str = "", override: str | No
 def production_library_to_item(video: dict[str, Any], *, root: Path) -> VideoLibraryItem:
     output_path = str(video.get("final_output_path") or "") or None
     output_paths = [output_path] if output_path else []
-    preview_available = bool(output_path and file_exists_rel(root, output_path))
+    preview_available = bool(output_path and is_previewable_output(root, output_path))
     missing_paths = [] if preview_available else ([output_path] if output_path else [])
     slug = str(video.get("slug") or f"video-{video.get('id')}")
     meta = video.get("metadata") if isinstance(video.get("metadata"), dict) else {}
@@ -203,12 +211,22 @@ def legacy_to_library_item(
     media_kind = _resolved_media_kind(path=base_path, role=role, override=kind_override)
     if media_kind == "audio":
         preview_path = base_path
-        preview_available = bool(base_path and file_exists(root, base_path))
+        preview_available = bool(
+            base_path and is_playable_media(root, base_path, role=role)
+        )
     else:
-        playable = [path for path in existing if infer_media_kind(path) == "video"]
+        playable = [
+            path
+            for path in existing
+            if infer_media_kind(path) == "video" and is_previewable_output(root, path, role=role)
+        ]
         preview_path = playable[0] if playable else base_path
         preview_available = bool(
-            playable or (preview_path and file_exists(root, preview_path))
+            playable
+            or (
+                preview_path
+                and is_previewable_output(root, preview_path, role=role)
+            )
         )
     return VideoLibraryItem(
         key=str(entry.get("id") or f"legacy:{slug}"),
@@ -237,7 +255,7 @@ def build_video_library(
     store,
     *,
     root: Path | None = None,
-    include_missing_legacy: bool = True,
+    include_missing_legacy: bool = False,
     limit: int = 200,
 ) -> list[VideoLibraryItem]:
     root = root or project_root()
@@ -245,12 +263,22 @@ def build_video_library(
     projects = store.list_production_projects(limit=limit)
     production_slugs = {project.slug for project in projects}
 
-    items = [production_to_library_item(project, root=root) for project in projects]
+    items: list[VideoLibraryItem] = []
+    for project in projects:
+        item = production_to_library_item(project, root=root)
+        if not include_missing_legacy and not item.preview_available:
+            continue
+        items.append(item)
     seen_slugs = set(production_slugs)
 
     from discovery.production_library import list_videos
 
-    for video in list_videos(store, limit=limit, heal=False, playable_only=False):
+    for video in list_videos(
+        store,
+        limit=limit,
+        heal=False,
+        playable_only=not include_missing_legacy,
+    ):
         slug = str(video.get("slug") or "")
         if slug and slug in seen_slugs:
             continue
@@ -272,6 +300,15 @@ def build_video_library(
             continue
         items.append(legacy_item)
 
+    from discovery.publishing.links import publishing_links_for_video
+
+    for item in items:
+        item.published_to = publishing_links_for_video(
+            store,
+            project_id=item.project_id,
+            slug=item.slug,
+        )
+
     items.sort(
         key=lambda item: (
             0 if item.preview_available else 1,
@@ -284,10 +321,10 @@ def build_video_library(
 
 
 def prune_missing_legacy_catalog(root: Path | None = None) -> dict[str, Any]:
-    """Remove legacy used.json video rows with no files on disk."""
+    """Remove legacy used.json rows with missing or invalid (stub/incomplete) media."""
     root = root or project_root()
     catalog = content_reuse.load_persisted(root)
-    pruned, removed = content_reuse.prune_missing_videos(catalog, root)
+    pruned, removed = content_reuse.prune_unplayable_videos(catalog, root)
     if removed:
         content_reuse.save_catalog(pruned, root)
     return {"removed": removed, "remaining": len(pruned.videos)}
@@ -310,8 +347,8 @@ def update_video_library_item(
     speaker = speaker.strip() if speaker else None
     if media_kind is not None:
         kind = media_kind.strip().lower()
-        if kind not in {"audio", "video"}:
-            raise ValueError("media_kind must be audio or video")
+        if kind not in {"audio", "video", "video_audio"}:
+            raise ValueError("media_kind must be audio, video, or video_audio")
         media_kind = kind
 
     if source == "library":
@@ -415,6 +452,59 @@ def update_video_library_item(
     raise ValueError("Updated item not found in library")
 
 
+def delete_video_library_item(
+    store,
+    *,
+    root: Path | None = None,
+    source: str,
+    library_id: int | None = None,
+    project_id: int | None = None,
+    legacy_id: str | None = None,
+    slug: str | None = None,
+) -> dict[str, Any]:
+    """Remove one Videos tab entry. Does not delete files on disk."""
+    root = root or project_root()
+    deleted: dict[str, Any] = {"source": source}
+
+    if source == "legacy":
+        if not legacy_id and not slug:
+            raise ValueError("legacy_id or slug is required for legacy source")
+        removed = content_reuse.delete_catalog_video_entry(
+            str(legacy_id or ""),
+            root=root,
+            slug=slug,
+        )
+        if not removed:
+            raise ValueError("Legacy catalog entry not found")
+        deleted["legacy_id"] = removed.get("id") or legacy_id
+        deleted["slug"] = removed.get("slug") or slug
+
+    elif source == "library":
+        if not library_id:
+            raise ValueError("library_id is required for library source")
+        from discovery.production_library import delete_video
+
+        if not delete_video(store, int(library_id)):
+            raise ValueError(f"Video {library_id} not found")
+        deleted["library_id"] = int(library_id)
+
+    elif source == "production":
+        if not project_id:
+            raise ValueError("project_id is required for production source")
+        project = store.get_production_project(int(project_id))
+        if not project:
+            raise ValueError(f"Project {project_id} not found")
+        if not store.delete_production_project(int(project_id)):
+            raise ValueError(f"Project {project_id} not found")
+        deleted["project_id"] = int(project_id)
+        deleted["slug"] = project.slug
+        content_reuse.delete_catalog_video_entry("", root=root, slug=project.slug)
+    else:
+        raise ValueError(f"Unsupported source: {source}")
+
+    return deleted
+
+
 def library_summary(items: list[VideoLibraryItem]) -> dict[str, int]:
     return {
         "total": len(items),
@@ -423,6 +513,7 @@ def library_summary(items: list[VideoLibraryItem]) -> dict[str, int]:
         "legacy": sum(1 for item in items if item.source == "legacy"),
         "audio": sum(1 for item in items if item.media_kind == "audio"),
         "video": sum(1 for item in items if item.media_kind == "video"),
+        "video_audio": sum(1 for item in items if item.media_kind == "video_audio"),
         "preview_ready": sum(1 for item in items if item.preview_available),
         "missing_files": sum(1 for item in items if not item.preview_available),
     }

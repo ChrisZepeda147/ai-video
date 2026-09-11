@@ -2,41 +2,29 @@
 $Root = Split-Path -Parent $PSScriptRoot
 $Scripts = $PSScriptRoot
 
-function Test-ApiHealthy {
-    try {
-        $health = Invoke-RestMethod -Uri "http://127.0.0.1:8000/health" -TimeoutSec 2
-        return $health.status -eq "ok"
-    } catch {
-        return $false
-    }
-}
-
-function Wait-ApiHealthy {
-    param([int]$Seconds = 45)
-    for ($i = 0; $i -lt $Seconds; $i++) {
-        if (Test-ApiHealthy) { return $true }
-        Start-Sleep -Seconds 1
-    }
-    return $false
-}
+. (Join-Path $Scripts "dev-common.ps1")
 
 Set-Location $Root
+
+$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+$machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+if ($userPath -or $machinePath) {
+    $env:Path = @($userPath, $machinePath, $env:Path) -join ';'
+}
 
 if (Test-ApiHealthy) {
     Write-Host "Discovery API already running on http://127.0.0.1:8000"
 } else {
-    Write-Host "Starting Discovery API in a background terminal..."
-    Start-Process powershell -ArgumentList @(
-        "-NoExit", "-ExecutionPolicy", "Bypass",
-        "-File", (Join-Path $Scripts "start-api.ps1")
-    ) -WorkingDirectory $Root
-
-    Write-Host "Waiting for API health..."
-    if (-not (Wait-ApiHealthy)) {
-        Write-Error "API did not become ready on port 8000. Check the API terminal for errors."
+    & (Join-Path $Scripts "stop-api.ps1") -Port 8000 | Out-Null
+    $Python = Resolve-PythonExe
+    if (-not $Python) {
+        Write-Error "Python not found. Install Python 3.11+ or set AI_VIDEO_PYTHON in scripts/.env"
         exit 1
     }
-    Write-Host "Discovery API is ready."
+    Write-Host "Using Python: $Python"
+    Write-Host "Starting Discovery API in background on http://127.0.0.1:8000 ..."
+    Start-ApiServer -Root $Root -Python $Python -Background
+    Wait-ApiHealthySoft -Seconds 12 | Out-Null
 }
 
 & (Join-Path $Scripts "start-dashboard.ps1")

@@ -14,7 +14,12 @@ if (-not (Test-Path $EnvFile) -and (Test-Path $Example)) {
     Write-Host "Created web/.env.local from .env.example"
 }
 
-npm install
+if (-not (Test-Path "node_modules") -or $env:AI_VIDEO_FORCE_NPM_INSTALL -eq "1") {
+    Write-Host "Installing dashboard npm deps..."
+    npm install
+} else {
+    Write-Host "Dashboard npm deps OK (skipping npm install)."
+}
 
 Write-Host "Starting dashboard at http://localhost:$Port"
 npx next dev -p $Port

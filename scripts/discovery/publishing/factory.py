@@ -6,6 +6,7 @@ import os
 
 from discovery.config import publish_dry_run
 from discovery.publishing.base import PublishingProvider
+from discovery.publishing.facebook import FacebookPublishingProvider
 from discovery.publishing.instagram import InstagramPublishingProvider
 from discovery.publishing.mock import MockPublishingProvider
 from discovery.publishing.tiktok import TikTokPublishingProvider
@@ -21,4 +22,6 @@ def build_publishing_provider(platform: str) -> PublishingProvider:
         return TikTokPublishingProvider()
     if platform == "instagram":
         return InstagramPublishingProvider()
+    if platform == "facebook":
+        return FacebookPublishingProvider()
     raise ValueError(f"Unsupported publishing platform: {platform}")

@@ -4,10 +4,13 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RiskBadge, riskLevel } from "@/components/shared/risk-badge";
 import { VideoItemEditor } from "@/components/videos/video-item-editor";
+import { VideoLinkDialog } from "@/components/videos/video-link-dialog";
 import {
   fetchLibrarySpeakers,
   fetchProjectAnalytics,
+  fetchPublishingOwner,
   fetchVideoLibrary,
+  postDeleteVideoLibraryItem,
   postImportVideos,
   postPruneVideoCatalog,
   postRejectProject,
@@ -15,11 +18,11 @@ import {
   postSendProjectToReview,
   productionMediaUrl,
 } from "@/lib/api";
-import { displayMediaPath, formatDuration } from "@/lib/format";
+import { displayMediaPath, formatDuration, formatMediaKind } from "@/lib/format";
 import type { ProjectAnalyticsResponse, VideoLibraryItem, VideoLibraryResponse } from "@/lib/types";
 
 type SourceFilter = "all" | "site" | "library" | "legacy";
-type MediaFilter = "all" | "video" | "audio";
+type MediaFilter = "all" | "video" | "video_audio" | "audio";
 
 function formatProfileLabel(profile: string): string {
   const labels: Record<string, string> = {
@@ -58,6 +61,9 @@ export function VideosWorkspace() {
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("video");
   const [showMissing, setShowMissing] = useState(false);
   const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
+  const [linkKey, setLinkKey] = useState<string | null>(null);
+  const [localOwner, setLocalOwner] = useState<string>("chris");
   const [speakerOptions, setSpeakerOptions] = useState<string[]>([]);
 
   const readyToAdd = useMemo(() => items.filter(canAddToSite), [items]);
@@ -68,7 +74,8 @@ export function VideosWorkspace() {
       if (sourceFilter === "site" && item.source !== "production") return false;
       if (sourceFilter === "library" && item.source !== "library") return false;
       if (sourceFilter === "legacy" && item.source !== "legacy") return false;
-      if (mediaFilter === "video" && item.media_kind === "audio") return false;
+      if (mediaFilter === "video" && item.media_kind !== "video") return false;
+      if (mediaFilter === "video_audio" && item.media_kind !== "video_audio") return false;
       if (mediaFilter === "audio" && item.media_kind !== "audio") return false;
       return true;
     });
@@ -77,7 +84,7 @@ export function VideosWorkspace() {
   const load = useCallback(async () => {
     setLoading(true);
     const [result, speakersResult] = await Promise.all([
-      fetchVideoLibrary({ include_missing: true, limit: 200 }),
+      fetchVideoLibrary({ include_missing: showMissing, limit: 200 }),
       fetchLibrarySpeakers(),
     ]);
     setLoading(false);
@@ -102,11 +109,17 @@ export function VideosWorkspace() {
       if (entry) map[entry[0]] = entry[1];
     }
     setAnalyticsByProject(map);
-  }, []);
+  }, [showMissing]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    fetchPublishingOwner().then((result) => {
+      if (result.ok && result.data.owner) setLocalOwner(result.data.owner);
+    });
+  }, []);
 
   async function importVideos(options?: { slug?: string; rebuild_catalog?: boolean }) {
     setBusy(true);
@@ -131,6 +144,27 @@ export function VideosWorkspace() {
     await load();
   }
 
+  async function handleDeleteItem(item: VideoLibraryItem) {
+    setBusy(true);
+    setMessage(null);
+    const result = await postDeleteVideoLibraryItem({
+      source: item.source,
+      library_id: item.library_id ?? undefined,
+      project_id: item.project_id ?? undefined,
+      legacy_id: item.legacy_id ?? undefined,
+      slug: item.slug,
+    });
+    setBusy(false);
+    if (!result.ok) {
+      setMessage(result.message);
+      return;
+    }
+    setConfirmDeleteKey(null);
+    setEditingKey(null);
+    setMessage(`Removed ${item.speaker || item.title} from Videos.`);
+    await load();
+  }
+
   async function handlePruneMissing() {
     setBusy(true);
     setMessage(null);
@@ -141,7 +175,11 @@ export function VideosWorkspace() {
       return;
     }
     const removed = result.data.legacy_catalog.removed;
-    setMessage(removed > 0 ? `Removed ${removed} missing legacy catalog row(s).` : "No missing legacy rows to remove.");
+    setMessage(
+      removed > 0
+        ? `Removed ${removed} invalid legacy catalog row(s).`
+        : "No invalid legacy rows to remove.",
+    );
     await load();
   }
 
@@ -169,7 +207,7 @@ export function VideosWorkspace() {
           onClick={() => void handlePruneMissing()}
           className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
         >
-          Remove missing legacy
+          Remove invalid legacy
         </button>
       </div>
 
@@ -195,13 +233,14 @@ export function VideosWorkspace() {
             className="ml-2 rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-1 text-sm text-zinc-200"
           >
             <option value="all">All</option>
-            <option value="video">Video only</option>
-            <option value="audio">Audio only</option>
+            <option value="video">Video</option>
+            <option value="video_audio">Video / Audio</option>
+            <option value="audio">Audio</option>
           </select>
         </label>
         <label className="flex items-center gap-2 text-xs text-zinc-400">
           <input type="checkbox" checked={showMissing} onChange={(e) => setShowMissing(e.target.checked)} />
-          Show missing files
+          Show invalid / missing files
         </label>
       </div>
 
@@ -236,6 +275,7 @@ export function VideosWorkspace() {
             const addable = canAddToSite(item);
             const href = itemHref(item);
             const isEditing = editingKey === item.key;
+            const isLinking = linkKey === item.key;
             const displayTitle = item.speaker || item.title;
 
             const cardInner = (
@@ -268,7 +308,7 @@ export function VideosWorkspace() {
                       </span>
                       {item.media_kind ? (
                         <span className="rounded-full border border-zinc-800 px-2 py-0.5 text-[10px] uppercase text-zinc-500">
-                          {item.media_kind}
+                          {formatMediaKind(item.media_kind)}
                         </span>
                       ) : null}
                     </div>
@@ -297,6 +337,22 @@ export function VideosWorkspace() {
                       <p className="mt-2 text-xs text-amber-300/90">
                         Missing: {item.missing_paths.map((p) => displayMediaPath(p) || p).join(", ")}
                       </p>
+                    ) : null}
+                    {item.published_to && item.published_to.length > 0 ? (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {item.published_to.map((link) => (
+                          <a
+                            key={`${link.job_id}-${link.account_id}`}
+                            href={link.platform_url || "#"}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="rounded border border-sky-800/60 bg-sky-950/30 px-2 py-0.5 text-[11px] text-sky-300"
+                          >
+                            {link.account_display_name || link.platform} · {link.platform}
+                          </a>
+                        ))}
+                      </div>
                     ) : null}
                     {projectId && analyticsByProject[projectId]?.latest_metrics ? (
                       <p className="mt-2 text-xs text-zinc-400">
@@ -332,6 +388,17 @@ export function VideosWorkspace() {
                         })}
                       </div>
                     ) : null}
+                    {isLinking ? (
+                      <VideoLinkDialog
+                        item={item}
+                        localOwner={localOwner}
+                        onClose={() => setLinkKey(null)}
+                        onLinked={(msg) => {
+                          setMessage(msg);
+                          void load();
+                        }}
+                      />
+                    ) : null}
                     {isEditing ? (
                       <VideoItemEditor
                         item={item}
@@ -352,10 +419,23 @@ export function VideosWorkspace() {
                         onClick={(e) => {
                           e.stopPropagation();
                           setEditingKey(isEditing ? null : item.key);
+                          setLinkKey(null);
                         }}
                         className="rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
                       >
                         Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setLinkKey(isLinking ? null : item.key);
+                          setEditingKey(null);
+                          setConfirmDeleteKey(null);
+                        }}
+                        className="rounded border border-sky-700/60 px-3 py-1 text-xs text-sky-300 hover:bg-sky-950/40"
+                      >
+                        Link post
                       </button>
                       {previewUrl || audioUrl ? (
                         <a
@@ -390,6 +470,46 @@ export function VideosWorkspace() {
                           Add to site
                         </button>
                       ) : null}
+                      {confirmDeleteKey === item.key ? (
+                        <div className="flex flex-wrap items-center gap-2 rounded border border-red-900/60 bg-red-950/30 px-2 py-1">
+                          <span className="text-xs text-red-200">Are you sure?</span>
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void handleDeleteItem(item);
+                            }}
+                            className="rounded bg-red-600 px-2 py-0.5 text-xs font-medium text-white disabled:opacity-50"
+                          >
+                            Yes, remove
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setConfirmDeleteKey(null);
+                            }}
+                            className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setConfirmDeleteKey(item.key);
+                            setEditingKey(null);
+                          }}
+                          className="rounded border border-red-900/50 px-3 py-1 text-xs text-red-300 hover:bg-red-950/40 disabled:opacity-50"
+                        >
+                          Delete
+                        </button>
+                      )}
                       {projectId ? (
                         <>
                           {["ready", "review", "rendered", "failed", "rejected"].includes(item.status) ? (
@@ -466,7 +586,7 @@ export function VideosWorkspace() {
                   href && item.preview_available ? "cursor-pointer hover:border-zinc-700" : ""
                 }`}
                 onClick={() => {
-                  if (isEditing) return;
+                  if (isEditing || isLinking) return;
                   if (href && item.preview_available) window.location.href = href;
                 }}
                 onKeyDown={(e) => {

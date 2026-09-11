@@ -137,6 +137,13 @@ class DiscoveryStore:
             if not self._column_exists(table, column):
                 self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
 
+        publishing_migrations = [
+            ("publishing_accounts", "owner", "TEXT NOT NULL DEFAULT 'chris'"),
+        ]
+        for table, column, col_type in publishing_migrations:
+            if not self._column_exists(table, column):
+                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+
         self._migrate_visual_assets_nullable()
 
     def _migrate_visual_assets_nullable(self) -> None:
@@ -2253,6 +2260,21 @@ class DiscoveryStore:
         )
         self._conn.commit()
 
+    def delete_production_project(self, project_id: int) -> bool:
+        project = self.get_production_project(project_id)
+        if not project:
+            return False
+        self._conn.execute(
+            "DELETE FROM production_project_visuals WHERE project_id = ?",
+            (project_id,),
+        )
+        self._conn.execute(
+            "DELETE FROM production_projects WHERE id = ?",
+            (project_id,),
+        )
+        self._conn.commit()
+        return True
+
     def set_project_visuals(self, project_id: int, visual_asset_ids: list[int]) -> None:
         self._conn.execute(
             "DELETE FROM production_project_visuals WHERE project_id = ?",
@@ -2328,6 +2350,7 @@ class DiscoveryStore:
         niche: str | None,
         auth_status: str,
         posting_available: bool,
+        owner: str = "chris",
         capabilities_json: str | None = None,
         audit_note: str | None = None,
         token_expires_at: str | None = None,
@@ -2335,14 +2358,15 @@ class DiscoveryStore:
         cursor = self._conn.execute(
             """
             INSERT INTO publishing_accounts (
-                platform, display_name, platform_account_id, username, niche,
+                platform, display_name, owner, platform_account_id, username, niche,
                 enabled, auth_status, token_expires_at, capabilities_json,
                 posting_available, audit_note, created_at
-            ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
             """,
             (
                 platform,
                 display_name,
+                owner,
                 platform_account_id,
                 username,
                 niche,
@@ -2419,6 +2443,7 @@ class DiscoveryStore:
         self,
         *,
         platform: str | None = None,
+        owner: str | None = None,
         enabled_only: bool = False,
     ) -> list[PublishingAccount]:
         clauses = []
@@ -2426,11 +2451,14 @@ class DiscoveryStore:
         if platform:
             clauses.append("platform = ?")
             params.append(platform)
+        if owner:
+            clauses.append("owner = ?")
+            params.append(owner)
         if enabled_only:
             clauses.append("enabled = 1")
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = self._conn.execute(
-            f"SELECT * FROM publishing_accounts {where} ORDER BY platform, display_name",
+            f"SELECT * FROM publishing_accounts {where} ORDER BY owner, platform, display_name",
             params,
         ).fetchall()
         return [row_to_publishing_account(row) for row in rows]
@@ -2819,10 +2847,12 @@ class DiscoveryStore:
         niche: str | None = None,
         account_id: int | None = None,
         platform: str | None = None,
+        owner: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        rows = self.list_latest_post_snapshots(limit=limit * 2)
+        rows = self.list_latest_post_snapshots(limit=limit * 3)
         filtered: list[dict[str, Any]] = []
+        account_owner_cache: dict[int, str | None] = {}
         for row in rows:
             if niche and (row.get("niche") or "").lower() != niche.lower():
                 continue
@@ -2830,6 +2860,13 @@ class DiscoveryStore:
                 continue
             if platform and row.get("platform") != platform:
                 continue
+            if owner:
+                aid = int(row["account_id"])
+                if aid not in account_owner_cache:
+                    account = self.get_publishing_account(aid)
+                    account_owner_cache[aid] = account.owner if account else None
+                if account_owner_cache.get(aid) != owner:
+                    continue
             filtered.append(row)
             if len(filtered) >= limit:
                 break
@@ -2924,6 +2961,7 @@ class DiscoveryStore:
         *,
         platform: str | None = None,
         account_id: int | None = None,
+        owner: str | None = None,
         niche: str | None = None,
         days: int = 30,
     ) -> dict[str, Any]:
@@ -2931,6 +2969,7 @@ class DiscoveryStore:
             niche=niche,
             account_id=account_id,
             platform=platform,
+            owner=owner,
             limit=500,
         )
         total_views = sum(int(r.get("views") or 0) for r in rows)

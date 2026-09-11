@@ -156,69 +156,95 @@ def run_preflight(store: DiscoveryStore | None = None) -> dict[str, Any]:
         )
     )
 
-    # Publishing
-    yt_id = os.environ.get("YOUTUBE_CLIENT_ID", "").strip()
-    yt_secret = os.environ.get("YOUTUBE_CLIENT_SECRET", "").strip()
-    yt_oauth = "ready" if yt_id and yt_secret else "not_configured"
+    from discovery.config import publishing_oauth_redirect_uri, publishing_owner
+    from discovery.publishing.setup import publishing_env_status, publishing_account_matrix, TARGET_ACCOUNTS_PER_OWNER
+
+    env_status = publishing_env_status()
+    redirect = env_status["oauth_redirect_uri"]
     checks["publishing"].append(
         _check(
-            "YouTube OAuth",
-            yt_oauth,
-            "Client ID + secret configured" if yt_oauth == "ready" else "Missing YOUTUBE_CLIENT_ID/SECRET",
-            fix_hint="Create Google Cloud OAuth app with YouTube upload scope",
+            "OAuth redirect URI",
+            "ready",
+            redirect,
+            fix_hint="Register this exact URL in Google, TikTok, and Meta developer consoles",
         )
     )
-
-    accounts: list[Any] = []
-    if store:
-        accounts = store.list_publishing_accounts()
-    yt_accounts = [a for a in accounts if a.platform == "youtube"]
-    if yt_accounts:
-        connected = [a for a in yt_accounts if a.auth_status == "connected"]
+    if env_status["mock_provider"]:
         checks["publishing"].append(
             _check(
-                "YouTube accounts",
-                "ready" if connected else "warning",
-                f"{len(connected)} connected / {len(yt_accounts)} total",
-                fix_hint="Connect via /accounts and complete OAuth",
+                "Live OAuth providers",
+                "not_configured",
+                "DISCOVERY_PUBLISH_PROVIDER=mock",
+                fix_hint="Remove or unset DISCOVERY_PUBLISH_PROVIDER for real account connect",
             )
         )
     else:
         checks["publishing"].append(
             _check(
-                "YouTube accounts",
-                "not_configured",
-                "No YouTube accounts connected",
-                fix_hint="Connect your first account on /accounts",
+                "Live OAuth providers",
+                "ready",
+                "Real platform APIs enabled",
+            )
+        )
+    checks["publishing"].append(
+        _check(
+            "Machine owner",
+            "ready",
+            publishing_owner(),
+            fix_hint="Set PUBLISHING_OWNER=stephen or chris in scripts/.env on each PC",
+        )
+    )
+    internal_key = env_status["internal_key_configured"]
+    checks["publishing"].append(
+        _check(
+            "Videos Link post key",
+            "ready" if internal_key else "warning",
+            "AI_VIDEO_INTERNAL_KEY set" if internal_key else "Missing — Link post on Videos will fail",
+            fix_hint="Set AI_VIDEO_INTERNAL_KEY in scripts/.env and NEXT_PUBLIC_AI_VIDEO_INTERNAL_KEY in web/.env.local",
+        )
+    )
+
+    for platform, info in env_status["platforms"].items():
+        status: CheckStatus = "ready" if info["env_ready"] else "not_configured"
+        checks["publishing"].append(
+            _check(
+                f"{info['label']} app credentials",
+                status,
+                "Configured in scripts/.env" if info["env_ready"] else f"Missing {', '.join(info['env_keys'])}",
+                fix_hint=f"Create developer app — {info['portal_url']}",
             )
         )
 
-    tt_key = os.environ.get("TIKTOK_CLIENT_KEY", "").strip()
-    checks["publishing"].append(
-        _check(
-            "TikTok",
-            "ready" if tt_key else "warning",
-            "Developer app configured" if tt_key else "Not configured — optional for first pilot",
+    matrix = publishing_account_matrix(store) if store else {}
+    for owner in ("stephen", "chris"):
+        owner_connected = 0
+        owner_target = 0
+        for platform in ("youtube", "tiktok", "instagram", "facebook"):
+            counts = matrix.get(owner, {}).get(platform, {})
+            owner_connected += int(counts.get("connected") or 0)
+            owner_target += int(counts.get("target") or TARGET_ACCOUNTS_PER_OWNER)
+        ratio_status: CheckStatus = (
+            "ready" if owner_connected >= owner_target else "warning" if owner_connected else "not_configured"
         )
-    )
-
-    meta_id = os.environ.get("META_APP_ID", "").strip()
-    checks["publishing"].append(
-        _check(
-            "Instagram / Meta",
-            "ready" if meta_id else "warning",
-            "Meta app configured" if meta_id else "Not configured — optional for first pilot",
+        checks["publishing"].append(
+            _check(
+                f"{owner.title()} connected accounts",
+                ratio_status,
+                f"{owner_connected}/{owner_target} ({TARGET_ACCOUNTS_PER_OWNER} per platform)",
+                fix_hint=f"/accounts → {owner} tab → connect each channel twice where needed",
+            )
         )
-    )
 
     # Analytics
-    dry = os.environ.get("DISCOVERY_PUBLISH_DRY_RUN", "").strip().lower() in {"1", "true", "yes"}
+    dry = env_status["dry_run"]
     checks["analytics"].append(
         _check(
             "Analytics providers",
-            "warning" if dry else "ready",
-            "Mock/dry-run mode" if dry else "Live provider mode",
-            fix_hint="Unset DISCOVERY_PUBLISH_DRY_RUN for real analytics after publish",
+            "warning" if dry or env_status["mock_provider"] else "ready",
+            "Mock/dry-run mode"
+            if dry or env_status["mock_provider"]
+            else "Live provider mode",
+            fix_hint="Unset DISCOVERY_PUBLISH_PROVIDER and DISCOVERY_PUBLISH_DRY_RUN for real analytics",
         )
     )
 
