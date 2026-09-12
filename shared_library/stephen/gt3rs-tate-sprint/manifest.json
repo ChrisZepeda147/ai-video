@@ -1,0 +1,43 @@
+{
+  "manifest_version": 1,
+  "manifest_id": "stephen:gt3rs-tate-sprint:ada50f62b83eec5a",
+  "owner": "stephen",
+  "slug": "gt3rs-tate-sprint",
+  "title": "GET ANGRY, GET DISCIPLINED, GET RICH \u2014 OR STAY BROKE | Andrew Tate Motivation",
+  "speaker": "Andrew Tate",
+  "source_url": "https://www.youtube.com/watch?v=E6CkSdE6Y5E",
+  "source_external_id": "E6CkSdE6Y5E",
+  "source_start_sec": 474.32,
+  "source_end_sec": null,
+  "transcript": "the second things aren't that bad, they're back to playing video games. So, you're only uncomfortable 2 days a week. For 5 days a week you're fine being a [\u00a0__\u00a0] loser and that's why you're still a loser. I When I When When I had no money, James, I couldn't sleep. I couldn't sleep a single night. I couldn't sleep. Where's my money? People have Lamborghinis. I ain't got one. I can't I couldn't tolerate the pain in my mind.",
+  "transcript_hash": "af31daf52cc2bc483aca61888bf11c209bc1f743edaeefdf12ad54cba1808b30",
+  "duration_sec": 20.0,
+  "topic": null,
+  "visual_style": "Porsche 911 GT3 RS cinematic 4k",
+  "visual_category": "Luxury",
+  "broll_ids": [
+    "E7pCceDrKmg",
+    "_BXXy86HmFI",
+    "9j3mEUh7QV4",
+    "pe1MfYs4HVw"
+  ],
+  "parent_manifest_id": null,
+  "version": 1,
+  "version_label": null,
+  "change_summary": null,
+  "paths": {
+    "final": "final.mp4",
+    "audio": "audio/speech.mp3",
+    "caption": "captions/subs.en.json3",
+    "transcript": "transcript.txt"
+  },
+  "hashes": {
+    "final": "ada50f62b83eec5ae50f1912ad9a6757a2fa02e7b8460288c5e4625ec0358012",
+    "audio": "942ecd0cf6a5f8f2bf5099b31a2204a45724f513143f3a3de1fedeb76b2e87ad",
+    "caption": "5d2eb766074ca940590aa45b18f38ee05669673ebe0d63e0fdc2aa431349b3e1"
+  },
+  "pipeline": "build_motivation_job",
+  "created_at": "2026-09-12T16:34:29+00:00",
+  "updated_at": "2026-09-12T16:34:29+00:00",
+  "exported_at": "2026-09-12T16:34:29+00:00"
+}

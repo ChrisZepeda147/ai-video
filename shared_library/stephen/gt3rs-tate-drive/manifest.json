@@ -1,0 +1,44 @@
+{
+  "manifest_version": 1,
+  "manifest_id": "stephen:gt3rs-tate-drive:08c2ee255bc1355c",
+  "owner": "stephen",
+  "slug": "gt3rs-tate-drive",
+  "title": "GET ANGRY, GET DISCIPLINED, GET RICH \u2014 OR STAY BROKE | Andrew Tate Motivation",
+  "speaker": "Andrew Tate",
+  "source_url": "https://www.youtube.com/watch?v=E6CkSdE6Y5E",
+  "source_external_id": "E6CkSdE6Y5E",
+  "source_start_sec": 45.2,
+  "source_end_sec": null,
+  "transcript": "You have dulled your sword, so you HAVE NOTHING TO THREATEN the demons with cuz you're too busy sitting around in therapy like a little girl. When anxiety turns up, you cower before it with your little weak dulled sword. I pull my blade and say, \"You now work for me.\"",
+  "transcript_hash": "72fc5978dbdc95d1361f687f89132ea8b6e011cc750e92c9f02ac8eb7f0a24bc",
+  "duration_sec": 16.98,
+  "topic": null,
+  "visual_style": "Porsche 911 GT3 RS cinematic 4k",
+  "visual_category": "Luxury",
+  "broll_ids": [
+    "2RS07NJ6boQ",
+    "j1pBfCmmrCo",
+    "U5aSeE5PakE",
+    "Ta_CMBtrZeI",
+    "1iaHhC1ji7g"
+  ],
+  "parent_manifest_id": null,
+  "version": 1,
+  "version_label": null,
+  "change_summary": null,
+  "paths": {
+    "final": "final.mp4",
+    "audio": "audio/speech.mp3",
+    "caption": "captions/subs.en.json3",
+    "transcript": "transcript.txt"
+  },
+  "hashes": {
+    "final": "08c2ee255bc1355c83d7dd84b25ca57ea8fe20bbb598d6778c7d2e9765c30fb9",
+    "audio": "068476547a1a553cdbe08db83e9710afbf9faf4bf3411b8bd9e9e041801cb3fa",
+    "caption": "c48fcd0593ba0a6a30dc157136f37ec88f17c77e3e35e6db11215d1bcdd9a18e"
+  },
+  "pipeline": "build_motivation_job",
+  "created_at": "2026-09-12T16:34:29+00:00",
+  "updated_at": "2026-09-12T16:34:29+00:00",
+  "exported_at": "2026-09-12T16:34:29+00:00"
+}

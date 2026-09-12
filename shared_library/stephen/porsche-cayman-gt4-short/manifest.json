@@ -1,0 +1,62 @@
+{
+  "manifest_version": 1,
+  "manifest_id": "stephen:porsche-cayman-gt4-short:1d9d61d020046b2e",
+  "owner": "stephen",
+  "slug": "porsche-cayman-gt4-short",
+  "title": "GET ANGRY, GET DISCIPLINED, GET RICH \u2014 OR STAY BROKE | Andrew Tate Motivation",
+  "speaker": "Andrew Tate",
+  "source_url": "https://www.youtube.com/watch?v=E6CkSdE6Y5E",
+  "source_external_id": "E6CkSdE6Y5E",
+  "source_start_sec": null,
+  "source_end_sec": null,
+  "transcript": "lay in bed, \"Wah, wah, I can't sleep.\" like a [\u00a0__\u00a0] baby. The second I couldn't sleep, I was up, training, working, reading the Romanian law, learning a new language, finding Aikido, the European Court of Human Rights, endless Aikido, new legal teams, new money, new ways to combat their narratives, fighting the BBC, preparing for interviews, ENDLESS SETS,",
+  "transcript_hash": "f18282cfe24b59deda9ade9c8212e6c60e21fdb4a3cd7f28cd92331eaadf461c",
+  "duration_sec": 22.0,
+  "topic": null,
+  "visual_style": "Porsche Cayman GT4 cinematic driving 4k",
+  "visual_category": "Luxury",
+  "broll_ids": [
+    "-Pkj1qIcK2Y",
+    "B4VOThlleaw",
+    "c5LeLdbK_-A",
+    "da5x-__kvGY",
+    "_XqUpE06pyc",
+    "XKRaJl2Vyfc",
+    "8FpXGOd_8u4"
+  ],
+  "parent_manifest_id": null,
+  "version": 1,
+  "version_label": null,
+  "change_summary": null,
+  "paths": {
+    "final": "final.mp4",
+    "audio": "audio/speech.mp3",
+    "caption": "captions/subs.en.json3",
+    "visuals": [
+      "visuals/-Pkj1qIcK2Y_part03.mp4",
+      "visuals/8FpXGOd_8u4_part01.mp4",
+      "visuals/_XqUpE06pyc_part03.mp4",
+      "visuals/B4VOThlleaw_part02.mp4",
+      "visuals/c5LeLdbK_-A_part02.mp4",
+      "visuals/da5x-__kvGY_part01.mp4",
+      "visuals/XKRaJl2Vyfc_part02.mp4"
+    ],
+    "transcript": "transcript.txt"
+  },
+  "hashes": {
+    "final": "1d9d61d020046b2e145233dc1d2404b4317e59d0a996dea50ee89d180fe38b9d",
+    "audio": "4f26f7061f6f466cd15309c24c1bd5a773daddbb7a05134cb0ea95ebdfb7aa38",
+    "caption": "8a4a7340bfea98fc327c6ee42c91cfc637f434532d515c2ba475ec9162468b1a",
+    "visuals/-Pkj1qIcK2Y_part03.mp4": "fb832217b5b53dfeb24099faa77a7e1814b1f8a7a5c2ebb85fd8c153d25852fa",
+    "visuals/8FpXGOd_8u4_part01.mp4": "956c76a99266e0f666d60383b43d4a3a59744459430b00f90dc570ff1ed6f5cf",
+    "visuals/_XqUpE06pyc_part03.mp4": "602118dffc6d825d7ad56240432157ee11de20876ba7b55fd4e69eafbe12839d",
+    "visuals/B4VOThlleaw_part02.mp4": "185ea6aa9aefa09096ce3e8e6fea5c0b3b9908a979723374d764e7ba5c0ade10",
+    "visuals/c5LeLdbK_-A_part02.mp4": "621b135a9cbedf23a1225c89eeb1a37dcb4d04aec3ff10bd1ec340be3b30e045",
+    "visuals/da5x-__kvGY_part01.mp4": "61984e9f7e42ee4a8555192bc9829fcf36da7f889eab200138c2fd726bb82d69",
+    "visuals/XKRaJl2Vyfc_part02.mp4": "818ff36a7e2b42104c20e0b18574144dc9f80ab35d1099d84f535a5216a0543c"
+  },
+  "pipeline": "build_motivation_job",
+  "created_at": "2026-09-12T16:34:30+00:00",
+  "updated_at": "2026-09-12T16:34:30+00:00",
+  "exported_at": "2026-09-12T16:34:30+00:00"
+}

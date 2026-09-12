@@ -1,0 +1,33 @@
+{
+  "manifest_version": 1,
+  "manifest_id": "stephen:porsche-own-one-day:890555e7cebffc61",
+  "owner": "stephen",
+  "slug": "porsche-own-one-day",
+  "title": "I will own a Porsche one day.",
+  "speaker": null,
+  "source_url": null,
+  "source_external_id": null,
+  "source_start_sec": null,
+  "source_end_sec": null,
+  "transcript": "I will own a Porsche one day.",
+  "transcript_hash": "f57c731ab422c73bf99ba58533d873da0f195ed72a14bcf9199fb2485ec86e4b",
+  "duration_sec": 23.0,
+  "topic": "porsche",
+  "visual_style": null,
+  "visual_category": "Custom",
+  "broll_ids": [],
+  "parent_manifest_id": null,
+  "version": 1,
+  "version_label": null,
+  "change_summary": null,
+  "paths": {
+    "final": "final.mp4"
+  },
+  "hashes": {
+    "final": "890555e7cebffc617dc6f07c5420a56af3e00ec589cc798e6791334bd14d3d1c"
+  },
+  "pipeline": "production_library",
+  "created_at": "2026-09-11T01:12:34+00:00",
+  "updated_at": "2026-09-12T16:34:30+00:00",
+  "exported_at": "2026-09-12T16:34:30+00:00"
+}
