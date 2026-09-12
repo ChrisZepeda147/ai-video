@@ -1,8 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { CommandWorkspace } from "@/components/command/command-workspace";
+import { LibraryTrimEditor } from "@/components/library/library-trim-editor";
+import { PostingStatusEditor } from "@/components/library/posting-status-editor";
 import { BackendOfflineBanner } from "@/components/backend-banner";
 import {
   CollapsibleMediaSection,
@@ -49,6 +52,7 @@ function searchIntent(video: ProductionLibraryVideo): string | null {
 }
 
 export function VideoDetailWorkspace({ videoId }: { videoId: number }) {
+  const router = useRouter();
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
   const [video, setVideo] = useState<ProductionLibraryVideo | null>(null);
   const [speakerOptions, setSpeakerOptions] = useState<string[]>([]);
@@ -133,6 +137,32 @@ export function VideoDetailWorkspace({ videoId }: { videoId: number }) {
       </div>
 
       <section className="max-w-xl rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+        <PostingStatusEditor
+          videoId={video.id}
+          status={video.posting_status}
+          onUpdated={(updated) => setVideo(updated)}
+        />
+        {(video.posting_status?.linked?.length ?? 0) > 0 ? (
+          <ul className="mt-3 space-y-1 border-t border-zinc-800/80 pt-3 text-xs text-zinc-400">
+            {video.posting_status?.linked.map((link) => (
+              <li key={link.job_id}>
+                {link.account_owner ? `${link.account_owner} · ` : ""}
+                Linked {link.platform}
+                {link.platform_url ? (
+                  <>
+                    {" · "}
+                    <a href={link.platform_url} target="_blank" rel="noreferrer" className="text-sky-400 hover:underline">
+                      View post
+                    </a>
+                  </>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </section>
+
+      <section className="max-w-xl rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold text-zinc-100">Speaker</h2>
@@ -204,7 +234,7 @@ export function VideoDetailWorkspace({ videoId }: { videoId: number }) {
       </section>
 
       {video.final_output_path ? (
-        <div>
+        <div className="max-w-xl space-y-4">
           <video
             src={productionMediaUrl(video.final_output_path) ?? undefined}
             controls
@@ -215,16 +245,26 @@ export function VideoDetailWorkspace({ videoId }: { videoId: number }) {
               href={productionMediaUrl(video.final_output_path)!}
               target="_blank"
               rel="noreferrer"
-              className="mt-2 inline-block text-sm text-violet-300 hover:underline"
+              className="inline-block text-sm text-violet-300 hover:underline"
             >
               Open final render
             </a>
           ) : null}
+          <LibraryTrimEditor
+            video={video}
+            onSaved={(next, mode) => {
+              if (mode === "new_version" && next.id !== video.id) {
+                router.push(`/library/${next.id}`);
+                return;
+              }
+              setVideo(next);
+            }}
+          />
         </div>
       ) : null}
 
       <section className="max-w-3xl">
-        <h2 className="mb-4 text-lg font-semibold text-zinc-100">Edit this video</h2>
+        <h2 className="mb-4 text-lg font-semibold text-zinc-100">Command Cursor</h2>
         <CommandWorkspace
           videoId={video.id}
           placeholder="Replace scene 4. Use the same audio but cars only."

@@ -464,6 +464,12 @@ export async function fetchPublishingSetup() {
   return fetchJson<import("@/lib/types").PublishingSetupResponse>(buildUrl("/api/config/publishing-setup"));
 }
 
+export async function fetchCommandCenter(params?: { owner?: string }) {
+  return fetchJson<import("@/lib/types").CommandCenterResponse>(
+    buildUrl("/api/command-center", params),
+  );
+}
+
 export async function fetchPublishingOwner() {
   return fetchJson<{ owner: string }>(buildUrl("/api/config/publishing-owner"));
 }
@@ -820,6 +826,34 @@ export async function postUpdateVideoSpeaker(
   body: { speaker: string; remember_correction?: boolean },
 ) {
   return fetchJson<ProductionLibraryVideo>(buildUrl(`/api/library/videos/${videoId}/speaker`), {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: internalHeaders(),
+  });
+}
+
+export async function postTrimLibraryVideo(
+  videoId: number,
+  body: {
+    start_sec: number;
+    end_sec: number;
+    mode: "override" | "new_version";
+    change_summary?: string;
+    version_label?: string;
+  },
+) {
+  return fetchJson<ProductionLibraryVideo>(buildUrl(`/api/library/videos/${videoId}/trim`), {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: internalHeaders(),
+  });
+}
+
+export async function postUpdateVideoPostingStatus(
+  videoId: number,
+  body: { owner: string } & Partial<Record<"tiktok" | "youtube" | "instagram", boolean>>,
+) {
+  return fetchJson<ProductionLibraryVideo>(buildUrl(`/api/library/videos/${videoId}/posting-status`), {
     method: "POST",
     body: JSON.stringify(body),
     headers: internalHeaders(),

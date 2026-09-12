@@ -1127,6 +1127,10 @@ def render_job(
     subject: str = "",
     playback_speed: float = DEFAULT_PLAYBACK_SPEED,
     use_vision: bool = True,
+    driven_pacing: bool = True,
+    caption_mode: str = "phrase",
+    hook_text: str | None = None,
+    quality_gate: bool = True,
 ) -> set[Path]:
     output.parent.mkdir(parents=True, exist_ok=True)
     temp_output = output.with_suffix(".nocap.mp4")
@@ -1151,8 +1155,10 @@ def render_job(
         subject=subject,
         playback_speed=playback_speed,
         use_vision=use_vision,
+        driven_pacing=driven_pacing,
     )
-    print("Burning word captions...")
+    caption_label = "phrase" if caption_mode == "phrase" else "word"
+    print(f"Burning {caption_label} captions...")
     burn_captions(
         temp_output,
         captions,
@@ -1161,9 +1167,19 @@ def render_job(
         height=1920,
         audio_start=0.0,
         audio_duration=duration,
-        word_by_word=captions.suffix.lower() == ".json3",
+        caption_mode=caption_mode,
+        hook_text=hook_text,
     )
     temp_output.unlink(missing_ok=True)
+    if quality_gate:
+        from discovery.render_quality_gate import check_render_quality
+
+        report = check_render_quality(output, expected_duration=duration)
+        for warning in report.warnings:
+            print(f"  quality warn: {warning}")
+        if not report.ok:
+            joined = "; ".join(report.errors)
+            raise RuntimeError(f"Render quality gate failed: {joined}")
     verify_output(output, duration)
     size_mb = output.stat().st_size / (1024 * 1024)
     print(f"  render done: {output.name} ({size_mb:.1f} MB, {duration:.1f}s)")
@@ -1357,6 +1373,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="Clip playback rate. Lower = slower motion",
     )
     parser.add_argument("--intro-skip", type=float, default=8.0, help="Skip this many seconds of each B-roll source")
+    parser.add_argument(
+        "--hook",
+        default=None,
+        help="Opening hook text (4–7 words). Must match speech; styled stronger in captions.",
+    )
+    parser.add_argument(
+        "--classic-captions",
+        action="store_true",
+        help="Revert to single-word captions instead of DrivenVisuals phrase blocks.",
+    )
+    parser.add_argument(
+        "--uniform-pacing",
+        action="store_true",
+        help="Disable DrivenVisuals fast-open pacing (use uniform segment length).",
+    )
+    parser.add_argument(
+        "--skip-quality-gate",
+        action="store_true",
+        help="Skip pre-ship render quality checks.",
+    )
     parser.add_argument("--no-vision", action="store_true", help="Skip optional vision subject check")
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--no-grade", action="store_true")
@@ -1480,16 +1516,22 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001 — registration still proceeds
             print(f"Speaker resolution skipped: {exc}")
         segment_length = resolve_segment_length(duration, args.segment_length)
+        driven_pacing = not args.uniform_pacing
+        plan_length = segment_length
+        if driven_pacing:
+            from discovery.driven_visuals import planning_segment_length
+
+            plan_length = planning_segment_length(driven_pacing=True, fallback=segment_length)
         clips_limit, clip_length, max_parts = broll_download_plan(
             duration=duration,
-            segment_length=segment_length,
+            segment_length=plan_length,
             clips_limit=args.clips_limit,
             clip_length=args.clip_length,
             max_parts=args.max_parts,
         )
         needed_clips = min_unique_clips_needed(
             duration=duration,
-            segment_length=segment_length,
+            segment_length=plan_length,
             layout="single",
         )
         broll_ids = ensure_broll_clips(
@@ -1507,6 +1549,7 @@ def main() -> int:
             use_vision=not args.no_vision,
             reuse_policy=reuse_policy,
         )
+        caption_mode = "word" if args.classic_captions else "phrase"
         render_job(
             jobs_root=jobs_root,
             clips_dir=clips_dir,
@@ -1520,6 +1563,10 @@ def main() -> int:
             subject=args.broll_query,
             playback_speed=args.playback_speed,
             use_vision=not args.no_vision,
+            driven_pacing=driven_pacing,
+            caption_mode=caption_mode,
+            hook_text=args.hook,
+            quality_gate=not args.skip_quality_gate,
         )
     except MotivationJobError as exc:
         print(exc, file=sys.stderr)
@@ -1547,6 +1594,10 @@ def main() -> int:
             "audio_duration": duration,
             "segment_length": segment_length,
             "playback_speed": args.playback_speed,
+            "driven_pacing": driven_pacing,
+            "caption_mode": caption_mode,
+            "hook": args.hook,
+            "driven_visuals_preset": "driven_visuals_v1",
             "output": str(output.as_posix()),
             "speaker_resolution": speaker_resolution,
             "search_intent": speaker_resolution.get("search_intent"),

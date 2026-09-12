@@ -1,0 +1,44 @@
+---
+description: DrivenVisuals default cinematic edit style for daily motivational batches
+alwaysApply: false
+---
+
+# DrivenVisuals default editing
+
+Applies to **future** production unless the daily brief overrides.
+
+Preset file: `content/driven-visuals-defaults.json`  
+Loader/helpers: `scripts/discovery/driven_visuals.py`
+
+## Non-negotiables
+
+1. **Opener (1–2s)** — movement, strong subject, speech starts immediately. No black/static open.
+2. **Hook** — 4–7 words when it matches the speech; show within ~1s; stronger caption style.
+3. **Captions** — phrase blocks (2–5 words), not single-word karaoke default.
+4. **Pacing** — fast beats first ~6s (0.8–1.8s), then ~2–3.5s; speech beats win over math.
+5. **Pattern interrupts** — vary shot type/mood; no cheesy transitions.
+6. **Three daily videos** — distinct visual direction per slot.
+7. **Audio** — speech only unless brief asks for music.
+8. **Reuse** — existing checks stay advisory unless user asked unused-only.
+
+## Tooling defaults
+
+```powershell
+python scripts/build_motivation_job.py --slug ... --broll-query "..." --hook "FOUR TO SEVEN WORD HOOK"
+```
+
+- Phrase captions + driven pacing: **on by default**
+- Revert: `--classic-captions`, `--uniform-pacing`
+- Pre-ship check: `python scripts/check_render_quality.py --video path/to/final.mp4`
+
+## Daily batch
+
+One brief with `VIDEO 1` / `VIDEO 2` / `VIDEO 3` blocks → one command session:
+
+```powershell
+python scripts/run_daily_batch.py --brief-file path/to/brief.md
+```
+
+Manifest: `data/daily_batches/YYYY-MM-DD/manifest.json`
+
+Brief overrides preset where they conflict.

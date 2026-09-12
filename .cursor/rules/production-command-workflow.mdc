@@ -9,6 +9,12 @@ The private website sends natural-language commands to **Cursor Agent CLI** — 
 
 The dashboard exists primarily as **memory for Cursor**: production history, component lookup, organization, and version tracking for the same Cursor-driven workflow that already creates videos successfully. Reuse detection is **informational by default** — never reject a source, timestamp, segment, visual, or component merely because it was used before.
 
+## DrivenVisuals default edit style
+
+Future daily batches use **`content/driven-visuals-defaults.json`** unless the brief overrides.
+Motivation montage: phrase captions + fast-open pacing are **on by default** in `build_motivation_job.py`.
+Daily brief with `VIDEO 1` / `VIDEO 2` / `VIDEO 3`: `python scripts/run_daily_batch.py --brief-file ...`
+
 ## Before creating any new production video
 
 1. Query the **production library** (NOT discovery references):

@@ -439,6 +439,21 @@ export type ProductionVideoComponent = {
   end_sec?: number | null;
 };
 
+export type OwnerPostingStatus = {
+  posted: boolean;
+  manual: Partial<Record<"tiktok" | "youtube" | "instagram", boolean>>;
+  linked: VideoPublishedLink[];
+  effective: Partial<Record<"tiktok" | "youtube" | "instagram", boolean>>;
+};
+
+export type VideoPostingStatus = {
+  posted: boolean;
+  by_owner: Record<PublishingOwner, OwnerPostingStatus>;
+  manual: Partial<Record<"tiktok" | "youtube" | "instagram", boolean>>;
+  linked: VideoPublishedLink[];
+  effective: Partial<Record<"tiktok" | "youtube" | "instagram", boolean>>;
+};
+
 export type ProductionLibraryVideo = {
   id: number;
   video_key: string;
@@ -457,6 +472,12 @@ export type ProductionLibraryVideo = {
   thumbnail_path?: string | null;
   duration_sec?: number | null;
   created_at: string;
+  posted?: boolean;
+  platform_ids?:
+    | Partial<Record<"tiktok" | "youtube" | "instagram", boolean>>
+    | Record<PublishingOwner, Partial<Record<"tiktok" | "youtube" | "instagram", boolean>>>
+    | null;
+  posting_status?: VideoPostingStatus;
   metadata?: Record<string, unknown> | null;
   components?: ProductionVideoComponent[];
   versions?: Array<{
@@ -526,6 +547,11 @@ export type CombinationVisualStatus = {
   used_by_other_owner: boolean;
   other_owner?: string | null;
   rendered_video_ids?: number[];
+  posting?: {
+    effective: Partial<Record<"tiktok" | "youtube" | "instagram", boolean>>;
+    by_owner: Record<PublishingOwner, Partial<Record<"tiktok" | "youtube" | "instagram", boolean>>>;
+    by_video_id: Record<string, VideoPostingStatus>;
+  } | null;
 };
 
 export type CombinationStatusResponse = {
@@ -854,4 +880,111 @@ export type ProjectAnalyticsResponse = {
   snapshots: Record<string, unknown>[];
   performance_signals: string[];
   publishing_jobs: PublishingJobItem[];
+};
+
+export type CommandCenterProgress = {
+  done: number;
+  target: number;
+};
+
+export type CommandCenterOwnerBundle = {
+  owner: string;
+  progress: {
+    videos: CommandCenterProgress;
+    tiktok: CommandCenterProgress;
+    youtube: CommandCenterProgress;
+    completion_pct: number;
+  };
+  schedule: Array<{
+    window: string;
+    platform: string;
+    target_time: string;
+    target_label: string;
+    completed: boolean;
+    job_id?: number | null;
+    production_project_id?: number | null;
+    title?: string | null;
+    platform_url?: string | null;
+    minutes_until: number;
+  }>;
+  next_post?: CommandCenterNextPost | null;
+  views: {
+    total_views_30d: number;
+    total_views_7d: number;
+    linked_posts: number;
+    live_followers: number;
+    accounts: Array<{
+      id: number;
+      platform: string;
+      display_name: string;
+      follower_count?: number | null;
+    }>;
+  };
+  streak_days: number;
+  week: Array<{
+    date: string;
+    date_iso: string;
+    completion_pct: number;
+    met_targets: boolean;
+  }>;
+  checklist: Array<{
+    id: string;
+    label: string;
+    done: boolean;
+    detail: string;
+    href: string;
+  }>;
+};
+
+export type CommandCenterNextPost = {
+  platform: string;
+  window: string;
+  time_label: string;
+  minutes_until: number;
+  away_label: string;
+  job_id?: number | null;
+  production_project_id?: number | null;
+  title?: string | null;
+  owner?: string;
+};
+
+export type CommandCenterResponse = {
+  brand: string;
+  date_label: string;
+  timezone: string;
+  owner_filter: string;
+  targets: {
+    videos_per_owner: number;
+    tiktok_per_owner: number;
+    youtube_per_owner: number;
+  };
+  combined_progress: {
+    videos: CommandCenterProgress;
+    tiktok: CommandCenterProgress;
+    youtube: CommandCenterProgress;
+    completion_pct: number;
+  };
+  owners: Record<string, CommandCenterOwnerBundle>;
+  next_post?: CommandCenterNextPost | null;
+  review_queue: Array<{
+    id: number;
+    title: string;
+    slug: string;
+    niche?: string | null;
+    href: string;
+  }>;
+  ready_videos: Array<{
+    key: string;
+    title: string;
+    slug: string;
+    project_id?: number | null;
+    library_id?: number | null;
+    href: string;
+  }>;
+  pipeline: {
+    total_references: number;
+    concepts_ready: number;
+    visuals_waiting_review: number;
+  };
+  generated_at: string;
 };

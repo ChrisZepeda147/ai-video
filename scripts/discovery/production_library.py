@@ -30,6 +30,16 @@ COMPONENT_TYPES = frozenset({
     "other",
 })
 
+POSTING_PLATFORMS = frozenset({"tiktok", "youtube", "instagram"})
+LIBRARY_OWNERS = frozenset({"chris", "stephen"})
+
+
+def normalize_library_owner(owner: str) -> str:
+    value = (owner or "").strip().lower()
+    if value not in LIBRARY_OWNERS:
+        raise ValueError(f"owner must be one of: {', '.join(sorted(LIBRARY_OWNERS))}")
+    return value
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -145,6 +155,209 @@ def _row_to_video(row) -> dict[str, Any]:
     return data
 
 
+def _normalize_platform_flags(raw: Any) -> dict[str, bool]:
+    if not raw or not isinstance(raw, dict):
+        return {}
+    return {str(k): bool(v) for k, v in raw.items() if str(k) in POSTING_PLATFORMS}
+
+
+def _metadata_dict(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return dict(raw)
+    if raw and isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _manual_by_owner(platform_ids_raw: Any, meta_raw: Any) -> dict[str, dict[str, bool]]:
+    """Parse owner-scoped manual posting flags (migrates legacy flat flags)."""
+    meta = _metadata_dict(meta_raw)
+    result: dict[str, dict[str, bool]] = {owner: {} for owner in LIBRARY_OWNERS}
+    raw = platform_ids_raw if isinstance(platform_ids_raw, dict) else {}
+
+    if any(str(key) in POSTING_PLATFORMS for key in raw):
+        fallback_owner = str(meta.get("owner") or "chris").lower()
+        if fallback_owner not in LIBRARY_OWNERS:
+            fallback_owner = "chris"
+        for platform in POSTING_PLATFORMS:
+            if platform in raw:
+                result[fallback_owner][platform] = bool(raw[platform])
+    else:
+        for owner_key, platforms in raw.items():
+            owner = str(owner_key).lower()
+            if owner not in LIBRARY_OWNERS or not isinstance(platforms, dict):
+                continue
+            result[owner] = _normalize_platform_flags(platforms)
+
+    posting_by_owner = meta.get("posting_by_owner") or {}
+    if isinstance(posting_by_owner, dict):
+        for owner in LIBRARY_OWNERS:
+            slot = posting_by_owner.get(owner) or {}
+            if not isinstance(slot, dict):
+                continue
+            for platform in POSTING_PLATFORMS:
+                entry = slot.get(platform)
+                if isinstance(entry, dict):
+                    result[owner][platform] = True
+                elif entry is not None:
+                    result[owner][platform] = bool(entry)
+
+    legacy_manual = meta.get("posting_manual") or {}
+    if isinstance(legacy_manual, dict) and legacy_manual:
+        fallback_owner = str(meta.get("owner") or "chris").lower()
+        if fallback_owner not in LIBRARY_OWNERS:
+            fallback_owner = "chris"
+        for platform in POSTING_PLATFORMS:
+            if platform in legacy_manual:
+                result[fallback_owner][platform] = True
+
+    return result
+
+
+def _owner_posting_slot(
+    manual: dict[str, bool],
+    linked: list[dict[str, Any]],
+    owner: str,
+) -> dict[str, Any]:
+    owner_linked = [
+        link
+        for link in linked
+        if str(link.get("account_owner") or "").lower() == owner
+    ]
+    linked_platforms = {str(link.get("platform") or "").lower() for link in owner_linked}
+    effective = {
+        platform: bool(manual.get(platform)) or platform in linked_platforms
+        for platform in POSTING_PLATFORMS
+    }
+    return {
+        "posted": any(effective.values()),
+        "manual": {platform: bool(manual.get(platform)) for platform in POSTING_PLATFORMS},
+        "linked": owner_linked,
+        "effective": effective,
+    }
+
+
+def enrich_video_posting(store, video: dict[str, Any]) -> dict[str, Any]:
+    """Merge per-owner manual flags with linked publishing jobs."""
+    from discovery.publishing.links import publishing_links_for_video
+
+    manual_by_owner = _manual_by_owner(video.get("platform_ids"), video.get("metadata"))
+    linked = publishing_links_for_video(
+        store,
+        project_id=video.get("production_project_id"),
+        slug=video.get("slug"),
+    )
+    by_owner = {
+        owner: _owner_posting_slot(manual_by_owner.get(owner, {}), linked, owner)
+        for owner in sorted(LIBRARY_OWNERS)
+    }
+    effective = {
+        platform: any(by_owner[owner]["effective"].get(platform) for owner in LIBRARY_OWNERS)
+        for platform in POSTING_PLATFORMS
+    }
+    manual_union = {
+        platform: any(by_owner[owner]["manual"].get(platform) for owner in LIBRARY_OWNERS)
+        for platform in POSTING_PLATFORMS
+    }
+    video["posting_status"] = {
+        "posted": any(effective.values()),
+        "by_owner": by_owner,
+        "manual": manual_union,
+        "linked": linked,
+        "effective": effective,
+    }
+    return video
+
+
+def posting_summary_for_video_ids(store, video_ids: list[int]) -> dict[str, Any]:
+    """Compact posting summary for one or more library video ids."""
+    effective = {platform: False for platform in POSTING_PLATFORMS}
+    by_owner = {
+        owner: {platform: False for platform in POSTING_PLATFORMS}
+        for owner in LIBRARY_OWNERS
+    }
+    by_video: dict[str, dict[str, Any]] = {}
+    for raw_id in video_ids:
+        video_id = int(raw_id)
+        row = store._conn.execute(
+            "SELECT * FROM production_library_videos WHERE id = ?",
+            (video_id,),
+        ).fetchone()
+        if not row:
+            continue
+        video = enrich_video_posting(store, _row_to_video(row))
+        status = video.get("posting_status") or {}
+        by_video[str(video_id)] = status
+        for platform in POSTING_PLATFORMS:
+            if (status.get("effective") or {}).get(platform):
+                effective[platform] = True
+            for owner in LIBRARY_OWNERS:
+                owner_status = (status.get("by_owner") or {}).get(owner) or {}
+                if (owner_status.get("effective") or {}).get(platform):
+                    by_owner[owner][platform] = True
+    return {
+        "effective": effective,
+        "by_owner": by_owner,
+        "by_video_id": by_video,
+    }
+
+
+def update_video_posting_status(
+    store,
+    video_id: int,
+    *,
+    owner: str,
+    tiktok: bool | None = None,
+    youtube: bool | None = None,
+    instagram: bool | None = None,
+    marked_by: str = "user",
+) -> dict[str, Any]:
+    """Manually mark which platforms one owner posted a library video to."""
+    owner = normalize_library_owner(owner)
+    row = store._conn.execute(
+        "SELECT * FROM production_library_videos WHERE id = ?",
+        (video_id,),
+    ).fetchone()
+    if not row:
+        raise ValueError(f"Production video {video_id} not found")
+
+    video = _row_to_video(row)
+    manual_by_owner = _manual_by_owner(video.get("platform_ids"), video.get("metadata"))
+    meta = _metadata_dict(video.get("metadata"))
+    posting_by_owner = dict(meta.get("posting_by_owner") or {})
+    owner_manual = dict(manual_by_owner.get(owner, {}))
+    owner_audit = dict(posting_by_owner.get(owner) or {})
+    now = now_iso()
+    updates = {"tiktok": tiktok, "youtube": youtube, "instagram": instagram}
+    for platform, value in updates.items():
+        if value is None:
+            continue
+        owner_manual[platform] = bool(value)
+        if bool(value):
+            owner_audit[platform] = {"marked_at": now, "marked_by": marked_by}
+        else:
+            owner_audit.pop(platform, None)
+    manual_by_owner[owner] = owner_manual
+    posting_by_owner[owner] = owner_audit
+    meta["posting_by_owner"] = posting_by_owner
+    meta.pop("posting_manual", None)
+    posted = 1 if any(any(flags.values()) for flags in manual_by_owner.values()) else 0
+    store._conn.execute(
+        """
+        UPDATE production_library_videos
+        SET platform_ids_json = ?, posted = ?, metadata_json = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (json.dumps(manual_by_owner), posted, json.dumps(meta), now, video_id),
+    )
+    store._conn.commit()
+    return get_video(store, video_id)
+
+
 def _row_to_component(row, *, root: Path | None = None) -> dict[str, Any]:
     if row is None:
         return {}
@@ -248,7 +461,7 @@ def list_videos(
             video["playable"] = _is_playable_final(final_path)
         if playable_only and not video.get("playable"):
             continue
-        items.append(video)
+        items.append(enrich_video_posting(store, video))
         if len(items) >= limit:
             break
     return items
@@ -302,7 +515,7 @@ def get_video(store, video_id: int) -> dict[str, Any] | None:
         (video.get("parent_video_id") or video_id, video_id),
     ).fetchall()
     video["versions"] = [dict(v) for v in versions]
-    return video
+    return enrich_video_posting(store, video)
 
 
 def get_video_by_key(store, video_key: str) -> dict[str, Any] | None:

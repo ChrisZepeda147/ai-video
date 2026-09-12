@@ -141,7 +141,7 @@ def _ass_escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
 
 
-def _ass_header(*, width: int, height: int) -> str:
+def _ass_header(*, width: int, height: int, phrase_size: int = 46, hook_size: int = 64) -> str:
     return f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {width}
@@ -150,7 +150,8 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial Bold,52,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,4,0,5,80,80,0,1
+Style: Default,Arial Bold,{phrase_size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,4,0,2,80,80,120,1
+Style: Hook,Arial Bold,{hook_size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H90000000,1,0,0,0,100,100,0,0,1,5,0,2,80,80,180,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -197,6 +198,79 @@ def build_word_ass(
     ass_path.write_text(_ass_header(width=width, height=height) + "\n".join(dialogue_lines) + "\n", encoding="utf-8")
 
 
+def group_words_into_phrases(
+    words: list[tuple[float, float, str]],
+    *,
+    min_words: int = 2,
+    max_words: int = 5,
+) -> list[tuple[float, float, str]]:
+    """Merge word-level captions into 2–5 word phrase blocks."""
+    if not words:
+        return []
+    phrases: list[tuple[float, float, str]] = []
+    buffer: list[tuple[float, float, str]] = []
+
+    def flush() -> None:
+        if not buffer:
+            return
+        text = " ".join(item[2] for item in buffer).strip()
+        if not text:
+            buffer.clear()
+            return
+        phrases.append((buffer[0][0], buffer[-1][1], text.upper()))
+        buffer.clear()
+
+    for start, end, word in words:
+        buffer.append((start, end, word.strip()))
+        last = buffer[-1][2]
+        ends_clause = last.endswith((".", "!", "?", ","))
+        if len(buffer) >= max_words or (len(buffer) >= min_words and ends_clause):
+            flush()
+    if len(buffer) >= min_words:
+        flush()
+    elif buffer and not phrases:
+        text = " ".join(item[2] for item in buffer).strip()
+        if text:
+            phrases.append((buffer[0][0], buffer[-1][1], text.upper()))
+    elif buffer and phrases:
+        prev_start, prev_end, prev_text = phrases[-1]
+        extra = " ".join(item[2] for item in buffer).strip()
+        phrases[-1] = (prev_start, buffer[-1][1], f"{prev_text} {extra}".strip().upper())
+    return phrases
+
+
+def build_phrase_ass(
+    phrases: list[tuple[float, float, str]],
+    *,
+    width: int,
+    height: int,
+    ass_path: Path,
+    hook_text: str | None = None,
+    phrase_size: int = 46,
+    hook_size: int = 64,
+) -> None:
+    hook_norm = " ".join((hook_text or "").upper().split())
+    dialogue_lines: list[str] = []
+    for index, (start, end, text) in enumerate(phrases):
+        style = "Default"
+        if index == 0 and start <= 1.0:
+            if hook_norm and hook_norm in text:
+                style = "Hook"
+            elif hook_norm and text.startswith(hook_norm.split()[0]):
+                style = "Hook"
+            elif not hook_norm:
+                style = "Hook"
+        dialogue_lines.append(
+            f"Dialogue: 0,{_seconds_to_ass(start)},{_seconds_to_ass(end)},{style},,0,0,0,,{_ass_escape(text)}"
+        )
+    ass_path.write_text(
+        _ass_header(width=width, height=height, phrase_size=phrase_size, hook_size=hook_size)
+        + "\n".join(dialogue_lines)
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def build_centered_ass(srt_path: Path, *, width: int, height: int, ass_path: Path) -> None:
     content = srt_path.read_text(encoding="utf-8").replace("\r\n", "\n").strip()
     blocks = re.split(r"\n\s*\n", content)
@@ -227,14 +301,35 @@ def burn_captions(
     height: int,
     audio_start: float,
     audio_duration: float,
-    word_by_word: bool,
+    word_by_word: bool = False,
+    caption_mode: str | None = None,
+    hook_text: str | None = None,
+    phrase_min_words: int = 2,
+    phrase_max_words: int = 5,
 ) -> None:
     ass_path = captions.with_suffix(".burn.ass")
-    if word_by_word:
+    mode = caption_mode or ("word" if word_by_word else "phrase")
+    if mode == "word":
         words = parse_json3_words(captions, start=audio_start, duration=audio_duration)
         if not words:
             raise RuntimeError(f"No words found in {captions} for the selected audio window")
         build_word_ass(words, width=width, height=height, ass_path=ass_path)
+    elif mode == "phrase" and captions.suffix.lower() == ".json3":
+        words = parse_json3_words(captions, start=audio_start, duration=audio_duration)
+        if not words:
+            raise RuntimeError(f"No words found in {captions} for the selected audio window")
+        phrases = group_words_into_phrases(
+            words,
+            min_words=max(1, phrase_min_words),
+            max_words=max(phrase_min_words, phrase_max_words),
+        )
+        build_phrase_ass(
+            phrases,
+            width=width,
+            height=height,
+            ass_path=ass_path,
+            hook_text=hook_text,
+        )
     else:
         trimmed = captions.with_suffix(".trim.srt")
         trim_srt(captions, start=audio_start, duration=audio_duration, out_path=trimmed)

@@ -116,6 +116,7 @@ from discovery.production_library import (
     import_uploaded_video,
     list_videos,
     prune_missing_components,
+    update_video_posting_status,
 )
 from discovery.speaker_identity import KNOWN_SPEAKERS, update_video_speaker
 from discovery.shared_library import maybe_auto_pull_import, pull_and_import, sync_status
@@ -1204,6 +1205,62 @@ def library_update_speaker_endpoint(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.post("/api/library/videos/{video_id}/trim")
+def library_trim_video_endpoint(
+    video_id: int,
+    body: dict,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    _: Annotated[None, Depends(require_internal_key)],
+):
+    from discovery.library_trim import trim_library_video
+
+    mode = str(body.get("mode") or "new_version").strip().lower()
+    if mode not in {"override", "new_version"}:
+        raise HTTPException(status_code=422, detail="mode must be override or new_version")
+    try:
+        start_sec = float(body["start_sec"])
+        end_sec = float(body["end_sec"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="start_sec and end_sec are required numbers") from exc
+    try:
+        return trim_library_video(
+            store,
+            video_id,
+            start_sec=start_sec,
+            end_sec=end_sec,
+            mode=mode,
+            change_summary=body.get("change_summary"),
+            version_label=body.get("version_label"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/library/videos/{video_id}/posting-status")
+def library_update_posting_status_endpoint(
+    video_id: int,
+    body: dict,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    _: Annotated[None, Depends(require_internal_key)],
+):
+    owner = str(body.get("owner") or os.environ.get("PUBLISHING_OWNER") or "chris").strip().lower()
+    try:
+        return update_video_posting_status(
+            store,
+            video_id,
+            owner=owner,
+            tiktok=body.get("tiktok") if "tiktok" in body else None,
+            youtube=body.get("youtube") if "youtube" in body else None,
+            instagram=body.get("instagram") if "instagram" in body else None,
+            marked_by=str(body.get("marked_by") or "user"),
+        )
+    except ValueError as exc:
+        status = 422 if "owner must be" in str(exc) else 404
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+
+
 @app.post("/api/library/check-reuse")
 def library_check_reuse_endpoint(
     body: dict,
@@ -1512,6 +1569,16 @@ def publishing_setup_endpoint(store: Annotated[DiscoveryStore, Depends(get_store
     from discovery.publishing.setup import publishing_setup_report
 
     return publishing_setup_report(store)
+
+
+@app.get("/api/command-center")
+def command_center_endpoint(
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    owner: str | None = None,
+):
+    from discovery.command_center import build_command_center
+
+    return build_command_center(store, owner_filter=owner)
 
 
 @app.get("/api/accounts", response_model=PublishingAccountsResponse)

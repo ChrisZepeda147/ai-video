@@ -15,6 +15,11 @@ from discovery.store import DiscoveryStore
 from discovery.cursor_bridge import agent_available, create_chat, run_agent
 from discovery.production_library import check_reuse, get_video, library_summary_for_agent
 from discovery.reuse_policy import parse_reuse_policy
+from discovery.driven_visuals import (
+    agent_prompt_section,
+    parse_daily_video_briefs,
+    write_batch_manifest,
+)
 
 
 def now_iso() -> str:
@@ -84,6 +89,8 @@ def build_agent_prompt(
         f"   `python scripts/register_production_video.py --title \"...\" --final-path downloads/...`",
         "5. Preserve modular components (audio, transcript, scenes, visuals, captions, final).",
         "",
+        agent_prompt_section(),
+        "",
         f"## Reuse policy for this command: {parse_reuse_policy(user_command)}",
         "- allow (default): previously used sources/speakers/topics/segments/components are OK.",
         "- prefer_new: rank fresher material first, but fall back if needed.",
@@ -141,6 +148,38 @@ def build_agent_prompt(
             for comp in video["components"]:
                 detail = comp.get("local_path") or comp.get("url") or comp.get("text_content") or comp.get("label")
                 lines.append(f"- {comp.get('component_type')}: {detail}")
+            lines.append("")
+
+    daily_briefs = parse_daily_video_briefs(user_command)
+    if daily_briefs:
+        manifest_path = write_batch_manifest(briefs=daily_briefs, source_command=user_command)
+        lines.extend(
+            [
+                "## Daily batch brief (process all videos in one session)",
+                f"- Batch manifest: `{manifest_path.relative_to(root).as_posix()}`",
+                f"- Videos in brief: {len(daily_briefs)}",
+                "- Process VIDEO 1, then VIDEO 2, then VIDEO 3 sequentially.",
+                "- Register each finished render separately with hook + batch metadata.",
+                "",
+            ]
+        )
+        for brief in daily_briefs:
+            lines.append(f"### VIDEO {brief.get('slot', '?')}")
+            for key in (
+                "speaker",
+                "topic",
+                "hook",
+                "visual_direction",
+                "duration",
+                "description",
+                "hashtags",
+                "editing_notes",
+            ):
+                if brief.get(key):
+                    lines.append(f"- {key.replace('_', ' ').title()}: {brief[key]}")
+            if brief.get("raw"):
+                lines.append("")
+                lines.append(brief["raw"])
             lines.append("")
 
     lines.extend(
@@ -350,6 +389,9 @@ def submit_command(
         video_id = refs[0]
 
     count = parse_batch_count(user_command, batch_count)
+    daily_briefs = parse_daily_video_briefs(user_command)
+    if len(daily_briefs) >= 2:
+        count = len(daily_briefs)
     if count <= 1:
         record = create_command_job(
             store,

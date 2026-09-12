@@ -24,7 +24,7 @@ export const navItems: NavItem[] = [
     href: "/",
     label: "Dashboard",
     icon: LayoutDashboard,
-    description: "Overview and production status",
+    description: "Daily command center",
   },
   {
     href: "/command",

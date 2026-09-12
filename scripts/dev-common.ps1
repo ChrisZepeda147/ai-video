@@ -1,8 +1,14 @@
 # Shared helpers for start-dev / start-api / start-dashboard.
 
+function Test-ApiPortListening {
+    param([int]$Port = 8000)
+    $conn = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+    return [bool]$conn
+}
+
 function Test-ApiHealthy {
     try {
-        $health = Invoke-RestMethod -Uri "http://127.0.0.1:8000/health" -TimeoutSec 2
+        $health = Invoke-RestMethod -Uri "http://127.0.0.1:8000/health" -TimeoutSec 3
         return $health.status -eq "ok"
     } catch {
         return $false

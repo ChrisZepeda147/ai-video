@@ -17,7 +17,11 @@ if ($userPath -or $machinePath) {
 if (Test-ApiHealthy) {
     Write-Host "Discovery API already running on http://127.0.0.1:8000"
 } else {
-    Write-Host "Discovery API not healthy - starting uvicorn..."
+    if (Test-ApiPortListening) {
+        Write-Host "Port 8000 is listening but /health failed - restarting API..."
+    } else {
+        Write-Host "Discovery API not running yet - starting uvicorn..."
+    }
     & (Join-Path $Scripts "stop-api.ps1") -Port 8000 | Out-Null
     $Python = Resolve-PythonExe
     if (-not $Python) {

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { BackendOfflineBanner } from "@/components/backend-banner";
+import { PlatformBadge } from "@/components/platform-badge";
 import {
   fetchCombinationCatalog,
   fetchCombinationStatus,
@@ -359,6 +360,36 @@ export function CombinationsWorkspace() {
                           ? ` · ${formatDuration(visual?.duration_sec ?? pack.duration_sec)}`
                           : ""}
                       </p>
+                      {visual?.rendered_video_ids?.length ? (
+                        <p className="mt-1 text-[11px] opacity-80">
+                          Video{" "}
+                          {visual.rendered_video_ids.map((id, index) => (
+                            <span key={id}>
+                              {index > 0 ? ", " : null}
+                              <Link href={`/library/${id}`} className="text-violet-300 hover:underline">
+                                #{id}
+                              </Link>
+                            </span>
+                          ))}
+                        </p>
+                      ) : null}
+                      {visual?.posting?.by_owner ? (
+                        <div className="mt-2 space-y-1">
+                          {(["chris", "stephen"] as const).map((postOwner) => {
+                            const flags = visual.posting?.by_owner?.[postOwner];
+                            const used = (["tiktok", "youtube"] as const).filter((platform) => flags?.[platform]);
+                            if (!used.length) return null;
+                            return (
+                              <div key={postOwner} className="flex flex-wrap items-center gap-1">
+                                <span className="text-[10px] capitalize opacity-80">{postOwner}</span>
+                                {used.map((platform) => (
+                                  <PlatformBadge key={`${postOwner}-${platform}`} platform={platform} />
+                                ))}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : null}
                       {pack.preview_clip_path ? (
                         <div className="relative mt-2 w-24">
                           <video

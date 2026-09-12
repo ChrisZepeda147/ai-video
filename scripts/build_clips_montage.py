@@ -410,6 +410,20 @@ def _source_needed(output_duration: float, playback_speed: float) -> float:
     return max(0.4, output_duration * playback_speed)
 
 
+def _beat_duration(
+    *,
+    accumulated: float,
+    remaining: float,
+    segment_length: float,
+    driven_pacing: bool,
+) -> float:
+    if not driven_pacing:
+        return min(segment_length, remaining)
+    from discovery.driven_visuals import driven_beat_duration
+
+    return min(driven_beat_duration(elapsed=accumulated, remaining=remaining), remaining)
+
+
 def _pick_passing_window(
     picker: _ClipPicker,
     *,
@@ -458,6 +472,7 @@ def build_silent_montage(
     subject: str = "",
     playback_speed: float = 1.0,
     use_vision: bool = True,
+    driven_pacing: bool = False,
 ) -> set[Path]:
     """Stitch shuffled B-roll into a fixed-length silent video."""
     clips = sorted(clips_dir.glob("*.mp4"))
@@ -466,9 +481,15 @@ def build_silent_montage(
     if target_duration <= 0:
         raise ValueError("target_duration must be positive")
 
+    plan_length = segment_length
+    if driven_pacing:
+        from discovery.driven_visuals import planning_segment_length
+
+        plan_length = planning_segment_length(driven_pacing=True, fallback=segment_length)
+
     needed_clips = min_unique_clips_needed(
         duration=target_duration,
-        segment_length=segment_length,
+        segment_length=plan_length,
         layout=layout,
     )
     if len(clips) < needed_clips:
@@ -489,7 +510,12 @@ def build_silent_montage(
         tmp_dir = Path(tmp)
         while accumulated < target_duration - 0.02:
             remaining = target_duration - accumulated
-            this_duration = min(segment_length, remaining)
+            this_duration = _beat_duration(
+                accumulated=accumulated,
+                remaining=remaining,
+                segment_length=segment_length,
+                driven_pacing=driven_pacing,
+            )
             needed = _source_needed(this_duration, playback_speed)
             strict = segment_index == 0
             vision = use_vision and segment_index < 2
@@ -578,6 +604,7 @@ def build_montage(
     playback_speed: float = DEFAULT_PLAYBACK_SPEED,
     use_vision: bool = True,
     include_audio: bool = True,
+    driven_pacing: bool = False,
 ) -> set[Path]:
     clips = sorted(clips_dir.glob("*.mp4"))
     if not clips:
@@ -593,9 +620,15 @@ def build_montage(
     if target_duration <= 0:
         raise ValueError("audio_duration must be positive")
 
+    plan_length = segment_length
+    if driven_pacing:
+        from discovery.driven_visuals import planning_segment_length
+
+        plan_length = planning_segment_length(driven_pacing=True, fallback=segment_length)
+
     needed_clips = min_unique_clips_needed(
         duration=target_duration,
-        segment_length=segment_length,
+        segment_length=plan_length,
         layout=layout,
     )
     if len(clips) < needed_clips:
@@ -616,7 +649,12 @@ def build_montage(
         tmp_dir = Path(tmp)
         while accumulated < target_duration - 0.02:
             remaining = target_duration - accumulated
-            this_duration = min(segment_length, remaining)
+            this_duration = _beat_duration(
+                accumulated=accumulated,
+                remaining=remaining,
+                segment_length=segment_length,
+                driven_pacing=driven_pacing,
+            )
             needed = _source_needed(this_duration, playback_speed)
             strict = segment_index == 0
             vision = use_vision and segment_index < 2

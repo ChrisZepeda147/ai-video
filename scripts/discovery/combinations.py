@@ -11,7 +11,7 @@ from typing import Any
 
 from discovery.config import project_root
 from discovery.media_paths import display_media_path, file_exists_rel
-from discovery.production_library import check_reuse, get_video, now_iso
+from discovery.production_library import check_reuse, get_video, now_iso, posting_summary_for_video_ids
 from discovery.reuse_detection import transcript_hash
 from discovery.speaker_identity import get_correction, infer_speaker
 
@@ -659,6 +659,7 @@ def combination_status(
                 "used_by_other_owner": bool(other_use),
                 "other_owner": other if other_use else None,
                 "rendered_video_ids": prior_ids,
+                "posting": posting_summary_for_video_ids(store, prior_ids) if prior_ids else None,
             }
         )
 

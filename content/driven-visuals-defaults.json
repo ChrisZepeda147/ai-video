@@ -1,0 +1,60 @@
+{
+  "preset_id": "driven_visuals_v1",
+  "brand": "DrivenVisuals",
+  "description": "Default cinematic motivational edit style for daily batches unless a brief overrides.",
+  "opener": {
+    "priority": "highest",
+    "avoid": [
+      "slow establishing shots",
+      "nearly black opening frames",
+      "static visuals for several seconds",
+      "tiny one-word captions",
+      "long visual fade-ins"
+    ],
+    "prefer": [
+      "immediate movement",
+      "visually striking frame from frame 1",
+      "strong contrast",
+      "obvious subject",
+      "speech begins immediately"
+    ],
+    "fast_pacing_window_sec": 6,
+    "fast_beat_min_sec": 0.8,
+    "fast_beat_max_sec": 1.8,
+    "settle_beat_min_sec": 2.0,
+    "settle_beat_max_sec": 3.5
+  },
+  "hook": {
+    "enabled": true,
+    "word_count_min": 4,
+    "word_count_max": 7,
+    "appear_within_sec": 1.0,
+    "must_match_speech": true
+  },
+  "captions": {
+    "mode": "phrase",
+    "words_per_phrase_min": 2,
+    "words_per_phrase_max": 5,
+    "font_size_phrase": 46,
+    "font_size_hook": 64,
+    "alignment": "lower_middle"
+  },
+  "pacing": {
+    "driven_montage_pacing": true,
+    "pattern_interrupts": true
+  },
+  "audio": {
+    "background_music_default": false,
+    "speech_dominant": true
+  },
+  "daily_batch": {
+    "default_video_count": 3,
+    "require_distinct_visuals": true
+  },
+  "quality_gate": {
+    "enabled": true,
+    "max_leading_silence_sec": 0.35,
+    "max_opening_static_sec": 2.0,
+    "min_output_duration_sec": 8.0
+  }
+}

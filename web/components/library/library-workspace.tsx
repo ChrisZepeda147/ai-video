@@ -11,6 +11,7 @@ import {
   postSharedSyncPullImport,
   productionMediaUrl,
 } from "@/lib/api";
+import { PostingStatusEditor } from "@/components/library/posting-status-editor";
 import type { ProductionLibraryVideo, SharedSyncStatus } from "@/lib/types";
 
 export function LibraryWorkspace() {
@@ -227,48 +228,59 @@ export function LibraryWorkspace() {
           <p className="text-sm text-zinc-500">No production videos yet. Run a command or import an MP4.</p>
         ) : (
           videos.map((video) => (
-            <Link
+            <article
               key={video.id}
-              href={`/library/${video.id}`}
               className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4 hover:border-zinc-700"
             >
-              {video.final_output_path && productionMediaUrl(video.final_output_path) ? (
-                <div className="relative mb-3">
-                  <video
-                    src={productionMediaUrl(video.final_output_path)!}
-                    className="aspect-[9/16] w-full rounded-lg bg-zinc-950 object-cover"
-                    muted
-                    playsInline
-                    preload="metadata"
-                  />
-                  {video.duration_sec ? (
-                    <span className="absolute bottom-2 right-2 rounded bg-black/75 px-2 py-0.5 text-xs text-zinc-100">
-                      {formatTimecode(video.duration_sec)}
-                    </span>
-                  ) : null}
-                </div>
-              ) : (
-                <div className="mb-3 flex aspect-[9/16] items-center justify-center rounded-lg bg-zinc-950 text-xs text-zinc-600">
-                  No preview
-                </div>
-              )}
-              <p className="font-medium text-zinc-100">
-                Video {video.id}
-                {video.version && video.version > 1 ? ` ${video.version_label || `v${video.version}`}` : ""}
-              </p>
-              <p className="truncate text-sm text-zinc-400">{video.title}</p>
-              <p className="mt-1 text-xs text-zinc-500">
-                {[
-                  video.duration_sec ? formatDuration(video.duration_sec) : null,
-                  video.speaker,
-                  video.topic,
-                  (video.metadata as { visual_style?: string } | undefined)?.visual_style,
-                  video.status,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </p>
-            </Link>
+              <Link href={`/library/${video.id}`} className="block">
+                {video.final_output_path && productionMediaUrl(video.final_output_path) ? (
+                  <div className="relative mb-3">
+                    <video
+                      src={productionMediaUrl(video.final_output_path)!}
+                      className="aspect-[9/16] w-full rounded-lg bg-zinc-950 object-cover"
+                      muted
+                      playsInline
+                      preload="metadata"
+                    />
+                    {video.duration_sec ? (
+                      <span className="absolute bottom-2 right-2 rounded bg-black/75 px-2 py-0.5 text-xs text-zinc-100">
+                        {formatTimecode(video.duration_sec)}
+                      </span>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="mb-3 flex aspect-[9/16] items-center justify-center rounded-lg bg-zinc-950 text-xs text-zinc-600">
+                    No preview
+                  </div>
+                )}
+                <p className="font-medium text-zinc-100">
+                  Video {video.id}
+                  {video.version && video.version > 1 ? ` ${video.version_label || `v${video.version}`}` : ""}
+                </p>
+                <p className="truncate text-sm text-zinc-400">{video.title}</p>
+                <p className="mt-1 text-xs text-zinc-500">
+                  {[
+                    video.duration_sec ? formatDuration(video.duration_sec) : null,
+                    video.speaker,
+                    video.topic,
+                    (video.metadata as { visual_style?: string } | undefined)?.visual_style,
+                    video.status,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+              </Link>
+              <div className="mt-3 border-t border-zinc-800/80 pt-3">
+                <PostingStatusEditor
+                  videoId={video.id}
+                  status={video.posting_status}
+                  compact
+                  onUpdated={(updated) =>
+                    setVideos((prev) => prev.map((row) => (row.id === updated.id ? updated : row)))
+                  }
+                />
+              </div>
+            </article>
           ))
         )}
       </div>
