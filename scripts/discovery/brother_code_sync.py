@@ -29,6 +29,23 @@ def auto_pull_interval_minutes() -> int:
         return 60
 
 
+def brother_sync_interval_minutes() -> int:
+    return auto_pull_interval_minutes()
+
+
+def sync_source_code() -> dict[str, Any]:
+    """CLI alias used by shared_library_sync tick/watch."""
+    pull_result = safe_ff_pull()
+    return {
+        "ok": not pull_result.get("conflict") and pull_result.get("ok", True) is not False,
+        "pull": pull_result,
+        "git": git_repo_status(fetch=False),
+        "step": pull_result.get("step"),
+        "conflict": bool(pull_result.get("conflict")),
+        "error": pull_result.get("error") or pull_result.get("message"),
+    }
+
+
 def _pull_is_due(state: dict[str, Any], *, interval_minutes: int | None = None) -> bool:
     interval = interval_minutes if interval_minutes is not None else auto_pull_interval_minutes()
     last = state.get("last_code_pull_at")

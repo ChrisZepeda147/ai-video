@@ -37,7 +37,7 @@ Set any YouTube search for speech and visuals. `--speech-query` / `--broll-query
 
 ## Leftover speech
 
-Script takes 60–90s. Rest of that download is split into more excerpts and stashed in `downloads/motivational/speech-pool/{speaker}/`. Next job for the same speaker uses the pool first — no new YouTube download.
+Script takes ~20–28s (DrivenVisuals short default). Rest of that download is split into more excerpts and stashed in `downloads/motivational/speech-pool/{speaker}/` even when reuse is allowed. Next job for the same speaker uses the pool first — no new YouTube download.
 
 ## Repeat speech
 
@@ -90,7 +90,7 @@ First seconds of the output must show the subject with **movement** when possibl
 | `--classic-captions` | off | Revert to single-word captions |
 | `--playback-speed` | `0.80` | Lower = slower motion. `1` = source speed |
 | `--intro-skip` | `8` | Skip more intro if hosts keep talking |
-| `--min-seconds` / `--max-seconds` | `60` / `90` | Excerpt window |
+| `--min-seconds` / `--max-seconds` | `20` / `28` | Excerpt window. Longer cuts need explicit flags |
 | `--no-vision` | off | Local frame gate only |
 | `--no-grade` | off | User wants raw color |
 | `--skip-quality-gate` | off | Skip pre-ship checks |

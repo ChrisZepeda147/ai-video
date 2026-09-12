@@ -54,7 +54,7 @@ SUBJECT_ALIASES = {
     "gt3": ("gt3", "gt3rs", "porsche"),
     "lambo": ("lambo", "lamborghini", "aventador", "huracan", "urus", "revuelto"),
     "lamborghini": ("lambo", "lamborghini", "aventador", "huracan", "urus", "revuelto"),
-    "ferrari": ("ferrari", "sf90", "pista", "roma", "812"),
+    "ferrari": ("ferrari", "sf90", "pista", "roma", "812", "488"),
     "yacht": ("yacht", "superyacht", "megayacht"),
     "mansion": ("mansion", "estate", "villa"),
     "villa": ("villa", "estate"),

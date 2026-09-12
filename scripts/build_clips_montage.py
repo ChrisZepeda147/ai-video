@@ -485,7 +485,11 @@ def build_silent_montage(
     if driven_pacing:
         from discovery.driven_visuals import planning_segment_length
 
-        plan_length = planning_segment_length(driven_pacing=True, fallback=segment_length)
+        plan_length = planning_segment_length(
+            driven_pacing=True,
+            fallback=segment_length,
+            duration=target_duration,
+        )
 
     needed_clips = min_unique_clips_needed(
         duration=target_duration,
@@ -495,7 +499,7 @@ def build_silent_montage(
     if len(clips) < needed_clips:
         raise RuntimeError(
             f"Need at least {needed_clips} unique B-roll clips for "
-            f"{target_duration:.0f}s at {segment_length:.1f}s beats, have {len(clips)}."
+            f"{target_duration:.0f}s at {plan_length:.1f}s beats, have {len(clips)}."
         )
 
     rng = random.Random(seed)
@@ -624,7 +628,11 @@ def build_montage(
     if driven_pacing:
         from discovery.driven_visuals import planning_segment_length
 
-        plan_length = planning_segment_length(driven_pacing=True, fallback=segment_length)
+        plan_length = planning_segment_length(
+            driven_pacing=True,
+            fallback=segment_length,
+            duration=target_duration,
+        )
 
     needed_clips = min_unique_clips_needed(
         duration=target_duration,
@@ -634,7 +642,7 @@ def build_montage(
     if len(clips) < needed_clips:
         raise RuntimeError(
             f"Need at least {needed_clips} unique B-roll clips for "
-            f"{target_duration:.0f}s at {segment_length:.1f}s beats, have {len(clips)}."
+            f"{target_duration:.0f}s at {plan_length:.1f}s beats, have {len(clips)}."
         )
 
     rng = random.Random(seed)

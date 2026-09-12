@@ -36,6 +36,7 @@ from build_clips_montage import (
     probe_duration,
     segment_length_for_duration,
 )
+from discovery.driven_visuals import speech_window_defaults
 from discovery.reuse_policy import REUSE_POLICIES, normalize_reuse_policy
 from toolchain_env import (
     check_toolchain,
@@ -355,7 +356,7 @@ def leftover_speech_windows(
     max_seconds: float,
     source_duration: float = 0.0,
 ) -> list[tuple[float, float]]:
-    """Unused 60–90s excerpts after the job takes its minute."""
+    """Unused leftover excerpts after the job takes its window."""
     if captions.suffix.lower() != ".json3":
         return []
     words = json3_word_times(captions)
@@ -799,19 +800,18 @@ def prepare_speech(
     print(f"Speech picked: {chosen.title} ({chosen.video_id})")
     print(f"Excerpt: start={start:.2f}s duration={duration:.2f}s")
     print(f"  preview: {_preview(excerpt_text)}")
-    if not allow_reuse:
-        _stash_speech_leftovers(
-            jobs_root=jobs_root,
-            speaker=speaker,
-            candidate=chosen,
-            source_mp3=source_mp3,
-            captions=captions,
-            used_start=start,
-            used_duration=duration,
-            min_seconds=min_seconds,
-            max_seconds=max_seconds,
-            source_text=source_text,
-        )
+    _stash_speech_leftovers(
+        jobs_root=jobs_root,
+        speaker=speaker,
+        candidate=chosen,
+        source_mp3=source_mp3,
+        captions=captions,
+        used_start=start,
+        used_duration=duration,
+        min_seconds=min_seconds,
+        max_seconds=max_seconds,
+        source_text=source_text,
+    )
     _write_job_speech(
         audio_dir=audio_dir,
         source_mp3=source_mp3,
@@ -1108,6 +1108,12 @@ def ensure_broll_clips(
         use_vision=use_vision,
         reuse_policy=reuse_policy,
     )
+    have = len(list(clips_dir.glob("*_part*.mp4")))
+    if have < needed_clips:
+        raise RuntimeError(
+            f"Need {needed_clips} unique B-roll clips after subject gate, have {have}. "
+            "Use a shorter --max-seconds or a broader --broll-query."
+        )
     if broll_ids:
         return list(dict.fromkeys([*broll_ids, *downloaded]))
     return downloaded
@@ -1358,8 +1364,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSON with speaker + optional speech_query",
     )
     parser.add_argument("--jobs-root", type=Path, default=None)
-    parser.add_argument("--min-seconds", type=float, default=60.0)
-    parser.add_argument("--max-seconds", type=float, default=90.0)
+    _min_speech, _max_speech = speech_window_defaults()
+    parser.add_argument("--min-seconds", type=float, default=_min_speech)
+    parser.add_argument("--max-seconds", type=float, default=_max_speech)
     parser.add_argument(
         "--segment-length",
         type=float,
@@ -1521,7 +1528,11 @@ def main() -> int:
         if driven_pacing:
             from discovery.driven_visuals import planning_segment_length
 
-            plan_length = planning_segment_length(driven_pacing=True, fallback=segment_length)
+            plan_length = planning_segment_length(
+                driven_pacing=True,
+                fallback=segment_length,
+                duration=duration,
+            )
         clips_limit, clip_length, max_parts = broll_download_plan(
             duration=duration,
             segment_length=plan_length,

@@ -22,6 +22,12 @@ class BrollPoolTests(unittest.TestCase):
         right = ["porsche", "gt3rs", "cinematic"]
         self.assertTrue(broll_pool.subjects_match(left, right))
 
+    def test_named_models_do_not_share_brand_pool(self) -> None:
+        query = "Ferrari 488 Pista night city cinematic 4k driving"
+        self.assertTrue(broll_pool.subjects_match(query, ["ferrari", "488", "pista"]))
+        self.assertFalse(broll_pool.subjects_match(query, ["ferrari", "sf90", "stradale"]))
+        self.assertFalse(broll_pool.subjects_match(query, ["ferrari", "roma", "coastal"]))
+
     def test_stash_and_take_roundtrip(self) -> None:
         root = Path(self.id().split(".")[-1])
         jobs_root = root / "motivational"

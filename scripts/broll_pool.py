@@ -50,11 +50,44 @@ def _write_pool_meta(path: Path, *, subject: str) -> None:
     meta_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+_MODEL_HINTS = frozenset(
+    {
+        "488",
+        "812",
+        "911",
+        "aventador",
+        "cayman",
+        "carrera",
+        "gt2",
+        "gt3",
+        "gt3rs",
+        "huracan",
+        "pista",
+        "revuelto",
+        "roma",
+        "sf90",
+        "targa",
+        "urus",
+    }
+)
+
+
+def _model_tokens(tokens: list[str]) -> set[str]:
+    return {item for item in tokens if item in _MODEL_HINTS}
+
+
 def subjects_match(left: str, right_tokens: list[str]) -> bool:
+    """Same brand may share a pool. Named models (488 vs SF90) stay separate."""
     want = subject_tokens(left)
     have = [str(item) for item in right_tokens if item]
     if not want or not have:
         return want == have
+    want_models = _model_tokens(want)
+    have_models = _model_tokens(have)
+    if want_models and have_models:
+        return bool(want_models & have_models)
+    if want_models and not have_models:
+        return False
     if want[0] == have[0]:
         return True
     shared = set(want) & set(have)

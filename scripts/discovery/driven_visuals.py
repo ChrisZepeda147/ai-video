@@ -44,14 +44,43 @@ def driven_beat_duration(*, elapsed: float, remaining: float) -> float:
     return min(beat, max(remaining, 0.05))
 
 
-def planning_segment_length(*, driven_pacing: bool, fallback: float) -> float:
-    """Conservative beat length for clip-count planning."""
+def speech_window_defaults() -> tuple[float, float]:
+    """Daily-short excerpt window. Override with --min-seconds / --max-seconds."""
+    speech = load_defaults().get("speech") or {}
+    return (
+        float(speech.get("min_seconds") or 20),
+        float(speech.get("max_seconds") or 28),
+    )
+
+
+def planning_segment_length(
+    *,
+    driven_pacing: bool,
+    fallback: float,
+    duration: float | None = None,
+) -> float:
+    """Blend fast-open + settle beats so clip-count matches the real cut."""
     if not driven_pacing:
         return fallback
     preset = load_defaults()
     opener = preset.get("opener") or {}
-    fast_min = float(opener.get("fast_beat_min_sec") or 0.8)
-    return max(0.8, min(fallback, fast_min + 0.2))
+    fast_window = float(opener.get("fast_pacing_window_sec") or 6)
+    fast_avg = (
+        float(opener.get("fast_beat_min_sec") or 0.8)
+        + float(opener.get("fast_beat_max_sec") or 1.8)
+    ) / 2
+    settle_avg = (
+        float(opener.get("settle_beat_min_sec") or 2.0)
+        + float(opener.get("settle_beat_max_sec") or 3.5)
+    ) / 2
+    total = float(duration) if duration and duration > 0 else 0.0
+    if total <= 0:
+        blended = settle_avg
+    else:
+        fast = min(fast_window, total)
+        rest = max(total - fast, 0.0)
+        blended = (fast * fast_avg + rest * settle_avg) / total
+    return max(0.8, min(fallback, blended))
 
 
 def caption_mode_default() -> str:
