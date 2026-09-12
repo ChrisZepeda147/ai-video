@@ -127,7 +127,7 @@ def _probe_duration_sec(path: Path) -> float | None:
             check=True,
             timeout=30,
         )
-        return float(probe.stdout.strip())
+        return float(probe.stdout.strip().split(",")[0].strip())
     except (subprocess.SubprocessError, ValueError, OSError):
         return None
 

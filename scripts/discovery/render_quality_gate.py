@@ -41,7 +41,7 @@ def _ffprobe_duration(path: Path) -> float:
         check=True,
         env=subprocess_env(),
     )
-    return float(result.stdout.strip())
+    return float(result.stdout.strip().split(",")[0].strip())
 
 
 def _leading_silence_sec(path: Path) -> float | None:

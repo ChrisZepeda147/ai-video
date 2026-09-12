@@ -457,7 +457,7 @@ def verify_output(path: Path, expected: float) -> None:
     streams: dict[str, float] = {}
     for line in result.stdout.strip().splitlines():
         kind, _, value = line.partition(",")
-        streams[kind] = float(value)
+        streams[kind] = float(value.strip().split(",")[0].strip())
     video = streams.get("video")
     audio = streams.get("audio")
     if video is None or audio is None:

@@ -62,7 +62,7 @@ def probe_duration(path: Path) -> float:
         text=True,
         check=True,
     )
-    return float(result.stdout.strip())
+    return float(result.stdout.strip().split(",")[0].strip())
 
 
 # Charcoal + light plum cast — matches prompts/dark-luxury-still.md
