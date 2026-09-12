@@ -1180,7 +1180,7 @@ def render_job(
     if quality_gate:
         from discovery.render_quality_gate import check_render_quality
 
-        report = check_render_quality(output, expected_duration=duration)
+        report = check_render_quality(output, expected_duration=duration, subject=subject)
         for warning in report.warnings:
             print(f"  quality warn: {warning}")
         if not report.ok:

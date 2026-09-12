@@ -89,6 +89,24 @@ class BrollFrameGateTests(unittest.TestCase):
         self.assertIn("missing-subject", broll_frame_gate.frame_fail_reasons(boats.read_bytes(), subject))
         self.assertNotIn("missing-subject", broll_frame_gate.frame_fail_reasons(car.read_bytes(), subject))
 
+    def test_vehicle_opener_prompt_rejects_cabin(self) -> None:
+        prompt = broll_frame_gate.vision_prompt("Ferrari 488 Pista", opener=True)
+        self.assertIn("full_exterior", prompt)
+        self.assertIn("cabin", prompt.lower())
+        self.assertIn("rear", prompt.lower())
+        regular = broll_frame_gate.vision_prompt("Ferrari 488 Pista", opener=False)
+        self.assertIn("cabin", regular.lower())
+
+    def test_opener_verdict_rejects_rear_and_coffee(self) -> None:
+        coffee = '{"object":"coffee tamper","view":"other","full_exterior":true}'
+        rear = '{"object":"ferrari rear","view":"rear","full_exterior":true}'
+        hero = '{"object":"red ferrari coupe","view":"three_quarter","full_exterior":true}'
+        host = '{"object":"man with ferrari","view":"front","full_exterior":true}'
+        self.assertFalse(broll_frame_gate.parse_opener_verdict(coffee))
+        self.assertFalse(broll_frame_gate.parse_opener_verdict(rear))
+        self.assertFalse(broll_frame_gate.parse_opener_verdict(host))
+        self.assertTrue(broll_frame_gate.parse_opener_verdict(hero))
+
     def test_sample_clip_stamps_cover_clip(self) -> None:
         stamps = broll_frame_gate.sample_clip_stamps(8.0, step=1.0)
         self.assertGreaterEqual(len(stamps), 6)

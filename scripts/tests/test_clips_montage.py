@@ -46,6 +46,19 @@ class ClipsMontageTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             picker.pick()
 
+    def test_clip_picker_consume_and_unused(self) -> None:
+        clips = [
+            Path("aaa_part01.mp4"),
+            Path("bbb_part01.mp4"),
+            Path("ccc_part01.mp4"),
+        ]
+        picker = montage._ClipPicker(clips, random.Random(0))
+        first = clips[0]
+        picker.consume(first)
+        leftover = picker.unused_clips()
+        self.assertNotIn(first, leftover)
+        self.assertEqual(len(leftover), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

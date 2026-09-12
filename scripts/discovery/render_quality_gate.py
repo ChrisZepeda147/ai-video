@@ -79,10 +79,22 @@ def _ensure_scripts_path() -> None:
         sys.path.insert(0, str(scripts))
 
 
+def _opener_is_full_exterior(video_path: Path, subject: str) -> bool | None:
+    from broll_frame_gate import extract_preview_frame, vision_subject_present, wants_vehicle
+
+    if not wants_vehicle(subject):
+        return None
+    frame = extract_preview_frame(video_path, 0.12)
+    if not frame:
+        return False
+    return vision_subject_present(frame, subject, opener=True)
+
+
 def check_render_quality(
     video_path: Path,
     *,
     expected_duration: float | None = None,
+    subject: str = "",
 ) -> QualityReport:
     preset = load_defaults()
     gate = preset.get("quality_gate") or {}
@@ -118,6 +130,16 @@ def check_render_quality(
     leading = _leading_silence_sec(video_path)
     if leading is not None and leading > max_leading:
         report.warnings.append(f"speech starts late (~{leading:.2f}s leading silence)")
+
+    if subject and gate.get("require_full_exterior_opener", True):
+        from broll_frame_gate import wants_vehicle
+
+        if wants_vehicle(subject):
+            opener = _opener_is_full_exterior(video_path, subject)
+            if opener is False:
+                report.errors.append("opener is not a full exterior view of the car")
+            elif opener is None:
+                report.warnings.append("could not vision-check opener frame")
 
     if report.errors:
         report.ok = False

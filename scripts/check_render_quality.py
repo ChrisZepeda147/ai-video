@@ -18,9 +18,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Check a finished MP4 before publishing.")
     parser.add_argument("--video", type=Path, required=True)
     parser.add_argument("--expected-duration", type=float, default=None)
+    parser.add_argument("--subject", default="", help="B-roll subject for opener check")
     args = parser.parse_args()
 
-    report = check_render_quality(args.video, expected_duration=args.expected_duration)
+    report = check_render_quality(
+        args.video,
+        expected_duration=args.expected_duration,
+        subject=args.subject,
+    )
     for warning in report.warnings:
         print(f"WARN: {warning}")
     for error in report.errors:

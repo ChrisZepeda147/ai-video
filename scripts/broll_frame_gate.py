@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 import re
 import subprocess
@@ -73,6 +74,7 @@ VEHICLE_WORDS = frozenset(
         "aventador",
         "car",
         "carrera",
+        "coupe",
         "ferrari",
         "gt2",
         "gt3",
@@ -83,8 +85,32 @@ VEHICLE_WORDS = frozenset(
         "pista",
         "porsche",
         "revuelto",
+        "roma",
         "sf90",
+        "supercar",
         "urus",
+        "vehicle",
+    }
+)
+OPENER_VIEWS = frozenset({"front", "three_quarter", "side"})
+NON_CAR_OBJECTS = frozenset(
+    {
+        "coffee",
+        "tamper",
+        "espresso",
+        "person",
+        "people",
+        "man",
+        "woman",
+        "host",
+        "face",
+        "kitchen",
+        "watch",
+        "phone",
+        "logo",
+        "text",
+        "mansion",
+        "house",
     }
 )
 
@@ -230,8 +256,15 @@ def frame_fail_reasons(png_bytes: bytes, subject: str = "") -> list[str]:
 
 
 def extract_preview_frame(source: Path, timestamp: float) -> bytes | None:
+    ffmpeg = "ffmpeg"
+    try:
+        from toolchain_env import resolve_tool
+
+        ffmpeg = resolve_tool("ffmpeg") or "ffmpeg"
+    except Exception:
+        pass
     cmd = [
-        "ffmpeg",
+        ffmpeg,
         "-y",
         "-ss",
         f"{timestamp:.3f}",
@@ -320,12 +353,15 @@ def vision_prompt(subject: str, *, opener: bool = False) -> str:
     subject = subject.strip()
     if opener and wants_vehicle(subject):
         return (
-            f'Does this frame show a FULL EXTERIOR view of this vehicle: "{subject}"? '
-            "Answer YES only if the whole car body (or most of it) is visible from outside "
-            "— front three-quarter, side profile, or wide hero shot. "
-            "Answer NO if this is a cabin/interior, dashboard, steering wheel, driver POV, "
-            "only the rear or taillights, a wheel close-up, a person talking, "
-            "a title card, or no car."
+            f'Intended subject: "{subject}". Reply with JSON only, no extra text: '
+            '{"object":"2-4 word main object","view":"front|three_quarter|side|rear|cabin|other",'
+            '"full_exterior":true_or_false}. '
+            "full_exterior is true ONLY if a car is seen from outside and most of the body "
+            "is visible from the front, three-quarter, or side. "
+            "full_exterior is false for rear-only, taillights, cabin, dashboard, "
+            "a wheel close-up, a person standing in frame, a house/mansion tour, "
+            "a title card, coffee, or anything that is not a car as the main object. "
+            "If a person is the center of the shot, full_exterior is false even if a car is nearby."
         )
     extra = ""
     if wants_vehicle(subject):
@@ -340,6 +376,44 @@ def vision_prompt(subject: str, *, opener: bool = False) -> str:
         "an empty room, a different object, or anything out of context "
         f"for that subject.{extra}"
     )
+
+
+def parse_opener_verdict(raw: str) -> bool | None:
+    """Parse opener JSON. True only for a full front/side/3-4 exterior car."""
+    text = (raw or "").strip()
+    if not text:
+        return None
+    start = text.find("{")
+    end = text.rfind("}")
+    if start < 0 or end <= start:
+        upper = text.upper()
+        if upper.startswith("YES"):
+            return True
+        if upper.startswith("NO"):
+            return False
+        return None
+    try:
+        payload = json.loads(text[start : end + 1])
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    obj = str(payload.get("object") or "").lower()
+    view = str(payload.get("view") or "").lower().replace("-", "_")
+    full = payload.get("full_exterior")
+    if any(token in obj for token in NON_CAR_OBJECTS):
+        return False
+    if view in {"rear", "cabin", "other"}:
+        return False
+    if view not in OPENER_VIEWS:
+        return False
+    if full is False or str(full).lower() in {"false", "0", "no"}:
+        return False
+    if full is True or str(full).lower() in {"true", "1", "yes"}:
+        if any(word in obj for word in VEHICLE_WORDS) or "car" in obj:
+            return True
+        return False
+    return None
 
 
 def vision_subject_present(
@@ -364,7 +438,7 @@ def vision_subject_present(
     prompt = vision_prompt(subject, opener=opener)
     response = client.chat.completions.create(
         model="gpt-4o-mini",
-        max_tokens=4,
+        max_tokens=80 if opener else 4,
         messages=[
             {
                 "role": "user",
@@ -378,10 +452,13 @@ def vision_subject_present(
             }
         ],
     )
-    answer = (response.choices[0].message.content or "").strip().upper()
-    if answer.startswith("YES"):
+    answer = (response.choices[0].message.content or "").strip()
+    if opener and wants_vehicle(subject):
+        return parse_opener_verdict(answer)
+    upper = answer.upper()
+    if upper.startswith("YES"):
         return True
-    if answer.startswith("NO"):
+    if upper.startswith("NO"):
         return False
     return None
 
