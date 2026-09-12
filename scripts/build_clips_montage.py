@@ -155,6 +155,16 @@ class _ClipPicker:
         self.unused_files.discard(clip)
         return clip
 
+    def consume(self, clip: Path) -> None:
+        self.unused_files.discard(clip)
+        source_id = _source_id(clip)
+        if source_id in self._unused_sources:
+            self._unused_sources.remove(source_id)
+
+    def unused_clips(self, exclude: set[Path] | None = None) -> list[Path]:
+        blocked = exclude or set()
+        return [clip for clip in self.all_clips if clip in self.unused_files and clip not in blocked]
+
     def used_clips(self) -> set[Path]:
         return {clip for clip in self.all_clips if clip not in self.unused_files}
 
@@ -181,23 +191,29 @@ def _pick_segment(
     source_needed: float | None = None,
     strict: bool = False,
     use_vision: bool = False,
+    opener: bool = False,
 ) -> tuple[float, float] | None:
     duration = probe_duration(clip)
     needed = source_needed if source_needed is not None else segment_length
-    samples = scan_clip_local(clip, duration=duration)
+    samples = scan_clip_local(clip, duration=duration, subject=subject)
     min_length = min(needed, duration, 2.5)
     spans = clean_spans(samples, min_length=min_length)
     if not spans:
         return None
 
     fit = [span for span in spans if span[1] - span[0] >= min(needed, duration) - 0.05]
-    if fit:
+    if opener and fit:
+        window_start, window_len = _window_in_span(fit[0], min(needed, duration), rng)
+        window_start = fit[0][0]
+    elif fit:
         window_start, window_len = _window_in_span(rng.choice(fit), min(needed, duration), rng)
     else:
         longest = longest_clean_span(samples, min_length=min_length)
         if longest is None:
             return None
         window_start, window_len = _window_in_span(longest, min(needed, duration), rng)
+        if opener:
+            window_start = longest[0]
 
     report = score_window(
         clip,
@@ -207,6 +223,7 @@ def _pick_segment(
         subject=subject,
         strict=strict,
         use_vision=use_vision,
+        opener=opener,
     )
     if not report["ok"]:
         return None
@@ -424,6 +441,53 @@ def _beat_duration(
     return min(driven_beat_duration(elapsed=accumulated, remaining=remaining), remaining)
 
 
+def _pick_opener_window(
+    picker: _ClipPicker,
+    *,
+    segment_length: float,
+    rng: random.Random,
+    subject: str,
+    source_needed: float,
+    use_vision: bool,
+    exclude: set[Path] | None = None,
+) -> tuple[Path, float, float]:
+    """First beat: scan unused clips until one has a full-exterior opener."""
+    from broll_frame_gate import wants_vehicle
+
+    if not wants_vehicle(subject):
+        return _pick_passing_window(
+            picker,
+            segment_length=segment_length,
+            rng=rng,
+            subject=subject,
+            source_needed=source_needed,
+            strict=True,
+            use_vision=use_vision,
+            exclude=exclude,
+            opener=False,
+        )
+    for clip in picker.unused_clips(exclude):
+        picked = _pick_segment(
+            clip,
+            segment_length=segment_length,
+            rng=rng,
+            subject=subject,
+            source_needed=source_needed,
+            strict=True,
+            use_vision=use_vision,
+            opener=True,
+        )
+        if picked:
+            picker.consume(clip)
+            print(f"  opener: {clip.name} (full exterior)")
+            return clip, picked[0], picked[1]
+        print(f"  skip opener {clip.name}: not a full exterior")
+    raise RuntimeError(
+        "No B-roll clip has a full exterior opener. "
+        "Need a wide outside view of the car — not cabin, rear-only, or empty."
+    )
+
+
 def _pick_passing_window(
     picker: _ClipPicker,
     *,
@@ -434,7 +498,18 @@ def _pick_passing_window(
     strict: bool,
     use_vision: bool,
     exclude: set[Path] | None = None,
+    opener: bool = False,
 ) -> tuple[Path, float, float]:
+    if opener:
+        return _pick_opener_window(
+            picker,
+            segment_length=segment_length,
+            rng=rng,
+            subject=subject,
+            source_needed=source_needed,
+            use_vision=use_vision,
+            exclude=exclude,
+        )
     tried: set[Path] = set(exclude or ())
     attempts = 0
     limit = max(len(picker.all_clips) * 2, 6)
@@ -533,6 +608,7 @@ def build_silent_montage(
                     source_needed=needed,
                     strict=strict,
                     use_vision=vision,
+                    opener=segment_index == 0,
                 )
                 out_len = min(this_duration, source_len / max(playback_speed, 0.05))
                 segment_path = tmp_dir / f"seg_{segment_index:04d}.mp4"
@@ -676,6 +752,7 @@ def build_montage(
                     source_needed=needed,
                     strict=strict,
                     use_vision=vision,
+                    opener=segment_index == 0,
                 )
                 out_len = min(this_duration, source_len / max(playback_speed, 0.05))
                 segment_path = tmp_dir / f"seg_{segment_index:04d}.mp4"

@@ -315,7 +315,39 @@ def _load_env_files() -> None:
                 os.environ[key] = value.strip().strip('"').strip("'")
 
 
-def vision_subject_present(png_bytes: bytes, subject: str) -> bool | None:
+def vision_prompt(subject: str, *, opener: bool = False) -> str:
+    """Ask vision whether the subject is in frame. Opener is stricter for cars."""
+    subject = subject.strip()
+    if opener and wants_vehicle(subject):
+        return (
+            f'Does this frame show a FULL EXTERIOR view of this vehicle: "{subject}"? '
+            "Answer YES only if the whole car body (or most of it) is visible from outside "
+            "— front three-quarter, side profile, or wide hero shot. "
+            "Answer NO if this is a cabin/interior, dashboard, steering wheel, driver POV, "
+            "only the rear or taillights, a wheel close-up, a person talking, "
+            "a title card, or no car."
+        )
+    extra = ""
+    if wants_vehicle(subject):
+        extra = (
+            " For a vehicle, answer NO if there is no car, only a cabin/dashboard, "
+            "or the frame is a person talking."
+        )
+    return (
+        f'Does this frame clearly show this subject: "{subject}"? '
+        "Answer YES only if the subject is visible as the main object. "
+        "Answer NO if it is a person talking, a title card, a logo, "
+        "an empty room, a different object, or anything out of context "
+        f"for that subject.{extra}"
+    )
+
+
+def vision_subject_present(
+    png_bytes: bytes,
+    subject: str,
+    *,
+    opener: bool = False,
+) -> bool | None:
     """Return True/False when a vision key exists, else None."""
     if not subject.strip() or not png_bytes:
         return None
@@ -329,13 +361,7 @@ def vision_subject_present(png_bytes: bytes, subject: str) -> bool | None:
         return None
     payload = base64.b64encode(png_bytes).decode("ascii")
     client = OpenAI(api_key=api_key)
-    prompt = (
-        f'Does this frame clearly show this subject: "{subject}"? '
-        "Answer YES only if the subject is visible as the main object. "
-        "Answer NO if it is a person talking, a title card, a logo, "
-        "an empty room, a different object, or anything out of context "
-        "for that subject."
-    )
+    prompt = vision_prompt(subject, opener=opener)
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         max_tokens=4,
@@ -466,6 +492,7 @@ def score_window(
     subject: str = "",
     strict: bool = False,
     use_vision: bool = False,
+    opener: bool = False,
 ) -> dict[str, object]:
     frames: list[bytes] = []
     for stamp in sample_timestamps(clip_duration, start, duration):
@@ -474,6 +501,14 @@ def score_window(
             frames.append(frame)
     report = window_report(frames, strict=strict, subject=subject)
     if not report["ok"] or not use_vision or not subject or not frames:
+        return report
+    if opener and wants_vehicle(subject):
+        present = vision_subject_present(frames[0], subject, opener=True)
+        if present is False:
+            report["ok"] = False
+            reasons = list(report["reasons"])
+            reasons.append("weak-opener")
+            report["reasons"] = reasons
         return report
     checked = 0
     for frame in (frames[0], frames[len(frames) // 2]):
