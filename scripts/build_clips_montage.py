@@ -695,6 +695,8 @@ def _pick_passing_window(
     attempts = 0
     limit = max(len(picker.all_clips) * 2, 6)
     while attempts < limit:
+        if not picker.unused_clips(tried):
+            break
         clip = picker.pick(exclude=tried)
         picked = _pick_segment(
             clip,
@@ -712,6 +714,23 @@ def _pick_passing_window(
         picker.unused_files.add(clip)
         if len(tried) >= len(picker.all_clips):
             break
+    leftovers = picker.unused_clips()
+    if leftovers:
+        clip = max(leftovers, key=probe_duration)
+        relaxed = min(source_needed, max(0.8, probe_duration(clip) - 0.05))
+        picked = _pick_segment(
+            clip,
+            segment_length=segment_length,
+            rng=rng,
+            subject=subject,
+            source_needed=relaxed,
+            strict=False,
+            use_vision=use_vision,
+        )
+        if picked:
+            picker.consume(clip)
+            print(f"  short clip fallback: {clip.name} ({probe_duration(clip):.1f}s)")
+            return clip, picked[0], picked[1]
     raise RuntimeError("No B-roll window passed the subject/frame gate.")
 
 
