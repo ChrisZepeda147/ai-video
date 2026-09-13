@@ -32,8 +32,11 @@ from broll_frame_gate import (
 from build_clips_montage import (
     DEFAULT_PLAYBACK_SPEED,
     build_montage,
+    drop_low_fps_clips,
+    is_usable_fps,
     min_unique_clips_needed,
     probe_duration,
+    probe_fps,
     segment_length_for_duration,
 )
 from discovery.driven_visuals import speech_window_defaults
@@ -1037,7 +1040,7 @@ def filter_broll_clips(
     use_vision: bool = True,
 ) -> list[Path]:
     kept: list[Path] = []
-    all_clips = sorted(clips_dir.glob("*_part*.mp4"))
+    all_clips = drop_low_fps_clips(sorted(clips_dir.glob("*_part*.mp4")), delete=True)
     for clip in all_clips:
         try:
             duration = probe_duration(clip)

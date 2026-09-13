@@ -14,7 +14,9 @@ from pathlib import Path
 from broll_frame_gate import clean_spans, longest_clean_span, scan_clip_local, score_window
 from build_stills_slideshow import burn_captions
 
-FPS = 30
+FPS = 60
+PREFERRED_FPS = 60
+MIN_USABLE_FPS = 30.0
 DEFAULT_PLAYBACK_SPEED = 0.80
 BASELINE_AUDIO_SECONDS = 60.0
 BASELINE_SEGMENT_SECONDS = 12.0
@@ -65,6 +67,67 @@ def probe_duration(path: Path) -> float:
     return float(result.stdout.strip().split(",")[0].strip())
 
 
+def probe_fps(path: Path) -> float:
+    """Native frame rate. Uses r_frame_rate, falls back to avg."""
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=r_frame_rate,avg_frame_rate",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    rates: list[float] = []
+    for line in result.stdout.splitlines():
+        raw = line.strip()
+        if not raw:
+            continue
+        if "/" in raw:
+            num, den = raw.split("/", 1)
+            try:
+                den_f = float(den)
+            except ValueError:
+                continue
+            rates.append(float(num) / den_f if den_f else 0.0)
+            continue
+        try:
+            rates.append(float(raw))
+        except ValueError:
+            continue
+    return max(rates) if rates else 0.0
+
+
+def is_usable_fps(fps: float, *, min_fps: float = MIN_USABLE_FPS) -> bool:
+    """True for 30fps and up. 24p/25p is a hard reject."""
+    return fps >= min_fps - 0.51
+
+
+def drop_low_fps_clips(clips: list[Path], *, delete: bool = False) -> list[Path]:
+    """Skip (and optionally delete) B-roll under 30fps."""
+    kept: list[Path] = []
+    for clip in clips:
+        try:
+            fps = probe_fps(clip)
+        except (OSError, subprocess.CalledProcessError, ValueError):
+            fps = 0.0
+        if not is_usable_fps(fps):
+            print(f"  drop {clip.name}: {fps:.1f} fps")
+            if delete:
+                clip.unlink(missing_ok=True)
+            continue
+        kept.append(clip)
+    return kept
+
+
 # Charcoal + light plum cast — matches prompts/dark-luxury-still.md
 # Saturation stays high enough that paint and sky do not go grey.
 DARK_LUXURY_GRADE = (
@@ -81,7 +144,7 @@ def _duration_to_frames(seconds: float) -> int:
 def _scale_crop_filter(*, width: int, height: int, grade: bool) -> str:
     chain = (
         f"scale={width}:{height}:force_original_aspect_ratio=increase,"
-        f"crop={width}:{height},fps=30"
+        f"crop={width}:{height},fps={FPS}"
     )
     if grade:
         chain += f",{DARK_LUXURY_GRADE}"
@@ -564,7 +627,7 @@ def build_silent_montage(
     driven_pacing: bool = False,
 ) -> set[Path]:
     """Stitch shuffled B-roll into a fixed-length silent video."""
-    clips = sorted(clips_dir.glob("*.mp4"))
+    clips = drop_low_fps_clips(sorted(clips_dir.glob("*.mp4")), delete=True)
     if not clips:
         raise FileNotFoundError(f"No .mp4 clips in {clips_dir}")
     if target_duration <= 0:
@@ -703,7 +766,7 @@ def build_montage(
     include_audio: bool = True,
     driven_pacing: bool = False,
 ) -> set[Path]:
-    clips = sorted(clips_dir.glob("*.mp4"))
+    clips = drop_low_fps_clips(sorted(clips_dir.glob("*.mp4")), delete=True)
     if not clips:
         raise FileNotFoundError(f"No .mp4 clips in {clips_dir}")
     if include_audio and (audio is None or not audio.is_file()):

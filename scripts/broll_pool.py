@@ -126,10 +126,20 @@ def take_from_pool(
     """Move pooled clips into a job clips folder for the same subject."""
     clips_dir.mkdir(parents=True, exist_ok=True)
     taken: list[Path] = []
+    from build_clips_montage import is_usable_fps, probe_fps
+
     for pool_dir in find_matching_pools(jobs_root, subject):
         for clip in list_pool_clips(pool_dir):
             if count is not None and len(taken) >= count:
                 return taken
+            try:
+                fps = probe_fps(clip)
+            except (OSError, ValueError):
+                fps = 0.0
+            if not is_usable_fps(fps):
+                print(f"  drop pool {clip.name}: {fps:.1f} fps")
+                clip.unlink(missing_ok=True)
+                continue
             dest = clips_dir / clip.name
             if dest.exists():
                 continue
@@ -153,8 +163,24 @@ def stash_unused_clips(
     used_names = {Path(item).name for item in used}
     pool_dir = pool_dir_for_subject(jobs_root, subject)
     stashed: list[Path] = []
+    from build_clips_montage import is_usable_fps, probe_fps
+
     for clip in sorted(clips_dir.glob(CLIP_GLOB)):
         if clip.name in used_names:
+            continue
+        try:
+            fps = probe_fps(clip)
+        except (OSError, ValueError):
+            fps = 0.0
+        import subprocess as _sp
+
+        try:
+            fps = probe_fps(clip)
+        except (_sp.CalledProcessError, OSError, ValueError):
+            fps = 0.0
+        if not is_usable_fps(fps):
+            print(f"  drop {clip.name}: {fps:.1f} fps")
+            clip.unlink(missing_ok=True)
             continue
         pool_dir.mkdir(parents=True, exist_ok=True)
         dest = pool_dir / clip.name
