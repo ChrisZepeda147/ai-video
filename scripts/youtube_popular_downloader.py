@@ -645,6 +645,12 @@ def download_videos(
         "writeinfojson": True,
         "postprocessors": postprocessors,
         "overwrites": True,
+        "retries": 0,
+        "fragment_retries": 0,
+        "extractor_retries": 0,
+        "file_access_retries": 0,
+        "socket_timeout": 15,
+        "skip_unavailable_fragments": True,
         **_toolchain_opts(),
     }
 
@@ -724,7 +730,12 @@ def download_videos(
         except Exception as exc:  # noqa: BLE001 — collect per-video failures
             record["status"] = "error"
             record["error"] = str(exc)
-            _safe_print(f"    Failed: {exc}", file=sys.stderr, quiet=quiet)
+            err = str(exc)
+            if "403" in err or "Forbidden" in err:
+                _safe_print(f"    Skip 403: {candidate.video_id} — next source", file=sys.stderr, quiet=quiet)
+            else:
+                _safe_print(f"    Failed: {exc}", file=sys.stderr, quiet=quiet)
+            continue
         results.append(record)
 
     return results
@@ -908,7 +919,7 @@ def _safe_print(message: str, *, file=None, quiet: bool = False) -> None:
     stream = file or sys.stdout
     encoding = getattr(stream, "encoding", None) or "utf-8"
     safe = str(message).encode(encoding, errors="replace").decode(encoding, errors="replace")
-    print(safe, file=stream)
+    print(safe, file=stream, flush=True)
 
 
 def _load_local_env() -> None:
