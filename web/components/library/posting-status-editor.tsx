@@ -143,6 +143,7 @@ export function PostingStatusEditor({
           />
         ))}
         {error ? <p className="text-xs text-red-300">{error}</p> : null}
+        <p className="text-[10px] text-zinc-600">Mark used moves the finished MP4 into the used folder.</p>
       </div>
     );
   }
@@ -194,6 +195,7 @@ export function PostingStatusEditor({
         })}
       </div>
       {error ? <p className="text-xs text-red-300">{error}</p> : null}
+      <p className="text-[11px] text-zinc-500">Mark used moves the finished file to downloads/production_library/used/. Unmark sends it back to unused/.</p>
     </div>
   );
 }

@@ -7,7 +7,7 @@ export default function VideosPage() {
     <>
       <PageHeader
         title="Videos"
-        description="All finished Shorts — site pipeline and legacy renders from Stephen's scripts, in one library."
+        description="All finished Shorts — unused and used folders, site pipeline, and legacy renders."
       />
       <PublishingQueue />
       <VideosWorkspace />

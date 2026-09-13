@@ -27,6 +27,8 @@ def main() -> int:
     list_p.add_argument("--limit", type=int, default=50)
     list_p.add_argument("--speaker")
     list_p.add_argument("--topic")
+    list_p.add_argument("--used", action="store_true", help="Only videos marked used / posted")
+    list_p.add_argument("--unused", action="store_true", help="Only unused finished videos")
 
     show_p = sub.add_parser("show", help="Show one video with components")
     show_p.add_argument("--video-id", type=int, required=True)
@@ -48,11 +50,16 @@ def main() -> int:
     store = DiscoveryStore(args.db or default_db_path())
     try:
         if args.cmd == "list":
+            if args.used and args.unused:
+                print(json.dumps({"error": "use --used or --unused, not both"}))
+                return 1
+            used_flag = True if args.used else False if args.unused else None
             payload = list_videos(
                 store,
                 limit=args.limit,
                 speaker=args.speaker,
                 topic=args.topic,
+                used=used_flag,
             )
         elif args.cmd == "show":
             payload = get_video(store, args.video_id)

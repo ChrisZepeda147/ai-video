@@ -1,0 +1,35 @@
+---
+description: Move finished library MP4s into unused/ or used/ when marked used
+alwaysApply: true
+---
+
+# Used vs unused finished videos
+
+Finished production-library MP4s live in two folders. Do not mix them.
+
+```
+downloads/production_library/unused/<video_key>/final.mp4
+downloads/production_library/used/<video_key>/final.mp4
+```
+
+## When
+
+- New register / import copies the final into **unused**.
+- Website **Mark used** (posting status) moves that folder to **used**.
+- Unmark all platforms moves it back to **unused**.
+- Job outputs under `downloads/motivational/.../output/` stay put. Library copy is the one that moves.
+
+## Do
+
+- After marking used, confirm `final_output_path` contains `/used/`.
+- Filter Library / Videos by Unused vs Used instead of hunting mixed folders.
+- Keep components next to the final when the library folder moves.
+
+```
+# ❌ BAD — dump posted and unposted finals in one folder
+downloads/production_library/video_000047/final.mp4
+
+# ✅ GOOD — posted file in used, still-to-post in unused
+downloads/production_library/unused/video_000047/final.mp4
+downloads/production_library/used/video_000048/final.mp4
+```

@@ -809,6 +809,7 @@ export async function fetchProductionLibrary(params?: {
   speaker?: string;
   topic?: string;
   status?: string;
+  used?: boolean;
 }) {
   return fetchJson<{ items: ProductionLibraryVideo[] }>(buildUrl("/api/library/videos", params));
 }

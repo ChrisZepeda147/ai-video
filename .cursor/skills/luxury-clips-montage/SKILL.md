@@ -69,6 +69,8 @@ Script:
 
 First seconds of the output must show the subject with **movement** when possible. If a Porsche job opens on a house or a host, the gate failed — do not ship it.
 
+**Cars (required):** keep **exterior** frames only — drop cabin, dashboard, steering wheel, seats, interior POV. Opener is a **full view of the car** (front / three-quarter / side, most of the body) held **≥5 seconds** before a cut to detail. Check 0s, ~2.5s, and 5s on the output. See `.cursor/rules/car-exterior-frames.mdc`.
+
 ## Agent rules
 
 1. Run the script. Do not copy audio from another job unless the user asked to reuse it.

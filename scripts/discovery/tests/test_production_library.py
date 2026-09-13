@@ -8,10 +8,16 @@ import unittest
 from pathlib import Path
 
 from discovery.command_jobs import build_agent_prompt, create_command_job
-from discovery.config import project_root
 from discovery.cursor_bridge import run_agent
 from discovery.auto_register import auto_register_final_output, find_video_by_slug
-from discovery.production_library import check_reuse, register_video
+from unittest.mock import patch
+
+from discovery.production_library import (
+    check_reuse,
+    list_videos,
+    register_video,
+    update_video_posting_status,
+)
 from discovery.store import DiscoveryStore
 
 
@@ -96,6 +102,60 @@ class ProductionLibraryTests(unittest.TestCase):
             self.assertTrue(result.dry_run)
         finally:
             os.environ.pop("CURSOR_BRIDGE_DRY_RUN", None)
+
+    def test_mark_used_moves_final_between_folders(self) -> None:
+        root = Path(self.tmp.name) / "repo"
+        lib = root / "downloads" / "production_library"
+        job = root / "downloads" / "job"
+        job.mkdir(parents=True)
+        lib.mkdir(parents=True)
+        src = job / "speech.mp4"
+        src.write_bytes(b"\x00" * 120_000)
+
+        with patch("discovery.production_library.project_root", return_value=root):
+            with patch("discovery.production_library.production_library_dir", return_value=lib):
+                video = register_video(
+                    self.store,
+                    title="Night Drive",
+                    speaker="Test Speaker",
+                    final_output_path=str(src.relative_to(root).as_posix()),
+                    copy_final_to_library=True,
+                )
+                unused = lib / "unused" / video["video_key"] / "final.mp4"
+                used = lib / "used" / video["video_key"] / "final.mp4"
+                self.assertTrue(unused.is_file())
+                self.assertFalse(used.exists())
+                self.assertIn("/unused/", str(video["final_output_path"]).replace("\\", "/"))
+                self.assertFalse(video.get("used"))
+                self.assertEqual(video.get("finished_bucket"), "unused")
+
+                marked = update_video_posting_status(
+                    self.store,
+                    int(video["id"]),
+                    owner="chris",
+                    tiktok=True,
+                )
+                self.assertTrue(used.is_file())
+                self.assertFalse(unused.exists())
+                self.assertTrue(marked.get("used"))
+                self.assertEqual(marked.get("finished_bucket"), "used")
+                self.assertIn("/used/", str(marked["final_output_path"]).replace("\\", "/"))
+
+                unused_list = list_videos(self.store, used=False, playable_only=False, heal=False)
+                used_list = list_videos(self.store, used=True, playable_only=False, heal=False)
+                self.assertEqual(len(unused_list), 0)
+                self.assertEqual(len(used_list), 1)
+
+                unmarked = update_video_posting_status(
+                    self.store,
+                    int(video["id"]),
+                    owner="chris",
+                    tiktok=False,
+                )
+                self.assertTrue(unused.is_file())
+                self.assertFalse(used.exists())
+                self.assertFalse(unmarked.get("used"))
+                self.assertEqual(unmarked.get("finished_bucket"), "unused")
 
 
 if __name__ == "__main__":

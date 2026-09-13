@@ -307,6 +307,9 @@ export type VideoLibraryItem = {
   reuse_confidence?: number | null;
   error_message?: string | null;
   published_to?: VideoPublishedLink[];
+  used?: boolean;
+  finished_bucket?: "used" | "unused" | null;
+  posting_status?: VideoPostingStatus;
 };
 
 export type VideoPublishedLink = {
@@ -473,6 +476,8 @@ export type ProductionLibraryVideo = {
   duration_sec?: number | null;
   created_at: string;
   posted?: boolean;
+  used?: boolean;
+  finished_bucket?: "used" | "unused" | null;
   platform_ids?:
     | Partial<Record<"tiktok" | "youtube" | "instagram", boolean>>
     | Record<PublishingOwner, Partial<Record<"tiktok" | "youtube" | "instagram", boolean>>>

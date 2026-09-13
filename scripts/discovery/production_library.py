@@ -90,6 +90,199 @@ def _is_playable_final(path: Path | None, *, min_bytes: int = MIN_PLAYABLE_BYTES
     return bool(path and path.is_file() and path.stat().st_size >= min_bytes)
 
 
+FINISHED_UNUSED = "unused"
+FINISHED_USED = "used"
+
+
+def video_is_used(video: dict[str, Any]) -> bool:
+    status = video.get("posting_status") or {}
+    if isinstance(status, dict) and "posted" in status:
+        return bool(status.get("posted"))
+    return bool(video.get("posted"))
+
+
+def annotate_finished_location(video: dict[str, Any]) -> dict[str, Any]:
+    used = video_is_used(video)
+    video["used"] = used
+    video["finished_bucket"] = FINISHED_USED if used else FINISHED_UNUSED
+    return video
+
+
+def finished_library_dir(video_key: str, *, used: bool, create: bool = True) -> Path:
+    bucket = FINISHED_USED if used else FINISHED_UNUSED
+    path = production_library_dir() / bucket / video_key
+    if create:
+        path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _rel_to_root(path: Path, root: Path) -> str | None:
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return None
+
+
+def _path_is_under(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _library_final_candidates(video: dict[str, Any], *, root: Path | None = None) -> list[Path]:
+    root = root or project_root()
+    key = str(video.get("video_key") or "")
+    if not key and video.get("id") is not None:
+        key = _video_key(int(video["id"]))
+    lib = production_library_dir()
+    out: list[Path] = []
+    seen: set[str] = set()
+    rel = video.get("final_output_path")
+    if rel:
+        path = Path(str(rel))
+        if not path.is_absolute():
+            path = root / path
+        out.append(path)
+    if key:
+        out.extend(
+            [
+                lib / FINISHED_UNUSED / key / "final.mp4",
+                lib / FINISHED_USED / key / "final.mp4",
+                lib / key / "final.mp4",
+            ]
+        )
+    unique: list[Path] = []
+    for path in out:
+        marker = str(path)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        unique.append(path)
+    return unique
+
+
+def _first_playable_candidate(video: dict[str, Any], *, root: Path | None = None) -> Path | None:
+    for path in _library_final_candidates(video, root=root):
+        if _is_playable_final(path):
+            return path
+    return None
+
+
+def _relocate_dir(src: Path, dest: Path) -> None:
+    if not src.exists():
+        return
+    if src.resolve() == dest.resolve():
+        return
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if not dest.exists():
+        shutil.move(str(src), str(dest))
+        return
+    for item in src.iterdir():
+        target = dest / item.name
+        if item.is_file() and target.is_file() and item.stat().st_size == target.stat().st_size:
+            item.unlink()
+            continue
+        if target.exists() and item.is_file():
+            target.unlink()
+        shutil.move(str(item), str(target))
+    try:
+        src.rmdir()
+    except OSError:
+        shutil.rmtree(src, ignore_errors=True)
+
+
+def _rewrite_video_file_paths(
+    store,
+    video_id: int,
+    *,
+    old_dir_rel: str | None,
+    new_dir_rel: str,
+    new_final_rel: str,
+) -> None:
+    store._conn.execute(
+        "UPDATE production_library_videos SET final_output_path = ?, updated_at = ? WHERE id = ?",
+        (new_final_rel, now_iso(), video_id),
+    )
+    rows = store._conn.execute(
+        "SELECT id, local_path FROM production_video_components WHERE video_id = ? AND local_path IS NOT NULL",
+        (video_id,),
+    ).fetchall()
+    old = (old_dir_rel or "").replace("\\", "/").rstrip("/")
+    new = new_dir_rel.replace("\\", "/").rstrip("/")
+    for row in rows:
+        posix = str(row["local_path"] or "").replace("\\", "/")
+        updated = None
+        if old and (posix == old or posix.startswith(old + "/")):
+            updated = new + posix[len(old) :]
+        elif Path(posix).name == "final.mp4" and "production_library" in posix:
+            updated = new_final_rel
+        if updated and updated != posix:
+            store._conn.execute(
+                "UPDATE production_video_components SET local_path = ? WHERE id = ?",
+                (updated, int(row["id"])),
+            )
+    store._conn.commit()
+
+
+def sync_finished_video_location(store, video: dict[str, Any], *, root: Path | None = None) -> dict[str, Any]:
+    """Put the library final in unused/ or used/ so posted files stay separate."""
+    root = root or project_root()
+    if not video.get("id"):
+        return annotate_finished_location(video)
+    if "posting_status" not in video:
+        enrich_video_posting(store, video)
+    used = video_is_used(video)
+    key = str(video.get("video_key") or _video_key(int(video["id"])))
+    target_dir = finished_library_dir(key, used=used, create=False)
+    target_final = target_dir / "final.mp4"
+    target_rel = target_final.relative_to(root).as_posix()
+    src = _first_playable_candidate(video, root=root)
+    if src is None:
+        return annotate_finished_location(video)
+    current_rel = str(video.get("final_output_path") or "").replace("\\", "/")
+    if src.resolve() == target_final.resolve():
+        if current_rel != target_rel:
+            old_dir_rel = str(Path(current_rel).parent.as_posix()) if current_rel else None
+            _rewrite_video_file_paths(
+                store,
+                int(video["id"]),
+                old_dir_rel=old_dir_rel,
+                new_dir_rel=target_dir.relative_to(root).as_posix(),
+                new_final_rel=target_rel,
+            )
+            video["final_output_path"] = target_rel
+        return annotate_finished_location(video)
+
+    old_dir = src.parent
+    old_dir_rel = _rel_to_root(old_dir, root)
+    lib_root = production_library_dir()
+    under_library = _path_is_under(src, lib_root)
+    if under_library:
+        _relocate_dir(old_dir, target_dir)
+    elif used and not _is_playable_final(target_final):
+        target_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, target_final)
+        old_dir_rel = None
+    else:
+        return annotate_finished_location(video)
+
+    if not _is_playable_final(target_final):
+        return annotate_finished_location(video)
+
+    _rewrite_video_file_paths(
+        store,
+        int(video["id"]),
+        old_dir_rel=old_dir_rel,
+        new_dir_rel=target_dir.relative_to(root).as_posix(),
+        new_final_rel=target_rel,
+    )
+    video["final_output_path"] = target_rel
+    video["playable"] = True
+    return annotate_finished_location(video)
+
+
 def _motivation_output_candidates(slug: str | None, root: Path) -> list[Path]:
     if not slug:
         return []
@@ -121,8 +314,7 @@ def heal_final_output(store, video: dict[str, Any], *, root: Path | None = None)
             shutil.copy2(src, dest)
         else:
             key = video.get("video_key") or _video_key(int(video["id"]))
-            dest_dir = production_library_dir() / key
-            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest_dir = finished_library_dir(key, used=video_is_used(video))
             dest = dest_dir / "final.mp4"
             shutil.copy2(src, dest)
             rel = dest.relative_to(root).as_posix()
@@ -427,6 +619,7 @@ def list_videos(
     speaker: str | None = None,
     topic: str | None = None,
     status: str | None = None,
+    used: bool | None = None,
     playable_only: bool = True,
     heal: bool = True,
 ) -> list[dict[str, Any]]:
@@ -441,7 +634,7 @@ def list_videos(
     if status:
         clauses.append("status = ?")
         params.append(status)
-    fetch_limit = limit * 3 if playable_only else limit
+    fetch_limit = limit * 5 if playable_only or used is not None else limit
     params.append(fetch_limit)
     rows = store._conn.execute(
         f"""
@@ -456,12 +649,20 @@ def list_videos(
     for row in rows:
         video = _row_to_video(row)
         if heal:
+            sync_finished_video_location(store, video)
             heal_final_output(store, video)
             final_path = _final_path_on_disk(video.get("final_output_path"))
             video["playable"] = _is_playable_final(final_path)
         if playable_only and not video.get("playable"):
             continue
-        items.append(enrich_video_posting(store, video))
+        if "posting_status" not in video:
+            enrich_video_posting(store, video)
+        annotate_finished_location(video)
+        if used is True and not video.get("used"):
+            continue
+        if used is False and video.get("used"):
+            continue
+        items.append(video)
         if len(items) >= limit:
             break
     return items
@@ -495,6 +696,7 @@ def get_video(store, video_id: int) -> dict[str, Any] | None:
     if not row:
         return None
     video = _row_to_video(row)
+    sync_finished_video_location(store, video)
     components = store._conn.execute(
         """
         SELECT * FROM production_video_components
@@ -515,7 +717,8 @@ def get_video(store, video_id: int) -> dict[str, Any] | None:
         (video.get("parent_video_id") or video_id, video_id),
     ).fetchall()
     video["versions"] = [dict(v) for v in versions]
-    return enrich_video_posting(store, video)
+    enrich_video_posting(store, video)
+    return annotate_finished_location(video)
 
 
 def get_video_by_key(store, video_key: str) -> dict[str, Any] | None:
@@ -626,13 +829,13 @@ def register_video(
         if parent:
             version = int(parent["version"]) + 1
 
-    dest_dir = production_library_dir() / key
-    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_dir = finished_library_dir(key, used=False, create=False)
 
     rel_final = final_output_path
     if final_output_path and copy_final_to_library:
         src = root / final_output_path if not Path(final_output_path).is_absolute() else Path(final_output_path)
         if src.is_file():
+            dest_dir.mkdir(parents=True, exist_ok=True)
             dest = dest_dir / "final.mp4"
             if not dest.exists() or dest.stat().st_size != src.stat().st_size:
                 shutil.copy2(src, dest)
@@ -741,8 +944,7 @@ def import_uploaded_video(
     root = project_root()
     video_id = _next_video_id(store)
     key = _video_key(video_id)
-    dest_dir = production_library_dir() / key
-    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_dir = finished_library_dir(key, used=False)
     final_dest = dest_dir / "final.mp4"
     shutil.copy2(upload_path, final_dest)
     rel_final = final_dest.relative_to(root).as_posix()

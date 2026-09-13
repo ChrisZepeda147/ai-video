@@ -109,6 +109,9 @@ class VideoLibraryItem:
     reuse_confidence: float | None = None
     error_message: str | None = None
     published_to: list[dict[str, Any]] = field(default_factory=list)
+    used: bool = False
+    finished_bucket: str | None = None
+    posting_status: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -164,6 +167,8 @@ def production_library_to_item(video: dict[str, Any], *, root: Path) -> VideoLib
         path=output_path,
         override=str(meta.get("media_kind_override") or "") or None,
     )
+    used = bool((video.get("posting_status") or {}).get("posted") or video.get("used") or video.get("posted"))
+    finished_bucket = str(video.get("finished_bucket") or ("used" if used else "unused"))
     return VideoLibraryItem(
         key=f"library:{video.get('id')}",
         source="library",
@@ -184,6 +189,9 @@ def production_library_to_item(video: dict[str, Any], *, root: Path) -> VideoLib
         media_kind=media_kind,
         display_path=display_media_path(output_path),
         editable=True,
+        used=used,
+        finished_bucket=finished_bucket,
+        posting_status=video.get("posting_status"),
     )
 
 
@@ -308,6 +316,9 @@ def build_video_library(
             project_id=item.project_id,
             slug=item.slug,
         )
+        if item.source != "library":
+            item.used = bool(item.published_to)
+            item.finished_bucket = "used" if item.used else "unused"
 
     items.sort(
         key=lambda item: (

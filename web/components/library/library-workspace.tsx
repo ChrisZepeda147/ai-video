@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { BackendOfflineBanner } from "@/components/backend-banner";
 import { formatDuration, formatTimecode } from "@/lib/format";
 import {
@@ -12,6 +12,8 @@ import {
   productionMediaUrl,
 } from "@/lib/api";
 import { PostingStatusEditor } from "@/components/library/posting-status-editor";
+import { FinishedBucketBadge, FinishedBucketFilter } from "@/components/library/finished-bucket-filter";
+import type { FinishedBucketFilterValue } from "@/components/library/finished-bucket-filter";
 import type { ProductionLibraryVideo, SharedSyncStatus } from "@/lib/types";
 
 export function LibraryWorkspace() {
@@ -22,6 +24,18 @@ export function LibraryWorkspace() {
   const [message, setMessage] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<SharedSyncStatus | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
+  const [bucketFilter, setBucketFilter] = useState<FinishedBucketFilterValue>("unused");
+
+  const unusedCount = videos.filter((video) => !(video.used ?? video.posting_status?.posted)).length;
+  const usedCount = videos.length - unusedCount;
+  const visibleVideos = useMemo(() => {
+    return videos.filter((video) => {
+      const used = Boolean(video.used ?? video.posting_status?.posted);
+      if (bucketFilter === "unused") return !used;
+      if (bucketFilter === "used") return used;
+      return true;
+    });
+  }, [videos, bucketFilter]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -193,7 +207,7 @@ export function LibraryWorkspace() {
         <div>
           <h2 className="text-lg font-semibold text-zinc-100">Production library</h2>
           <p className="text-sm text-zinc-400">
-            Production memory for Cursor — history, components, and versions. Reuse info is advisory unless you ask for unused-only.
+            Unused finished files live in downloads/production_library/unused/. Mark used moves them to used/.
           </p>
         </div>
         <div className="flex gap-3">
@@ -221,13 +235,24 @@ export function LibraryWorkspace() {
 
       {message ? <p className="text-sm text-zinc-300">{message}</p> : null}
 
+      <FinishedBucketFilter
+        value={bucketFilter}
+        onChange={setBucketFilter}
+        unusedCount={unusedCount}
+        usedCount={usedCount}
+      />
+
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {loading ? (
           <p className="text-sm text-zinc-500">Loading library…</p>
         ) : videos.length === 0 ? (
           <p className="text-sm text-zinc-500">No production videos yet. Run a command or import an MP4.</p>
+        ) : visibleVideos.length === 0 ? (
+          <p className="text-sm text-zinc-500">
+            No {bucketFilter} finished videos. Switch tabs to see the other folder.
+          </p>
         ) : (
-          videos.map((video) => (
+          visibleVideos.map((video) => (
             <article
               key={video.id}
               className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4 hover:border-zinc-700"
@@ -257,6 +282,9 @@ export function LibraryWorkspace() {
                   Video {video.id}
                   {video.version && video.version > 1 ? ` ${video.version_label || `v${video.version}`}` : ""}
                 </p>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <FinishedBucketBadge used={Boolean(video.used ?? video.posting_status?.posted)} />
+                </div>
                 <p className="truncate text-sm text-zinc-400">{video.title}</p>
                 <p className="mt-1 text-xs text-zinc-500">
                   {[

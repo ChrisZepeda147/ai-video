@@ -1145,8 +1145,9 @@ def library_videos_endpoint(
     speaker: str | None = None,
     topic: str | None = None,
     status: str | None = None,
+    used: bool | None = Query(None),
 ):
-    return {"items": list_videos(store, limit=limit, speaker=speaker, topic=topic, status=status)}
+    return {"items": list_videos(store, limit=limit, speaker=speaker, topic=topic, status=status, used=used)}
 
 
 @app.get("/api/library/videos/{video_id}")

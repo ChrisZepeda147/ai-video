@@ -51,6 +51,15 @@ When modifying an existing video, create a new library entry:
 python scripts/register_production_video.py ... --parent-video-id 47 --version-label v2 --change-summary "same audio, new visuals"
 ```
 
+## Used vs unused finished files
+
+Library copies of finished MP4s split by posting status:
+
+- Unused: `downloads/production_library/unused/<video_key>/final.mp4`
+- Used (marked posted on the site): `downloads/production_library/used/<video_key>/final.mp4`
+
+Mark used on Library / Videos. File moves with the flag. Unmark moves it back. See `.cursor/rules/used-finished-videos.mdc`.
+
 ## Use existing tooling
 
 - Motivation montage: `python scripts/build_motivation_job.py --slug ... --broll-query ... --reuse-policy allow`

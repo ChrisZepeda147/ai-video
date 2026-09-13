@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { CommandWorkspace } from "@/components/command/command-workspace";
 import { LibraryTrimEditor } from "@/components/library/library-trim-editor";
 import { PostingStatusEditor } from "@/components/library/posting-status-editor";
+import { FinishedBucketBadge } from "@/components/library/finished-bucket-filter";
 import { BackendOfflineBanner } from "@/components/backend-banner";
 import {
   CollapsibleMediaSection,
@@ -131,6 +132,9 @@ export function VideoDetailWorkspace({ videoId }: { videoId: number }) {
         <p className="mt-1 text-sm text-zinc-400">
           {[video.video_key, video.topic, video.status, video.version_label].filter(Boolean).join(" · ")}
         </p>
+        <div className="mt-2">
+          <FinishedBucketBadge used={Boolean(video.used ?? video.posting_status?.posted)} />
+        </div>
         {finalPath ? (
           <p className="mt-1 break-all font-mono text-xs text-violet-300/90">{finalPath}</p>
         ) : null}

@@ -18,11 +18,18 @@ import {
   postSendProjectToReview,
   productionMediaUrl,
 } from "@/lib/api";
+import { PostingStatusEditor } from "@/components/library/posting-status-editor";
+import { FinishedBucketBadge, FinishedBucketFilter } from "@/components/library/finished-bucket-filter";
+import type { FinishedBucketFilterValue } from "@/components/library/finished-bucket-filter";
 import { displayMediaPath, formatDuration, formatMediaKind } from "@/lib/format";
 import type { ProjectAnalyticsResponse, VideoLibraryItem, VideoLibraryResponse } from "@/lib/types";
 
 type SourceFilter = "all" | "site" | "library" | "legacy";
 type MediaFilter = "all" | "video" | "video_audio" | "audio";
+
+function itemIsUsed(item: VideoLibraryItem): boolean {
+  return Boolean(item.used || item.posting_status?.posted || (item.published_to && item.published_to.length > 0));
+}
 
 function formatProfileLabel(profile: string): string {
   const labels: Record<string, string> = {
@@ -59,6 +66,7 @@ export function VideosWorkspace() {
   const [message, setMessage] = useState<string | null>(null);
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("video");
+  const [bucketFilter, setBucketFilter] = useState<FinishedBucketFilterValue>("all");
   const [showMissing, setShowMissing] = useState(false);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
@@ -67,6 +75,9 @@ export function VideosWorkspace() {
   const [speakerOptions, setSpeakerOptions] = useState<string[]>([]);
 
   const readyToAdd = useMemo(() => items.filter(canAddToSite), [items]);
+
+  const unusedCount = items.filter((item) => !itemIsUsed(item)).length;
+  const usedCount = items.length - unusedCount;
 
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
@@ -77,9 +88,12 @@ export function VideosWorkspace() {
       if (mediaFilter === "video" && item.media_kind !== "video") return false;
       if (mediaFilter === "video_audio" && item.media_kind !== "video_audio") return false;
       if (mediaFilter === "audio" && item.media_kind !== "audio") return false;
+      const used = itemIsUsed(item);
+      if (bucketFilter === "unused") return !used;
+      if (bucketFilter === "used") return used;
       return true;
     });
-  }, [items, showMissing, sourceFilter, mediaFilter]);
+  }, [items, showMissing, sourceFilter, mediaFilter, bucketFilter]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -242,6 +256,12 @@ export function VideosWorkspace() {
           <input type="checkbox" checked={showMissing} onChange={(e) => setShowMissing(e.target.checked)} />
           Show invalid / missing files
         </label>
+        <FinishedBucketFilter
+          value={bucketFilter}
+          onChange={setBucketFilter}
+          unusedCount={unusedCount}
+          usedCount={usedCount}
+        />
       </div>
 
       {message ? <p className="mb-4 text-sm text-emerald-300">{message}</p> : null}
@@ -306,6 +326,7 @@ export function VideosWorkspace() {
                       <span className="rounded-full border border-zinc-700 px-2 py-0.5 text-[10px] uppercase tracking-wide text-zinc-400">
                         {sourceLabel(item)}
                       </span>
+                      <FinishedBucketBadge used={itemIsUsed(item)} />
                       {item.media_kind ? (
                         <span className="rounded-full border border-zinc-800 px-2 py-0.5 text-[10px] uppercase text-zinc-500">
                           {formatMediaKind(item.media_kind)}
@@ -412,6 +433,35 @@ export function VideosWorkspace() {
                         }}
                         onCancel={() => setEditingKey(null)}
                       />
+                    ) : null}
+                    {item.source === "library" && item.library_id ? (
+                      <div className="mt-3">
+                        <PostingStatusEditor
+                          videoId={item.library_id}
+                          status={item.posting_status}
+                          compact
+                          onUpdated={(updated) => {
+                            const used = Boolean(updated.used ?? updated.posting_status?.posted);
+                            setItems((prev) =>
+                              prev.map((row) =>
+                                row.library_id === updated.id
+                                  ? {
+                                      ...row,
+                                      used,
+                                      finished_bucket: updated.finished_bucket ?? (used ? "used" : "unused"),
+                                      output_path: updated.final_output_path ?? row.output_path,
+                                      output_paths: updated.final_output_path
+                                        ? [updated.final_output_path]
+                                        : row.output_paths,
+                                      display_path: displayMediaPath(updated.final_output_path) || row.display_path,
+                                      posting_status: updated.posting_status,
+                                    }
+                                  : row,
+                              ),
+                            );
+                          }}
+                        />
+                      </div>
                     ) : null}
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button

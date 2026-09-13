@@ -1,0 +1,36 @@
+---
+description: >-
+  Car B-roll frame vetting — keep exterior shots only (never cabin/interior)
+  and open every car video on a full outside view of the car for at least 5 seconds
+alwaysApply: true
+---
+
+# Car exterior frames
+
+Applies when B-roll / subject is a **car** (Porsche, Ferrari, GT3, coupe, etc.). Skip for yachts, watches, houses.
+
+## When vetting frames
+
+Every kept frame is the **outside** of the car. Drop cabin, cockpit, steering wheel, dashboard, seats, interior POV, and windshield-from-inside.
+
+```
+# ❌ BAD — inside
+dashboard, wheel in lap, leather seats, cabin night-drive POV
+
+# ✅ GOOD — outside
+full body in driveway, three-quarter street, side profile rolling, front 3/4 night
+```
+
+Wheel / taillight / badge close-ups are OK **after** the opener. Never as the start. Never instead of an exterior.
+
+## Opener (required)
+
+Car videos **start** on a full view of the car. Hold that exterior at least **5 seconds** before cutting to detail, cabin, or another shot.
+
+Full view = most of the body visible (front, three-quarter, or side). Not rear-only. Not taillights. Not a person with a car in the background.
+
+This overrides DrivenVisuals 1–2s / fast-beat opener **for cars**.
+
+When reviewing the output mp4, check **0s, ~2.5s, and 5s**. All three must show the car from outside. The start must be a wide/full body.
+
+If first 5s is cabin, host, house, or a cropped piece of the car — gate failed. Do not ship. Pick another clip or re-cut.
