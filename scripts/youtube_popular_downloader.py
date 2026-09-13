@@ -844,14 +844,24 @@ def download_videos(
                         _safe_print(f"    Saved: {converted}", quiet=quiet)
                     record["status"] = "ok"
                 else:
+                    try:
+                        source_duration = probe_duration(filepath)
+                    except (OSError, ValueError, subprocess.CalledProcessError):
+                        source_duration = candidate.duration_seconds
+                        if source_duration is None:
+                            source_duration = info.get("duration")
+                    source_label = _format_duration(
+                        float(source_duration) if source_duration is not None else None
+                    )
+                    part_label = _format_duration(float(clip_length))
                     if max_parts is None:
                         _safe_print(
-                            f"    Splitting full source into ~{_format_duration(float(clip_length))} parts...",
+                            f"    Splitting full source {source_label} into ~{part_label} parts...",
                             quiet=quiet,
                         )
                     else:
                         _safe_print(
-                            f"    Splitting into ~{_format_duration(float(clip_length))} parts...",
+                            f"    Splitting {source_label} into ~{part_label} parts...",
                             quiet=quiet,
                         )
                     parts = split_into_parts(
