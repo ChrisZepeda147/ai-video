@@ -53,7 +53,7 @@ python scripts/content_reuse.py reset-speeches
 
 ## Playback speed
 
-Clips play at **80%** (`--playback-speed 0.80`). `1` = source speed.
+Clips play at **source speed** by default (`--playback-speed 1`). Use `0.80` only when you want slower motion.
 
 Drop B-roll under 50fps. Delete it. Do not keep 24p/25p/30p. 4K is optional — 1080p/1440p is fine. Output is 60fps.
 
@@ -93,7 +93,7 @@ First seconds of the output must show the subject with **movement** when possibl
 | `--segment-length` | auto | Override uniform beat length |
 | `--uniform-pacing` | off | Disable fast-open DrivenVisuals pacing |
 | `--classic-captions` | off | Revert to single-word captions |
-| `--playback-speed` | `0.80` | Lower = slower motion. `1` = source speed |
+| `--playback-speed` | `1` | Source speed. Lower (e.g. `0.80`) = slower motion |
 | `--intro-skip` | `8` | Skip more intro if hosts keep talking |
 | `--min-seconds` / `--max-seconds` | `20` / `28` | Excerpt window. Longer cuts need explicit flags |
 | `--no-vision` | off | Local frame gate only |

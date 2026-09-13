@@ -18,7 +18,7 @@ from build_stills_slideshow import burn_captions
 FPS = 60
 PREFERRED_FPS = 60
 MIN_USABLE_FPS = 50.0
-DEFAULT_PLAYBACK_SPEED = 0.80
+DEFAULT_PLAYBACK_SPEED = 1.0
 BASELINE_AUDIO_SECONDS = 60.0
 BASELINE_SEGMENT_SECONDS = 12.0
 MIN_SEGMENT_SECONDS = 8.0
@@ -1063,7 +1063,7 @@ def main() -> int:
         "--playback-speed",
         type=float,
         default=DEFAULT_PLAYBACK_SPEED,
-        help="Clip playback rate. 0.80 = slower motion",
+        help="Clip playback rate. 1 = source speed; lower = slower motion",
     )
     parser.add_argument("--subject", default="", help="Required on-screen subject, e.g. porsche gt3rs")
     parser.add_argument("--no-vision", action="store_true", help="Skip optional vision subject check")
