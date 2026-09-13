@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 from pathlib import Path
 
 from broll_frame_gate import subject_tokens
@@ -110,6 +111,15 @@ def find_matching_pools(jobs_root: Path, subject: str) -> list[Path]:
     return matches
 
 
+def _clip_fps(clip: Path) -> float:
+    from build_clips_montage import probe_fps
+
+    try:
+        return probe_fps(clip)
+    except (OSError, ValueError, subprocess.CalledProcessError):
+        return 0.0
+
+
 def list_pool_clips(pool_dir: Path) -> list[Path]:
     if not pool_dir.is_dir():
         return []
@@ -126,16 +136,13 @@ def take_from_pool(
     """Move pooled clips into a job clips folder for the same subject."""
     clips_dir.mkdir(parents=True, exist_ok=True)
     taken: list[Path] = []
-    from build_clips_montage import is_usable_fps, probe_fps
+    from build_clips_montage import is_usable_fps
 
     for pool_dir in find_matching_pools(jobs_root, subject):
         for clip in list_pool_clips(pool_dir):
             if count is not None and len(taken) >= count:
                 return taken
-            try:
-                fps = probe_fps(clip)
-            except (OSError, ValueError):
-                fps = 0.0
+            fps = _clip_fps(clip)
             if not is_usable_fps(fps):
                 print(f"  drop pool {clip.name}: {fps:.1f} fps")
                 clip.unlink(missing_ok=True)
@@ -163,21 +170,12 @@ def stash_unused_clips(
     used_names = {Path(item).name for item in used}
     pool_dir = pool_dir_for_subject(jobs_root, subject)
     stashed: list[Path] = []
-    from build_clips_montage import is_usable_fps, probe_fps
+    from build_clips_montage import is_usable_fps
 
     for clip in sorted(clips_dir.glob(CLIP_GLOB)):
         if clip.name in used_names:
             continue
-        try:
-            fps = probe_fps(clip)
-        except (OSError, ValueError):
-            fps = 0.0
-        import subprocess as _sp
-
-        try:
-            fps = probe_fps(clip)
-        except (_sp.CalledProcessError, OSError, ValueError):
-            fps = 0.0
+        fps = _clip_fps(clip)
         if not is_usable_fps(fps):
             print(f"  drop {clip.name}: {fps:.1f} fps")
             clip.unlink(missing_ok=True)
@@ -193,3 +191,21 @@ def stash_unused_clips(
         _write_pool_meta(pool_dir, subject=subject)
         print(f"Stashed {len(stashed)} unused clip(s) -> {pool_dir.as_posix()}")
     return stashed
+
+
+def purge_low_fps_clips(jobs_root: Path) -> list[Path]:
+    """Delete pooled B-roll under 30fps."""
+    from build_clips_montage import is_usable_fps
+
+    root = pool_root(jobs_root)
+    if not root.is_dir():
+        return []
+    removed: list[Path] = []
+    for clip in sorted(root.rglob(CLIP_GLOB)):
+        fps = _clip_fps(clip)
+        if is_usable_fps(fps):
+            continue
+        print(f"  drop pool {clip.name}: {fps:.1f} fps")
+        clip.unlink(missing_ok=True)
+        removed.append(clip)
+    return removed

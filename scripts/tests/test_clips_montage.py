@@ -59,6 +59,14 @@ class ClipsMontageTests(unittest.TestCase):
         self.assertNotIn(first, leftover)
         self.assertEqual(len(leftover), 2)
 
+    def test_rejects_24_and_25_fps(self) -> None:
+        self.assertFalse(montage.is_usable_fps(23.976))
+        self.assertFalse(montage.is_usable_fps(24.0))
+        self.assertFalse(montage.is_usable_fps(25.0))
+        self.assertTrue(montage.is_usable_fps(29.97))
+        self.assertTrue(montage.is_usable_fps(30.0))
+        self.assertTrue(montage.is_usable_fps(60.0))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any
 
 import content_reuse
+from build_clips_montage import is_usable_fps, probe_fps
 
 try:
     import yt_dlp
@@ -474,6 +475,17 @@ def split_into_parts(
     max_height: int,
     start_offset: float = 0.0,
 ) -> list[dict[str, Any]]:
+    try:
+        source_fps = probe_fps(source)
+    except (OSError, ValueError, subprocess.CalledProcessError):
+        source_fps = None
+    if source_fps is not None and not is_usable_fps(source_fps):
+        print(f"    drop {source.name}: {source_fps:.1f} fps")
+        if not keep_source and source.exists():
+            source.unlink()
+            print(f"    Removed source file: {source.name}")
+        return []
+
     duration = probe_duration(source)
     usable = max(duration - start_offset, 0.0)
     part_count = estimate_part_count(usable, clip_length=clip_length, max_parts=max_parts)
@@ -629,7 +641,11 @@ def download_videos(
         outtmpl = str(output_dir / name_tpl)
         postprocessors = [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}]
     else:
-        format_selector = f"bestvideo[height<={max_height}]+bestaudio/best[height<={max_height}]/best"
+        format_selector = (
+            f"bestvideo[fps>=30][height<={max_height}]+bestaudio/"
+            f"bestvideo[height<={max_height}]+bestaudio/"
+            f"best[height<={max_height}]/best"
+        )
         outtmpl = str(output_dir / "%(id)s_source.%(ext)s")
         postprocessors = []
 

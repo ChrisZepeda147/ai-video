@@ -55,6 +55,8 @@ python scripts/content_reuse.py reset-speeches
 
 Clips play at **80%** (`--playback-speed 0.80`). `1` = source speed.
 
+Drop B-roll under 30fps. Delete it. Do not keep 24p/25p. Output is 60fps.
+
 ## Subject in frame
 
 `--broll-query` is the required on-screen subject.

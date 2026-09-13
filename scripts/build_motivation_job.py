@@ -33,10 +33,8 @@ from build_clips_montage import (
     DEFAULT_PLAYBACK_SPEED,
     build_montage,
     drop_low_fps_clips,
-    is_usable_fps,
     min_unique_clips_needed,
     probe_duration,
-    probe_fps,
     segment_length_for_duration,
 )
 from discovery.driven_visuals import speech_window_defaults
