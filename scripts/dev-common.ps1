@@ -102,6 +102,48 @@ function Import-ApiEnvFile {
     }
 }
 
+function Get-AgentToolBins {
+    $bins = @()
+    $pythonExe = $null
+    if ($env:AI_VIDEO_PYTHON -and (Test-Path -LiteralPath $env:AI_VIDEO_PYTHON)) {
+        $pythonExe = $env:AI_VIDEO_PYTHON
+    } else {
+        $pythonExe = Resolve-PythonExe
+    }
+    if ($pythonExe) {
+        $bins += (Split-Path -Parent $pythonExe)
+        $env:AI_VIDEO_PYTHON = $pythonExe
+    }
+    if ($env:FFMPEG_DIR -and (Test-Path -LiteralPath $env:FFMPEG_DIR)) {
+        $bins += $env:FFMPEG_DIR
+    }
+    return $bins | Select-Object -Unique
+}
+
+function Import-AgentPythonPath {
+    param(
+        [string]$Root,
+        [switch]$Persist
+    )
+    Import-ApiEnvFile -Root $Root
+    $bins = @(Get-AgentToolBins)
+    foreach ($bin in $bins) {
+        $env:Path = "$bin;" + (($env:Path -split ';' | Where-Object { $_ -and ($_ -ne $bin) }) -join ';')
+    }
+    if (-not $Persist) { return $bins }
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    if (-not $userPath) { $userPath = "" }
+    $parts = @($bins) + @($userPath -split ';' | Where-Object { $_ -and ($bins -notcontains $_) })
+    [Environment]::SetEnvironmentVariable('Path', ($parts -join ';'), 'User')
+    if ($env:AI_VIDEO_PYTHON) {
+        [Environment]::SetEnvironmentVariable('AI_VIDEO_PYTHON', $env:AI_VIDEO_PYTHON, 'User')
+    }
+    if ($env:FFMPEG_DIR) {
+        [Environment]::SetEnvironmentVariable('FFMPEG_DIR', $env:FFMPEG_DIR, 'User')
+    }
+    return $bins
+}
+
 function Test-ApiPythonDeps {
     param([string]$Python)
     if ($env:AI_VIDEO_FORCE_PIP -eq "1") { return $false }
