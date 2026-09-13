@@ -323,7 +323,7 @@ def _pick_window_from_words(
         if not _word_ends_sentence(text):
             continue
         nxt = words[i + 1][0] if i + 1 < len(words) else when + 0.6
-        duration = min(max(nxt - start, when - start + 0.35), max_seconds)
+        duration = min(when - start + min(0.45, max(nxt - when, 0.2)), max_seconds)
         if duration < min_seconds:
             continue
         best = (start, duration)
@@ -582,18 +582,19 @@ def _write_job_speech(
     captions: Path,
     start: float,
     duration: float,
+    keep_source: bool = False,
 ) -> None:
     speech_mp3 = audio_dir / "speech.mp3"
     trim_audio(source_mp3, speech_mp3, start=start, duration=duration)
-    if source_mp3.resolve() != speech_mp3.resolve():
+    if not keep_source and source_mp3.resolve() != speech_mp3.resolve():
         source_mp3.unlink(missing_ok=True)
     stable_caps = audio_dir / "subs.en.json3"
     if captions.suffix.lower() == ".json3":
         shift_json3(captions, stable_caps, start=start, duration=duration)
-        if captions.resolve() != stable_caps.resolve():
+        if not keep_source and captions.resolve() != stable_caps.resolve():
             captions.unlink(missing_ok=True)
         return
-    if captions.resolve() != stable_caps.resolve():
+    if not keep_source and captions.resolve() != stable_caps.resolve():
         captions.replace(stable_caps)
 
 
