@@ -258,13 +258,21 @@ def cabin_interior_reasons(png_bytes: bytes) -> list[str]:
                 outdoor += 1
     total = width * height
     outdoor_frac = outdoor / total if total else 0.0
+    row_means = [
+        sum(luma[y * width : (y + 1) * width]) / width
+        for y in range(height)
+    ]
+    max_drop = 0.0
+    for y in range(int(height * 0.40), int(height * 0.82)):
+        drop = row_means[y - 1] - row_means[y]
+        if drop > max_drop:
+            max_drop = drop
     lower = luma[int(height * 0.70) * width :]
     upper = luma[: int(height * 0.38) * width]
     if lower and upper:
         lower_mean = sum(lower) / len(lower)
         upper_mean = sum(upper) / len(upper)
-        lower_var = sum((value - lower_mean) ** 2 for value in lower) / len(lower)
-        if lower_mean < 70 and upper_mean > 120 and lower_var < 900:
+        if max_drop >= 30 and upper_mean > lower_mean + 25:
             return ["cabin"]
     mid = luma[int(height * 0.30) * width : int(height * 0.72) * width]
     if mid and outdoor_frac < 0.01:

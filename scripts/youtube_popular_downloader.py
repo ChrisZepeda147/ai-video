@@ -109,6 +109,10 @@ SIM_GAME_FOOTAGE_TITLE_RE = re.compile(
     r"speed\s+art\s*\+\s*gameplay|anime\s+lamborghini)\b",
     re.IGNORECASE,
 )
+CABIN_TITLE_RE = re.compile(
+    r"\b(interior|cabin|cockpit|dashboard|walkaround|start[\s-]?up)\b",
+    re.IGNORECASE,
+)
 
 BACKGROUND_SEARCH_QUERIES = [
     "satisfying mobile game no commentary",
@@ -390,6 +394,10 @@ def is_realestate_tour(video: VideoCandidate) -> bool:
 
 def is_sim_game_footage(video: VideoCandidate) -> bool:
     return bool(SIM_GAME_FOOTAGE_TITLE_RE.search(video.title))
+
+
+def is_cabin_titled(video: VideoCandidate) -> bool:
+    return bool(CABIN_TITLE_RE.search(video.title))
 
 
 def background_gameplay_score(video: VideoCandidate) -> int:

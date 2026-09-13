@@ -132,6 +132,25 @@ class BrollFrameGateTests(unittest.TestCase):
         self.assertIn("weak-opener", broll_frame_gate.opener_fail_reasons(bridge.read_bytes()))
         self.assertEqual(broll_frame_gate.opener_fail_reasons(hero.read_bytes()), [])
 
+    def test_cabin_gate_drops_windshield_and_gauge(self) -> None:
+        root = (
+            Path(__file__).resolve().parents[2]
+            / "downloads"
+            / "motivational"
+            / "lambo-dream-car"
+            / "preview"
+            / "all"
+        )
+        windshield = root / "xEIKiO3ZgZQ_part04.jpg"
+        gauge = root / "Ey29z3LwcyU_part04.jpg"
+        side = root / "-5wQWMvhMwo_part08.jpg"
+        if not (windshield.is_file() and gauge.is_file() and side.is_file()):
+            self.skipTest("lambo cabin preview frames not on disk")
+        subject = "lamborghini huracan"
+        self.assertIn("cabin", broll_frame_gate.frame_fail_reasons(windshield.read_bytes(), subject))
+        self.assertIn("cabin", broll_frame_gate.frame_fail_reasons(gauge.read_bytes(), subject))
+        self.assertNotIn("cabin", broll_frame_gate.frame_fail_reasons(side.read_bytes(), subject))
+
     def test_opener_jump_cut_detects_shot_change(self) -> None:
         same = [_png((20, 20, 24), busy=True) for _ in range(4)]
         changed = [

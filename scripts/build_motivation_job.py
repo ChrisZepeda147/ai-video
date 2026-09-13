@@ -28,6 +28,7 @@ from broll_frame_gate import (
     scan_clip_local,
     subject_tokens,
     title_matches_subject,
+    wants_vehicle,
 )
 from build_clips_montage import (
     DEFAULT_PLAYBACK_SPEED,
@@ -53,6 +54,7 @@ from youtube_popular_downloader import (
     discover_urls,
     download_videos,
     filter_unwanted,
+    is_cabin_titled,
     pick_usable_fps_candidates,
     title_suggests_usable_fps,
 )
@@ -957,6 +959,12 @@ def prepare_broll(
             pool = titled
         elif reuse_policy != "require_new":
             print(f"No B-roll title matched {wanted}; using search hits")
+    if wants_vehicle(subject or query):
+        outside = [item for item in pool if not is_cabin_titled(item)]
+        cabin = [item for item in pool if is_cabin_titled(item)]
+        if outside and cabin:
+            print(f"Ranked {len(outside)} exterior title(s) ahead of {len(cabin)} interior/walkaround")
+            pool = [*outside, *cabin]
     candidates = filter_unwanted(
         pool,
         limit=max(limit * 4, 24),
