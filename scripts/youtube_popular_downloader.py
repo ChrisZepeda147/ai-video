@@ -122,6 +122,9 @@ BACKGROUND_SEARCH_QUERIES = [
 ]
 
 
+FPS_TITLE_RE = re.compile(r"\b(50|59\.94|60)\s*fps\b", re.IGNORECASE)
+
+
 @dataclass
 class VideoCandidate:
     video_id: str
@@ -133,6 +136,7 @@ class VideoCandidate:
     published_at: str | None
     source: str
     category_id: str | None = None
+    fps: float | None = None
 
 
 def _default_output_dir() -> Path:
@@ -156,6 +160,85 @@ def _parse_view_count(value: Any) -> int | None:
     return None
 
 
+def _parse_fps(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        fps = float(value)
+    except (TypeError, ValueError):
+        return None
+    return fps if fps > 0 else None
+
+
+def listed_fps_from_entry(entry: dict[str, Any] | None) -> float | None:
+    if not entry:
+        return None
+    values: list[float] = []
+    top = _parse_fps(entry.get("fps"))
+    if top is not None:
+        values.append(top)
+    for fmt in entry.get("formats") or []:
+        fps = _parse_fps(fmt.get("fps"))
+        if fps is not None:
+            values.append(fps)
+    return max(values) if values else None
+
+
+def title_suggests_usable_fps(title: str) -> bool:
+    return bool(FPS_TITLE_RE.search(title or ""))
+
+
+def probe_listed_fps(url: str) -> float | None:
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        **_toolchain_opts(),
+    }
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+    return listed_fps_from_entry(info if isinstance(info, dict) else None)
+
+
+def pick_usable_fps_candidates(
+    candidates: list[VideoCandidate],
+    *,
+    limit: int,
+    probe: bool = True,
+) -> list[VideoCandidate]:
+    ranked = sorted(
+        candidates,
+        key=lambda video: (
+            title_suggests_usable_fps(video.title),
+            video.fps is not None and is_usable_fps(video.fps),
+            video.view_count or 0,
+        ),
+        reverse=True,
+    )
+    kept: list[VideoCandidate] = []
+    skipped = 0
+    for video in ranked:
+        fps = video.fps
+        if fps is None and probe:
+            try:
+                fps = probe_listed_fps(video.url)
+            except Exception:
+                fps = None
+            video.fps = fps
+        if fps is not None and not is_usable_fps(fps):
+            skipped += 1
+            continue
+        if fps is None and not title_suggests_usable_fps(video.title):
+            skipped += 1
+            continue
+        kept.append(video)
+        if len(kept) >= limit:
+            break
+    if skipped:
+        print(f"Filtered out {skipped} source(s) under {int(MIN_USABLE_FPS)}fps.")
+    return kept
+
+
 def _video_from_ytdlp_entry(entry: dict[str, Any], source: str) -> VideoCandidate | None:
     video_id = entry.get("id")
     if not video_id:
@@ -170,6 +253,7 @@ def _video_from_ytdlp_entry(entry: dict[str, Any], source: str) -> VideoCandidat
         published_at=entry.get("upload_date"),
         source=source,
         category_id=str(entry["categories"][0]) if entry.get("categories") else None,
+        fps=listed_fps_from_entry(entry),
     )
 
 

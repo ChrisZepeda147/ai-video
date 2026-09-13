@@ -53,6 +53,8 @@ from youtube_popular_downloader import (
     discover_urls,
     download_videos,
     filter_unwanted,
+    pick_usable_fps_candidates,
+    title_suggests_usable_fps,
 )
 
 KEEP_AUDIO = frozenset({"speech.mp3", "subs.en.json3"})
@@ -938,6 +940,10 @@ def prepare_broll(
     split_full_source: bool = True,
 ) -> list[str]:
     raw = discover_search(query=query, limit=max(limit * 4, 16))
+    if not title_suggests_usable_fps(query):
+        extra = discover_search(query=f"{query} 60fps", limit=max(limit * 3, 12))
+        seen = {item.video_id for item in raw}
+        raw = [*extra, *[item for item in raw if item.video_id not in seen]]
     used = used_ids()
     if reuse_policy == "require_new":
         pool = [item for item in raw if item.video_id not in used]
@@ -953,7 +959,7 @@ def prepare_broll(
             print(f"No B-roll title matched {wanted}; using search hits")
     candidates = filter_unwanted(
         pool,
-        limit=limit,
+        limit=max(limit * 4, 24),
         exclude_music=True,
         exclude_trailers=True,
         exclude_live=True,
@@ -961,6 +967,7 @@ def prepare_broll(
         min_views=min_views,
         min_duration=float(min_duration),
     )
+    candidates = pick_usable_fps_candidates(candidates, limit=limit)
     if reuse_policy == "prefer_new":
         candidates.sort(key=lambda item: item.video_id in used)
     if not candidates:
