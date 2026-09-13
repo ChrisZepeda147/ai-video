@@ -888,7 +888,8 @@ def broll_download_plan(
     clips_limit: int,
     clip_length: int,
     max_parts: int,
-) -> tuple[int, int, int]:
+    split_full_source: bool = True,
+) -> tuple[int, int, int | None]:
     """Scale B-roll download so longer montages get longer parts and enough unique clips."""
     needed = min_unique_clips_needed(
         duration=duration,
@@ -897,18 +898,26 @@ def broll_download_plan(
     )
     resolved_clip_length = max(clip_length, int(math.ceil(segment_length * 1.25)))
     resolved_limit = max(clips_limit, needed + 2)
-    parts_per_source = max(1, math.ceil(needed / max(resolved_limit, 1)))
-    resolved_max_parts = max(max_parts, min(4, parts_per_source + 1))
-    if (
-        resolved_clip_length != clip_length
-        or resolved_limit != clips_limit
-        or resolved_max_parts != max_parts
-    ):
+    if split_full_source:
+        resolved_max_parts: int | None = None
         print(
             "B-roll plan: "
-            f"{resolved_limit} source(s), {resolved_max_parts} part(s) each, "
-            f"{resolved_clip_length}s per part ({needed} unique clips needed)"
+            f"{resolved_limit} source(s), full split @ {resolved_clip_length}s "
+            f"(frame-gated + pooled, {needed} unique clips needed)"
         )
+    else:
+        parts_per_source = max(1, math.ceil(needed / max(resolved_limit, 1)))
+        resolved_max_parts = max(max_parts, min(4, parts_per_source + 1))
+        if (
+            resolved_clip_length != clip_length
+            or resolved_limit != clips_limit
+            or resolved_max_parts != max_parts
+        ):
+            print(
+                "B-roll plan: "
+                f"{resolved_limit} source(s), {resolved_max_parts} part(s) each, "
+                f"{resolved_clip_length}s per part ({needed} unique clips needed)"
+            )
     return resolved_limit, resolved_clip_length, resolved_max_parts
 
 
@@ -918,13 +927,15 @@ def prepare_broll(
     query: str,
     limit: int,
     clip_length: int,
-    max_parts: int,
+    max_parts: int | None,
     min_views: int,
     min_duration: int,
     start_offset: float = 0.0,
     subject: str = "",
     use_vision: bool = True,
     reuse_policy: str = "allow",
+    jobs_root: Path | None = None,
+    split_full_source: bool = True,
 ) -> list[str]:
     raw = discover_search(query=query, limit=max(limit * 4, 16))
     used = used_ids()
@@ -967,6 +978,8 @@ def prepare_broll(
         start_offset=start_offset,
         subject=subject or query,
         use_vision=use_vision,
+        jobs_root=jobs_root,
+        split_full_source=split_full_source,
     )
 
 
@@ -975,33 +988,49 @@ def download_broll_candidates(
     candidates: list[VideoCandidate],
     *,
     clip_length: int,
-    max_parts: int,
+    max_parts: int | None,
     start_offset: float = 0.0,
     subject: str = "",
     use_vision: bool = True,
+    jobs_root: Path | None = None,
+    split_full_source: bool = True,
 ) -> list[str]:
     print(f"Downloading {len(candidates)} B-roll source(s)...")
-    results = download_videos(
-        candidates,
-        output_dir=clips_dir,
-        max_height=1080,
-        audio_only=False,
-        clip_length=clip_length,
-        max_parts=max_parts,
-        split_parts=True,
-        keep_source=False,
-        aspect_ratio="9:16",
-        start_offset=start_offset,
-    )
-    ok_ids = [str(row.get("video_id") or "") for row in results if row.get("status") == "ok"]
+    split_parts = None if split_full_source else max_parts
+    ok_ids: list[str] = []
+    for candidate in candidates:
+        results = download_videos(
+            [candidate],
+            output_dir=clips_dir,
+            max_height=1080,
+            audio_only=False,
+            clip_length=clip_length,
+            max_parts=split_parts,
+            split_parts=True,
+            keep_source=False,
+            aspect_ratio="9:16",
+            start_offset=start_offset,
+        )
+        if not results or results[0].get("status") != "ok":
+            continue
+        video_id = str(results[0].get("video_id") or candidate.video_id)
+        ok_ids.append(video_id)
+        source_clips = sorted(clips_dir.glob(f"{video_id}_part*.mp4"))
+        kept = filter_broll_clip_list(
+            source_clips,
+            subject=subject,
+            use_vision=use_vision,
+        )
+        if jobs_root and kept:
+            broll_pool.add_gated_clips_to_pool(jobs_root, subject=subject, clips=kept)
     failed = len(candidates) - len(ok_ids)
     if failed:
         print(f"  download: {len(ok_ids)} ok, {failed} failed")
-    kept = filter_broll_clips(clips_dir, subject=subject, use_vision=use_vision)
-    if not kept:
+    kept_all = sorted(clips_dir.glob("*_part*.mp4"))
+    if not kept_all:
         raise RuntimeError("B-roll download produced no clips that passed the subject/frame gate.")
-    print(f"  ready: {len(kept)} clip(s) after subject/frame gate")
-    return [item for item in ok_ids if item]
+    print(f"  ready: {len(kept_all)} clip(s) after subject/frame gate")
+    return ok_ids
 
 
 def _trim_clip_to_span(clip: Path, start: float, end: float) -> None:
@@ -1031,14 +1060,14 @@ def _trim_clip_to_span(clip: Path, start: float, end: float) -> None:
     tmp.replace(clip)
 
 
-def filter_broll_clips(
-    clips_dir: Path,
+def filter_broll_clip_list(
+    clips: list[Path],
     *,
     subject: str,
     use_vision: bool = True,
 ) -> list[Path]:
     kept: list[Path] = []
-    all_clips = drop_low_fps_clips(sorted(clips_dir.glob("*_part*.mp4")), delete=True)
+    all_clips = drop_low_fps_clips(sorted(clips), delete=True)
     for clip in all_clips:
         try:
             duration = probe_duration(clip)
@@ -1073,15 +1102,30 @@ def filter_broll_clips(
     return kept
 
 
+def filter_broll_clips(
+    clips_dir: Path,
+    *,
+    subject: str,
+    use_vision: bool = True,
+) -> list[Path]:
+    return filter_broll_clip_list(
+        sorted(clips_dir.glob("*_part*.mp4")),
+        subject=subject,
+        use_vision=use_vision,
+    )
+
+
 def prepare_broll_from_ids(
     clips_dir: Path,
     video_ids: list[str],
     *,
     clip_length: int,
-    max_parts: int,
+    max_parts: int | None,
     start_offset: float = 0.0,
     subject: str = "",
     use_vision: bool = True,
+    jobs_root: Path | None = None,
+    split_full_source: bool = True,
 ) -> list[str]:
     urls = [f"https://www.youtube.com/watch?v={video_id}" for video_id in video_ids if video_id]
     candidates = discover_urls(urls)
@@ -1095,6 +1139,8 @@ def prepare_broll_from_ids(
         start_offset=start_offset,
         subject=subject,
         use_vision=use_vision,
+        jobs_root=jobs_root,
+        split_full_source=split_full_source,
     )
 
 
@@ -1107,13 +1153,14 @@ def ensure_broll_clips(
     needed_clips: int,
     clips_limit: int,
     clip_length: int,
-    max_parts: int,
+    max_parts: int | None,
     min_views: int,
     min_duration: int,
     start_offset: float,
     use_vision: bool,
     broll_ids: list[str] | None = None,
     reuse_policy: str = "allow",
+    split_full_source: bool = True,
 ) -> list[str]:
     """Fill clips_dir from pool first, then download only what is still missing."""
     broll_pool.take_from_pool(jobs_root, subject=subject, clips_dir=clips_dir)
@@ -1134,6 +1181,8 @@ def ensure_broll_clips(
                 start_offset=start_offset,
                 subject=subject,
                 use_vision=use_vision,
+                jobs_root=jobs_root,
+                split_full_source=split_full_source,
             )
             kept = filter_broll_clips(clips_dir, subject=subject, use_vision=use_vision)
             if len(kept) >= needed_clips:
@@ -1150,6 +1199,8 @@ def ensure_broll_clips(
         subject=subject,
         use_vision=use_vision,
         reuse_policy=reuse_policy,
+        jobs_root=jobs_root,
+        split_full_source=split_full_source,
     )
     have = len(list(clips_dir.glob("*_part*.mp4")))
     if have < needed_clips:

@@ -68,6 +68,7 @@ Script:
 3. Scans frames through each clip
 4. Trims talking-head, title-card, empty, missing-subject, and out-of-context frames
 5. Drops a clip if nothing usable remains
+6. Splits each downloaded source into ~20s parts (full video, capped by `BROLL_MAX_PARTS_PER_SOURCE`), gates every part, and **copies passing clips into `downloads/motivational/broll-pool/`** for the next job
 
 First seconds of the output must show the subject with **movement** when possible. If a Porsche job opens on a house or a host, the gate failed — do not ship it.
 

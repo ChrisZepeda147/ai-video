@@ -352,6 +352,18 @@ def _format_duration(seconds: float | None) -> str:
     return f"{minutes}:{secs:02d}"
 
 
+def max_parts_per_source_cap() -> int | None:
+    """When splitting a full download, cap part count so hour-long uploads do not explode."""
+    raw = os.environ.get("BROLL_MAX_PARTS_PER_SOURCE", "36").strip()
+    if not raw or raw.lower() in {"0", "none", "unlimited"}:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return 36
+    return value if value > 0 else None
+
+
 def estimate_part_count(
     duration_seconds: float | None,
     *,
@@ -365,6 +377,10 @@ def estimate_part_count(
     count = math.ceil(duration_seconds / clip_length)
     if max_parts is not None:
         count = min(count, max_parts)
+    else:
+        cap = max_parts_per_source_cap()
+        if cap is not None:
+            count = min(count, cap)
     return max(count, 1)
 
 
@@ -742,10 +758,16 @@ def download_videos(
                         _safe_print(f"    Saved: {converted}", quiet=quiet)
                     record["status"] = "ok"
                 else:
-                    _safe_print(
-                        f"    Splitting into ~{_format_duration(float(clip_length))} parts...",
-                        quiet=quiet,
-                    )
+                    if max_parts is None:
+                        _safe_print(
+                            f"    Splitting full source into ~{_format_duration(float(clip_length))} parts...",
+                            quiet=quiet,
+                        )
+                    else:
+                        _safe_print(
+                            f"    Splitting into ~{_format_duration(float(clip_length))} parts...",
+                            quiet=quiet,
+                        )
                     parts = split_into_parts(
                         filepath,
                         output_dir=output_dir,

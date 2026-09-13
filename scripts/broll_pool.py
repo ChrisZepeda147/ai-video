@@ -157,6 +157,37 @@ def take_from_pool(
     return taken
 
 
+def add_gated_clips_to_pool(
+    jobs_root: Path,
+    *,
+    subject: str,
+    clips: list[Path],
+) -> list[Path]:
+    """Copy frame-gated clips into the shared pool so later jobs can reuse them."""
+    if not clips:
+        return []
+    from build_clips_montage import is_usable_fps
+
+    pool_dir = pool_dir_for_subject(jobs_root, subject)
+    pool_dir.mkdir(parents=True, exist_ok=True)
+    added: list[Path] = []
+    for clip in clips:
+        if not clip.is_file():
+            continue
+        fps = _clip_fps(clip)
+        if not is_usable_fps(fps):
+            continue
+        dest = pool_dir / clip.name
+        if dest.exists() and dest.stat().st_size == clip.stat().st_size:
+            continue
+        shutil.copy2(clip, dest)
+        added.append(dest)
+    if added:
+        _write_pool_meta(pool_dir, subject=subject)
+        print(f"Pooled {len(added)} vetted clip(s) -> {pool_dir.as_posix()}")
+    return added
+
+
 def stash_unused_clips(
     jobs_root: Path,
     *,

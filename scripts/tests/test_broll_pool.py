@@ -68,6 +68,27 @@ class BrollPoolTests(unittest.TestCase):
         shutil_rmtree = __import__("shutil").rmtree
         shutil_rmtree(root, ignore_errors=True)
 
+    def test_add_gated_clips_to_pool_copies_vetted_parts(self) -> None:
+        root = Path("broll-pool-add-gated")
+        jobs_root = root / "motivational"
+        subject = "Lamborghini Huracan cinematic 4k exterior"
+        clips_dir = jobs_root / "job" / "clips"
+        clips_dir.mkdir(parents=True)
+        clip = clips_dir / "abc_part01.mp4"
+        clip.write_bytes(b"vetted")
+
+        with patch("broll_pool._clip_fps", return_value=60.0):
+            added = broll_pool.add_gated_clips_to_pool(
+                jobs_root,
+                subject=subject,
+                clips=[clip],
+            )
+        self.assertEqual(len(added), 1)
+        self.assertTrue(clip.exists())
+        pool_clip = broll_pool.pool_dir_for_subject(jobs_root, subject) / clip.name
+        self.assertTrue(pool_clip.is_file())
+        __import__("shutil").rmtree(root, ignore_errors=True)
+
     def test_take_from_pool_deletes_low_fps(self) -> None:
         root = Path("broll-pool-low-fps")
         jobs_root = root / "motivational"
