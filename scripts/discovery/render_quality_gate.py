@@ -64,6 +64,15 @@ def _leading_silence_sec(path: Path) -> float | None:
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, env=subprocess_env())
     log = (result.stderr or "") + (result.stdout or "")
+    start_match = re.search(r"silence_start:\s*([0-9.]+)", log)
+    if not start_match:
+        return 0.0
+    try:
+        silence_start = float(start_match.group(1))
+    except ValueError:
+        return None
+    if silence_start > 0.2:
+        return 0.0
     match = re.search(r"silence_end:\s*([0-9.]+)", log)
     if not match:
         return 0.0

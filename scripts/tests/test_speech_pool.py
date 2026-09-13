@@ -58,6 +58,28 @@ class SpeechPoolTests(unittest.TestCase):
         self.assertGreaterEqual(leftover[0][1], 60.0)
         self.assertLessEqual(leftover[0][1], 90.0)
 
+    def test_speech_window_starts_and_ends_on_sentences(self) -> None:
+        from build_motivation_job import _pick_window_from_words
+
+        words = [
+            (0.0, "Hello"),
+            (0.4, "there."),
+            (1.2, "You"),
+            (1.5, "must"),
+            (1.8, "work."),
+            (22.0, "Keep"),
+            (22.4, "going"),
+            (22.8, "now."),
+        ]
+        picked = _pick_window_from_words(words, min_seconds=20, max_seconds=28, default_start=1.2)
+        self.assertIsNotNone(picked)
+        start, duration = picked
+        self.assertAlmostEqual(start, 1.2, places=2)
+        self.assertGreaterEqual(start + duration, 22.8)
+        mid = _pick_window_from_words(words, min_seconds=20, max_seconds=28, default_start=1.5)
+        self.assertIsNotNone(mid)
+        self.assertAlmostEqual(mid[0], 1.2, places=2)
+
     def test_stash_and_take_roundtrip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             jobs_root = Path(tmp) / "motivational"

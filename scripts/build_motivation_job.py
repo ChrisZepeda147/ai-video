@@ -273,6 +273,19 @@ def captions_text(path: Path, *, start: float = 0.0, duration: float = 1_000_000
     return " ".join(text for _start, _end, text in words)
 
 
+def _word_ends_sentence(text: str) -> bool:
+    stripped = (text or "").strip().rstrip("\"'”’)")
+    return bool(stripped) and stripped[-1] in ".?!"
+
+
+def _sentence_start_indexes(words: list[tuple[float, str]]) -> list[int]:
+    starts = [0]
+    for index in range(1, len(words)):
+        if _word_ends_sentence(words[index - 1][1]):
+            starts.append(index)
+    return starts
+
+
 def _pick_window_from_words(
     words: list[tuple[float, str]],
     *,
@@ -282,30 +295,42 @@ def _pick_window_from_words(
 ) -> tuple[float, float] | None:
     if not words:
         return None
-    start = default_start if default_start is not None else words[0][0]
-    window_end = start + max_seconds
+    starts = _sentence_start_indexes(words)
+    if default_start is None:
+        start_index = starts[0]
+    else:
+        start_index = starts[0]
+        for index in starts:
+            if words[index][0] <= default_start + 0.05:
+                start_index = index
+            else:
+                break
+        if words[start_index][0] + min_seconds > words[-1][0] + 0.5:
+            for index in starts:
+                if words[index][0] >= default_start - 0.05:
+                    start_index = index
+                    break
+    start = words[start_index][0]
     window_min = start + min_seconds
+    window_max = start + max_seconds
     best: tuple[float, float] | None = None
-    for i, (when, text) in enumerate(words):
-        if when < window_min or when > window_end:
+    for i in range(start_index, len(words)):
+        when, text = words[i]
+        if when < window_min:
             continue
-        nxt = words[i + 1][0] if i + 1 < len(words) else when + 2.0
-        gap = nxt - when
-        ends_sentence = text.endswith((".", "?", "!"))
-        if gap < 0.65 and not ends_sentence:
+        if when > window_max:
+            break
+        if not _word_ends_sentence(text):
             continue
-        duration = min(when - start + 0.45, max_seconds)
+        nxt = words[i + 1][0] if i + 1 < len(words) else when + 0.6
+        duration = min(max(nxt - start, when - start + 0.35), max_seconds)
         if duration < min_seconds:
             continue
         best = (start, duration)
-        if ends_sentence and gap >= 0.65:
-            return best
+        return best
     if best:
         return best
-    last = min(words[-1][0] - start + 0.4, max_seconds)
-    if last < min_seconds:
-        return None
-    return start, last
+    return None
 
 
 def pick_speech_excerpt(
@@ -366,6 +391,15 @@ def leftover_speech_windows(
     cursor = used_start + used_duration + 0.15
     while True:
         remaining = [(when, text) for when, text in words if when >= cursor]
+        start_at = set(_sentence_start_indexes(words))
+        while remaining:
+            index = next(
+                (i for i, (when, _text) in enumerate(words) if abs(when - remaining[0][0]) < 1e-6),
+                None,
+            )
+            if index is None or index in start_at:
+                break
+            remaining = remaining[1:]
         picked = _pick_window_from_words(
             remaining,
             min_seconds=min_seconds,
@@ -416,19 +450,26 @@ def trim_audio(src: Path, dest: Path, *, start: float, duration: float) -> None:
     if src.resolve() == dest.resolve():
         tmp = dest.with_name(f"{dest.stem}.trim{dest.suffix}")
         out = tmp
+    start = max(0.0, float(start))
+    duration = max(0.2, float(duration))
+    pad = min(1.5, start)
     cmd = [
         ffmpeg,
         "-y",
         "-ss",
-        str(start),
-        "-t",
-        str(duration),
+        f"{start - pad:.3f}",
         "-i",
         str(src),
+        "-ss",
+        f"{pad:.3f}",
+        "-t",
+        f"{duration:.3f}",
         "-acodec",
         "libmp3lame",
         "-b:a",
         "192k",
+        "-avoid_negative_ts",
+        "make_zero",
         str(out),
     ]
     subprocess.run(cmd, check=True, capture_output=True)
@@ -1139,6 +1180,12 @@ def render_job(
     quality_gate: bool = True,
 ) -> set[Path]:
     output.parent.mkdir(parents=True, exist_ok=True)
+    actual_duration = probe_duration(audio)
+    if abs(actual_duration - duration) > 0.35:
+        print(
+            f"  audio file is {actual_duration:.2f}s (job said {duration:.2f}s) — using file"
+        )
+        duration = actual_duration
     temp_output = output.with_suffix(".nocap.mp4")
     clip_count = len(list(clips_dir.glob("*_part*.mp4")))
     grade_note = "charcoal grade" if grade else "no grade"
