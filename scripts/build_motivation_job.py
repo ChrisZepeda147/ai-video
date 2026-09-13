@@ -291,12 +291,61 @@ def _sentence_start_indexes(words: list[tuple[float, str]]) -> list[int]:
     return starts
 
 
+def json3_cue_end_sec(captions: Path, word_time: float) -> float | None:
+    """End time of the json3 caption cue that contains word_time (absolute source seconds)."""
+    if captions.suffix.lower() != ".json3":
+        return None
+    data = json.loads(captions.read_text(encoding="utf-8"))
+    word_ms = word_time * 1000.0
+    best: float | None = None
+    for event in data.get("events") or []:
+        segs = event.get("segs") or []
+        spoken = [
+            seg
+            for seg in segs
+            if str(seg.get("utf8") or "").strip() not in ("", "\n")
+        ]
+        if not spoken:
+            continue
+        base_ms = float(event.get("tStartMs") or 0)
+        dur_ms = float(event.get("dDurationMs") or 0)
+        if dur_ms <= 0:
+            continue
+        first_ms = base_ms + float(spoken[0].get("tOffsetMs") or 0)
+        last_ms = base_ms + float(spoken[-1].get("tOffsetMs") or 0)
+        cue_end_ms = base_ms + dur_ms
+        if word_ms < first_ms - 120 or word_ms > cue_end_ms + 120:
+            continue
+        if word_ms >= last_ms - 80 and abs(word_ms - last_ms) <= 120:
+            end_sec = cue_end_ms / 1000.0
+            best = end_sec if best is None else max(best, end_sec)
+    return best
+
+
+def _speech_tail_after_word(
+    words: list[tuple[float, str]],
+    index: int,
+    *,
+    captions: Path | None = None,
+) -> float:
+    when, _text = words[index]
+    if captions is not None:
+        cue_end = json3_cue_end_sec(captions, when)
+        if cue_end is not None:
+            return max(cue_end - when, 0.35)
+    if index + 1 < len(words):
+        gap = words[index + 1][0] - when
+        return min(1.5, max(0.35, gap))
+    return 1.5
+
+
 def _pick_window_from_words(
     words: list[tuple[float, str]],
     *,
     min_seconds: float,
     max_seconds: float,
     default_start: float | None = None,
+    captions: Path | None = None,
 ) -> tuple[float, float] | None:
     if not words:
         return None
@@ -327,8 +376,8 @@ def _pick_window_from_words(
             break
         if not _word_ends_sentence(text):
             continue
-        nxt = words[i + 1][0] if i + 1 < len(words) else when + 0.6
-        duration = min(when - start + min(0.45, max(nxt - when, 0.2)), max_seconds)
+        tail = _speech_tail_after_word(words, i, captions=captions)
+        duration = min(when - start + tail + 0.12, max_seconds)
         if duration < min_seconds:
             continue
         best = (start, duration)
@@ -361,6 +410,7 @@ def pick_speech_excerpt(
             min_seconds=min_seconds,
             max_seconds=max_seconds,
             default_start=start,
+            captions=captions,
         )
         if picked and not any(_range_overlaps(picked[0], picked[0] + picked[1], lo, hi) for lo, hi in avoid):
             return picked
@@ -371,6 +421,7 @@ def pick_speech_excerpt(
         min_seconds=min_seconds,
         max_seconds=max_seconds,
         default_start=start,
+        captions=captions,
     )
     if picked:
         return picked
@@ -409,6 +460,7 @@ def leftover_speech_windows(
             remaining,
             min_seconds=min_seconds,
             max_seconds=max_seconds,
+            captions=captions,
         )
         if picked is None:
             break
@@ -419,6 +471,7 @@ def leftover_speech_windows(
         before,
         min_seconds=min_seconds,
         max_seconds=max_seconds,
+        captions=captions,
     )
     if picked_before and picked_before[0] + picked_before[1] <= used_start:
         windows.insert(0, picked_before)

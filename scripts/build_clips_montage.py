@@ -708,7 +708,9 @@ def build_silent_montage(
             )
             needed = _source_needed(this_duration, playback_speed)
             strict = segment_index == 0
-            vision = use_vision and segment_index < 2
+            from broll_frame_gate import wants_vehicle
+
+            vision = use_vision and (wants_vehicle(subject) or segment_index < 2)
 
             if layout == "single":
                 clip, start, source_len = _pick_passing_window(
@@ -855,7 +857,9 @@ def build_montage(
             )
             needed = _source_needed(this_duration, playback_speed)
             strict = segment_index == 0
-            vision = use_vision and segment_index < 2
+            from broll_frame_gate import wants_vehicle
+
+            vision = use_vision and (wants_vehicle(subject) or segment_index < 2)
 
             if layout == "single":
                 clip, start, source_len = _pick_passing_window(

@@ -88,6 +88,31 @@ def _ensure_scripts_path() -> None:
         sys.path.insert(0, str(scripts))
 
 
+def _vehicle_missing_at_sample(video_path: Path, subject: str, duration: float) -> float | None:
+    from broll_frame_gate import (
+        extract_preview_frame,
+        frame_fail_reasons,
+        vision_subject_present,
+    )
+
+    step = 3.0
+    stamp = 5.0
+    while stamp < duration - 0.4:
+        frame = extract_preview_frame(video_path, stamp)
+        if frame:
+            fails = frame_fail_reasons(frame, subject=subject)
+            if any(
+                reason in fails
+                for reason in ("talking-head", "missing-subject", "cabin", "title-card", "empty")
+            ):
+                return stamp
+            present = vision_subject_present(frame, subject, opener=False)
+            if present is False:
+                return stamp
+        stamp += step
+    return None
+
+
 def _opener_is_full_exterior(video_path: Path, subject: str) -> bool | None:
     from broll_frame_gate import (
         cabin_interior_reasons,
@@ -162,6 +187,9 @@ def check_render_quality(
                 report.errors.append("opener is not a full exterior view of the car")
             elif opener is None:
                 report.warnings.append("could not vision-check opener frame")
+            bad_at = _vehicle_missing_at_sample(video_path, subject, duration)
+            if bad_at is not None:
+                report.errors.append(f"non-vehicle or off-subject frame around {bad_at:.0f}s")
 
     if report.errors:
         report.ok = False
