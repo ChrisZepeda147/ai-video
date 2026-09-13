@@ -569,7 +569,12 @@ def _pick_opener_window(
             exclude=exclude,
             opener=False,
         )
-    for clip in picker.unused_clips(exclude):
+    ranked = sorted(
+        picker.unused_clips(exclude),
+        key=lambda clip: probe_duration(clip),
+        reverse=True,
+    )
+    for clip in ranked:
         picked = _pick_segment(
             clip,
             segment_length=segment_length,
