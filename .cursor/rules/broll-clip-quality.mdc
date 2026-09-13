@@ -1,0 +1,42 @@
+---
+description: >-
+  B-roll clip gates — cars stay exterior-only, 50fps+ is required,
+  4K is optional
+alwaysApply: true
+---
+
+# B-roll clip quality
+
+Applies to every B-roll download, pool pull, frame gate, and ship check.
+
+## Cars — outside only
+
+Keep **exterior** frames only. Drop cabin, cockpit, steering wheel, dashboard, seats, interior POV, and windshield-from-inside. See `car-exterior-frames.mdc`.
+
+```
+# ❌ BAD
+dashboard, wheel in lap, leather seats, cabin night-drive POV
+
+# ✅ GOOD
+full body driveway, three-quarter street, side profile rolling
+```
+
+## Frame rate — 50fps+ required
+
+Every kept clip is **50fps or higher**. Drop 24p, 25p, 30p, and 48p. Keep 50 / 59.94 / 60.
+
+Pipeline floor: `MIN_USABLE_FPS = 50` in `scripts/build_clips_montage.py`. Delete unusable clips. Do not ship them.
+
+```
+# ❌ BAD
+24fps 4K cinematic, 30fps 1080p, 48fps slow-mo
+
+# ✅ GOOD
+50fps 1080p, 60fps 1440p, 59.94fps 4K
+```
+
+## Resolution — 4K not required
+
+Do **not** reject 1080p or 1440p. Prefer high fps over 4K. A 60fps 1080p clip beats a 24fps 4K clip. Search queries may say `4k`; still keep a non-4K clip if it is 50fps+.
+
+Output render stays 1080×1920. Source 4K is optional, never a gate.

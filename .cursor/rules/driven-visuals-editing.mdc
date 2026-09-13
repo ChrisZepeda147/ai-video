@@ -12,14 +12,15 @@ Loader/helpers: `scripts/discovery/driven_visuals.py`
 
 ## Non-negotiables
 
-1. **Opener (1–2s)** — movement, strong subject, speech starts immediately. No black/static open.
-2. **Hook** — 4–7 words when it matches the speech; show within ~1s; stronger caption style.
-3. **Captions** — phrase blocks (2–5 words), not single-word karaoke default.
-4. **Pacing** — fast beats first ~6s (0.8–1.8s), then ~2–3.5s; speech beats win over math.
-5. **Pattern interrupts** — vary shot type/mood; no cheesy transitions.
-6. **Three daily videos** — distinct visual direction per slot.
-7. **Audio** — speech only unless brief asks for music.
-8. **Reuse** — existing checks stay advisory unless user asked unused-only.
+1. **Opener (1–2s)** — movement, strong subject, speech starts immediately. No black/static open. **Cars override:** full exterior of the car for **≥5s** first — never cabin/interior. See `car-exterior-frames.mdc`.
+2. **B-roll clips** — 50fps+ required. 4K not required. No car interiors. See `broll-clip-quality.mdc`.
+3. **Hook** — 4–7 words when it matches the speech; show within ~1s; stronger caption style.
+4. **Captions** — phrase blocks (2–5 words), not single-word karaoke default.
+5. **Pacing** — fast beats first ~6s (0.8–1.8s), then ~2–3.5s; speech beats win over math.
+6. **Pattern interrupts** — vary shot type/mood; no cheesy transitions.
+7. **Three daily videos** — distinct visual direction per slot.
+8. **Audio** — speech only unless brief asks for music.
+9. **Reuse** — existing checks stay advisory unless user asked unused-only.
 
 ## Tooling defaults
 

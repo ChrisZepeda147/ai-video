@@ -42,7 +42,7 @@ class BrollPoolTests(unittest.TestCase):
         unused.write_bytes(b"unused")
         subject = "Porsche sports car cinematic 4k short"
 
-        with patch("broll_pool._clip_fps", return_value=30.0):
+        with patch("broll_pool._clip_fps", return_value=50.0):
             stashed = broll_pool.stash_unused_clips(
                 jobs_root,
                 subject=subject,

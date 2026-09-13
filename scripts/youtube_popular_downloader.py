@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any
 
 import content_reuse
-from build_clips_montage import is_usable_fps, probe_fps
+from build_clips_montage import MIN_USABLE_FPS, is_usable_fps, probe_fps
 
 try:
     import yt_dlp
@@ -675,10 +675,12 @@ def download_videos(
         outtmpl = str(output_dir / name_tpl)
         postprocessors = [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}]
     else:
+        min_fps = int(MIN_USABLE_FPS)
         format_selector = (
-            f"bestvideo[fps>=30][height<={max_height}]+bestaudio/"
-            f"bestvideo[height<={max_height}]+bestaudio/"
-            f"best[height<={max_height}]/best"
+            f"bestvideo[fps>={min_fps}][height<={max_height}]+bestaudio/"
+            f"bestvideo[fps>={min_fps}]+bestaudio/"
+            f"best[fps>={min_fps}][height<={max_height}]/"
+            f"best[fps>={min_fps}]"
         )
         outtmpl = str(output_dir / "%(id)s_source.%(ext)s")
         postprocessors = []

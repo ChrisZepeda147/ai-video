@@ -16,7 +16,7 @@ from build_stills_slideshow import burn_captions
 
 FPS = 60
 PREFERRED_FPS = 60
-MIN_USABLE_FPS = 30.0
+MIN_USABLE_FPS = 50.0
 DEFAULT_PLAYBACK_SPEED = 0.80
 BASELINE_AUDIO_SECONDS = 60.0
 BASELINE_SEGMENT_SECONDS = 12.0
@@ -107,12 +107,12 @@ def probe_fps(path: Path) -> float:
 
 
 def is_usable_fps(fps: float, *, min_fps: float = MIN_USABLE_FPS) -> bool:
-    """True for 30fps and up. 24p/25p is a hard reject."""
+    """True for 50fps and up. 24p/25p/30p/48p is a hard reject."""
     return fps >= min_fps - 0.51
 
 
 def drop_low_fps_clips(clips: list[Path], *, delete: bool = False) -> list[Path]:
-    """Skip (and optionally delete) B-roll under 30fps."""
+    """Skip (and optionally delete) B-roll under 50fps."""
     kept: list[Path] = []
     for clip in clips:
         try:
