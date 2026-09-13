@@ -196,7 +196,7 @@ def _pick_segment(
     duration = probe_duration(clip)
     needed = source_needed if source_needed is not None else segment_length
     samples = scan_clip_local(clip, duration=duration, subject=subject)
-    min_length = min(needed, duration, 2.5)
+    min_length = min(needed, duration) if opener else min(needed, duration, 2.5)
     spans = clean_spans(samples, min_length=min_length)
     if not spans:
         return None
@@ -433,12 +433,21 @@ def _beat_duration(
     remaining: float,
     segment_length: float,
     driven_pacing: bool,
+    subject: str = "",
 ) -> float:
     if not driven_pacing:
-        return min(segment_length, remaining)
-    from discovery.driven_visuals import driven_beat_duration
+        beat = min(segment_length, remaining)
+    else:
+        from discovery.driven_visuals import driven_beat_duration
 
-    return min(driven_beat_duration(elapsed=accumulated, remaining=remaining), remaining)
+        beat = min(driven_beat_duration(elapsed=accumulated, remaining=remaining), remaining)
+    if accumulated <= 0.05:
+        from broll_frame_gate import wants_vehicle
+        from discovery.driven_visuals import vehicle_opener_hold_sec
+
+        if wants_vehicle(subject):
+            beat = max(beat, min(vehicle_opener_hold_sec(), remaining))
+    return beat
 
 
 def _pick_opener_window(
@@ -594,6 +603,7 @@ def build_silent_montage(
                 remaining=remaining,
                 segment_length=segment_length,
                 driven_pacing=driven_pacing,
+                subject=subject,
             )
             needed = _source_needed(this_duration, playback_speed)
             strict = segment_index == 0
@@ -738,6 +748,7 @@ def build_montage(
                 remaining=remaining,
                 segment_length=segment_length,
                 driven_pacing=driven_pacing,
+                subject=subject,
             )
             needed = _source_needed(this_duration, playback_speed)
             strict = segment_index == 0

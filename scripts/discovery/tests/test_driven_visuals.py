@@ -9,7 +9,9 @@ from discovery.driven_visuals import (
     parse_daily_video_briefs,
     planning_segment_length,
     speech_window_defaults,
+    vehicle_opener_hold_sec,
 )
+from build_clips_montage import _beat_duration
 from build_stills_slideshow import _ass_escape, group_words_into_phrases
 
 
@@ -18,6 +20,26 @@ class DrivenVisualsTests(unittest.TestCase):
         opening = driven_beat_duration(elapsed=1.0, remaining=60.0)
         settled = driven_beat_duration(elapsed=20.0, remaining=40.0)
         self.assertLess(opening, settled)
+
+    def test_car_opener_holds_full_exterior(self) -> None:
+        hold = vehicle_opener_hold_sec()
+        self.assertGreaterEqual(hold, 5.0)
+        car_open = _beat_duration(
+            accumulated=0.0,
+            remaining=27.0,
+            segment_length=8.0,
+            driven_pacing=True,
+            subject="Lamborghini Huracan night city",
+        )
+        yacht_open = _beat_duration(
+            accumulated=0.0,
+            remaining=27.0,
+            segment_length=8.0,
+            driven_pacing=True,
+            subject="luxury yacht cinematic",
+        )
+        self.assertGreaterEqual(car_open, hold)
+        self.assertLess(yacht_open, hold)
 
     def test_parse_daily_brief_blocks(self) -> None:
         text = """

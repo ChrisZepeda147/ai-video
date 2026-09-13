@@ -25,6 +25,12 @@ def load_defaults(*, refresh: bool = False) -> dict[str, Any]:
     return _cached
 
 
+def vehicle_opener_hold_sec() -> float:
+    """Cars hold a full exterior before any detail cut."""
+    gate = load_defaults().get("quality_gate") or {}
+    return float(gate.get("min_full_exterior_opener_sec") or 5.0)
+
+
 def driven_beat_duration(*, elapsed: float, remaining: float) -> float:
     """Opening uses faster beats; then settles into longer beats."""
     preset = load_defaults()
