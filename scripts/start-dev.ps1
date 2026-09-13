@@ -7,12 +7,7 @@ $Scripts = $PSScriptRoot
 
 Set-Location $Root
 Import-ApiEnvFile -Root $Root
-
-$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-$machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
-if ($userPath -or $machinePath) {
-    $env:Path = @($userPath, $machinePath, $env:Path) -join ';'
-}
+Import-DevPath
 
 if (Test-ApiHealthy) {
     Write-Host "Discovery API already running on http://127.0.0.1:8000"

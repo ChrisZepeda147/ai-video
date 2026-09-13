@@ -1,5 +1,46 @@
 # Shared helpers for start-dev / start-api / start-dashboard.
 
+function Import-DevPath {
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+    $extra = @(
+        "$env:LOCALAPPDATA\Programs\nodejs",
+        "$env:ProgramFiles\nodejs",
+        "${env:ProgramFiles(x86)}\nodejs",
+        "$env:ProgramFiles\Git\cmd"
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+    $env:Path = (@($extra) + @($userPath, $machinePath, $env:Path) | Where-Object { $_ }) -join ';'
+}
+
+function Resolve-NpmCmd {
+    $fallback = @(
+        "$env:LOCALAPPDATA\Programs\nodejs\npm.cmd",
+        "$env:ProgramFiles\nodejs\npm.cmd",
+        "${env:ProgramFiles(x86)}\nodejs\npm.cmd"
+    )
+    foreach ($path in $fallback) {
+        if ($path -and (Test-Path -LiteralPath $path)) { return $path }
+    }
+    $cmd = Get-Command npm.cmd -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.Source -and (Test-Path -LiteralPath $cmd.Source)) {
+        return $cmd.Source
+    }
+    return $null
+}
+
+function Resolve-NpxCmd {
+    $npm = Resolve-NpmCmd
+    if ($npm) {
+        $npx = Join-Path (Split-Path $npm) "npx.cmd"
+        if (Test-Path -LiteralPath $npx) { return $npx }
+    }
+    $cmd = Get-Command npx.cmd -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.Source -and (Test-Path -LiteralPath $cmd.Source)) {
+        return $cmd.Source
+    }
+    return $null
+}
+
 function Test-ApiPortListening {
     param([int]$Port = 8000)
     $conn = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
