@@ -37,6 +37,7 @@ from build_clips_montage import (
     min_unique_clips_needed,
     probe_duration,
     segment_length_for_duration,
+    unique_clips_required,
 )
 from discovery.driven_visuals import speech_window_defaults
 from discovery.reuse_policy import REUSE_POLICIES, normalize_reuse_policy
@@ -946,12 +947,16 @@ def broll_download_plan(
     clip_length: int,
     max_parts: int,
     split_full_source: bool = True,
+    driven_pacing: bool = True,
+    subject: str = "",
 ) -> tuple[int, int, int | None]:
     """Scale B-roll download so longer montages get longer parts and enough unique clips."""
-    needed = min_unique_clips_needed(
-        duration=duration,
+    needed = unique_clips_required(
+        target_duration=duration,
         segment_length=segment_length,
         layout="single",
+        driven_pacing=driven_pacing,
+        subject=subject,
     )
     resolved_clip_length = max(clip_length, int(math.ceil(segment_length * 1.25)))
     resolved_limit = max(clips_limit, needed + 2)
@@ -1429,17 +1434,22 @@ def rerender_existing_job(
         return 1
     clips_dir = job_dir / "clips"
     clips_dir.mkdir(parents=True, exist_ok=True)
+    driven_pacing = bool(payload.get("driven_pacing", True))
     clips_limit, clip_length, max_parts = broll_download_plan(
         duration=duration,
         segment_length=segment_length,
         clips_limit=clips_limit,
         clip_length=clip_length,
         max_parts=max_parts,
+        driven_pacing=driven_pacing,
+        subject=subject,
     )
-    needed_clips = min_unique_clips_needed(
-        duration=duration,
+    needed_clips = unique_clips_required(
+        target_duration=duration,
         segment_length=segment_length,
         layout="single",
+        driven_pacing=driven_pacing,
+        subject=subject,
     )
     try:
         ensure_broll_clips(

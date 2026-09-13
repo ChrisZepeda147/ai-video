@@ -33,6 +33,16 @@ class ClipsMontageTests(unittest.TestCase):
         self.assertEqual(short, 5)
         self.assertEqual(long, 5)
 
+    def test_driven_23s_needs_nine_unique_clips(self) -> None:
+        needed = montage.unique_clips_required(
+            target_duration=22.72,
+            segment_length=8.0,
+            layout="single",
+            driven_pacing=True,
+            subject="lamborghini huracan exterior 60fps",
+        )
+        self.assertGreaterEqual(needed, 8)
+
     def test_clip_picker_never_reuses_files(self) -> None:
         clips = [
             Path("aaa_part01.mp4"),

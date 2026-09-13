@@ -9,6 +9,7 @@ import random
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path
 
 from broll_frame_gate import clean_spans, longest_clean_span, scan_clip_local, score_window
@@ -42,6 +43,64 @@ def montage_beats_needed(*, duration: float, segment_length: float, layout: str)
 
 def min_unique_clips_needed(*, duration: float, segment_length: float, layout: str) -> int:
     return montage_beats_needed(duration=duration, segment_length=segment_length, layout=layout)
+
+
+def estimate_montage_beats(
+    *,
+    target_duration: float,
+    segment_length: float,
+    driven_pacing: bool,
+    subject: str = "",
+) -> int:
+    """Beat count for driven pacing (matches build_montage loop)."""
+    accumulated = 0.0
+    beats = 0
+    while accumulated < target_duration - 0.02:
+        remaining = target_duration - accumulated
+        beat = _beat_duration(
+            accumulated=accumulated,
+            remaining=remaining,
+            segment_length=segment_length,
+            driven_pacing=driven_pacing,
+            subject=subject,
+        )
+        accumulated += beat
+        beats += 1
+    return beats
+
+
+def unique_clips_required(
+    *,
+    target_duration: float,
+    segment_length: float,
+    layout: str,
+    driven_pacing: bool,
+    subject: str = "",
+) -> int:
+    plan = segment_length
+    if driven_pacing:
+        from broll_frame_gate import wants_vehicle
+        from discovery.driven_visuals import planning_segment_length
+
+        plan = planning_segment_length(
+            driven_pacing=True,
+            fallback=segment_length,
+            duration=target_duration,
+            vehicle=wants_vehicle(subject),
+        )
+    heuristic = min_unique_clips_needed(
+        duration=target_duration,
+        segment_length=plan,
+        layout=layout,
+    )
+    if driven_pacing and layout == "single":
+        return max(heuristic, estimate_montage_beats(
+            target_duration=target_duration,
+            segment_length=segment_length,
+            driven_pacing=True,
+            subject=subject,
+        ))
+    return heuristic
 
 
 def _even(value: int) -> int:
@@ -188,8 +247,6 @@ class _ClipPicker:
         exclude = exclude or set()
         available_files = [clip for clip in self.unused_files if clip not in exclude]
         if not available_files:
-            available_files = [clip for clip in self.all_clips if clip not in exclude]
-        if not available_files:
             raise RuntimeError(
                 "Not enough unique B-roll clips for this video length. "
                 "Download more sources or use a shorter speech."
@@ -215,12 +272,6 @@ class _ClipPicker:
                     for part in self.pools[source_id]
                     if part in self.unused_files and part not in exclude
                 ]
-                if not parts:
-                    parts = [
-                        part
-                        for part in self.pools[source_id]
-                        if part in available_files and part not in exclude
-                    ]
                 if parts:
                     clip = self.rng.choice(parts)
                     self.unused_files.discard(clip)
@@ -242,6 +293,16 @@ class _ClipPicker:
 
     def used_clips(self) -> set[Path]:
         return {clip for clip in self.all_clips if clip not in self.unused_files}
+
+
+def _register_beat_clips(picker: _ClipPicker, beat_clips: list[Path], clips: Iterable[Path]) -> None:
+    for clip in clips:
+        if clip in beat_clips:
+            raise RuntimeError(
+                f"B-roll file reused in one render (not allowed): {clip.name}"
+            )
+        beat_clips.append(clip)
+        picker.consume(clip)
 
 
 def _window_in_span(
@@ -689,20 +750,17 @@ def build_silent_montage(
             vehicle=wants_vehicle(subject),
         )
 
-    needed_clips = min_unique_clips_needed(
-        duration=target_duration,
-        segment_length=plan_length,
+    needed_clips = unique_clips_required(
+        target_duration=target_duration,
+        segment_length=segment_length,
         layout=layout,
+        driven_pacing=driven_pacing,
+        subject=subject,
     )
     if len(clips) < needed_clips:
-        floor = min(needed_clips, 3)
-        if len(clips) < floor:
-            raise RuntimeError(
-                f"Need at least {floor} B-roll clips for "
-                f"{target_duration:.0f}s at {plan_length:.1f}s beats, have {len(clips)}."
-            )
-        print(
-            f"  clip pool: {len(clips)} file(s) for ~{needed_clips} beats — will reuse passes"
+        raise RuntimeError(
+            f"Need {needed_clips} unique B-roll clip files for "
+            f"{target_duration:.0f}s (one clip per beat, no repeats), have {len(clips)}."
         )
 
     rng = random.Random(seed)
@@ -710,6 +768,7 @@ def build_silent_montage(
     output.parent.mkdir(parents=True, exist_ok=True)
 
     segments: list[Path] = []
+    beat_clips: list[Path] = []
     accumulated = 0.0
     segment_index = 0
 
@@ -754,6 +813,7 @@ def build_silent_montage(
                     playback_speed=playback_speed,
                     output_duration=out_len,
                 )
+                _register_beat_clips(picker, beat_clips, [clip])
             else:
                 left, left_start, left_len = _pick_passing_window(
                     picker,
@@ -787,6 +847,7 @@ def build_silent_montage(
                     layout=layout,
                     grade=grade,
                 )
+                _register_beat_clips(picker, beat_clips, [left, right])
 
             segments.append(segment_path)
             accumulated += probe_duration(segment_path)
@@ -843,20 +904,17 @@ def build_montage(
             vehicle=wants_vehicle(subject),
         )
 
-    needed_clips = min_unique_clips_needed(
-        duration=target_duration,
-        segment_length=plan_length,
+    needed_clips = unique_clips_required(
+        target_duration=target_duration,
+        segment_length=segment_length,
         layout=layout,
+        driven_pacing=driven_pacing,
+        subject=subject,
     )
     if len(clips) < needed_clips:
-        floor = min(needed_clips, 3)
-        if len(clips) < floor:
-            raise RuntimeError(
-                f"Need at least {floor} B-roll clips for "
-                f"{target_duration:.0f}s at {plan_length:.1f}s beats, have {len(clips)}."
-            )
-        print(
-            f"  clip pool: {len(clips)} file(s) for ~{needed_clips} beats — will reuse passes"
+        raise RuntimeError(
+            f"Need {needed_clips} unique B-roll clip files for "
+            f"{target_duration:.0f}s (one clip per beat, no repeats), have {len(clips)}."
         )
 
     rng = random.Random(seed)
@@ -864,6 +922,7 @@ def build_montage(
     output.parent.mkdir(parents=True, exist_ok=True)
 
     segments: list[Path] = []
+    beat_clips: list[Path] = []
     accumulated = 0.0
     segment_index = 0
 
@@ -908,6 +967,7 @@ def build_montage(
                     playback_speed=playback_speed,
                     output_duration=out_len,
                 )
+                _register_beat_clips(picker, beat_clips, [clip])
             else:
                 left, left_start, left_len = _pick_passing_window(
                     picker,
@@ -941,6 +1001,7 @@ def build_montage(
                     layout=layout,
                     grade=grade,
                 )
+                _register_beat_clips(picker, beat_clips, [left, right])
 
             segments.append(segment_path)
             accumulated += probe_duration(segment_path)
