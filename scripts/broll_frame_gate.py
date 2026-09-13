@@ -68,6 +68,7 @@ PASS_RATIO = 0.8
 SCAN_STEP = 1.0
 MIN_CLEAN_SPAN = 3.0
 VEHICLE_MID_VAR_MIN = 1800.0
+OPENER_MID_VAR_MIN = 3000.0
 OPENER_JUMP_MEAN_DIFF = 42.0
 VEHICLE_WORDS = frozenset(
     {
@@ -241,6 +242,14 @@ def _luma_var(png_bytes: bytes, *, x0: float, x1: float, y0: float, y1: float) -
 def vehicle_missing(png_bytes: bytes) -> bool:
     mid_var = _luma_var(png_bytes, x0=0.20, x1=0.80, y0=0.35, y1=0.75)
     return mid_var < VEHICLE_MID_VAR_MIN
+
+
+def opener_fail_reasons(png_bytes: bytes) -> list[str]:
+    """Local full-car opener check. No API. Rejects windshield / tiny-car establishing shots."""
+    mid_var = _luma_var(png_bytes, x0=0.18, x1=0.82, y0=0.28, y1=0.72)
+    if mid_var < OPENER_MID_VAR_MIN:
+        return ["weak-opener"]
+    return []
 
 
 def opener_has_jump_cut(frames: list[bytes], *, threshold: float = OPENER_JUMP_MEAN_DIFF) -> bool:
@@ -597,6 +606,14 @@ def score_window(
         if frame:
             frames.append(frame)
     report = window_report(frames, strict=strict, subject=subject)
+    if opener and wants_vehicle(subject) and frames:
+        opener_reasons: list[str] = []
+        for frame in frames:
+            opener_reasons.extend(opener_fail_reasons(frame))
+        if opener_reasons:
+            report["ok"] = False
+            report["reasons"] = sorted(set(list(report["reasons"]) + opener_reasons))
+            return report
     if not report["ok"] or not use_vision or not subject or not frames:
         return report
     if opener and wants_vehicle(subject):

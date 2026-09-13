@@ -107,6 +107,31 @@ class BrollFrameGateTests(unittest.TestCase):
         self.assertFalse(broll_frame_gate.parse_opener_verdict(host))
         self.assertTrue(broll_frame_gate.parse_opener_verdict(hero))
 
+    def test_opener_local_rejects_bridge_keeps_hero(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        bridge = (
+            root
+            / "downloads"
+            / "motivational"
+            / "lambo-huracan-night-city"
+            / "output"
+            / "opener-check"
+            / "t0.jpg"
+        )
+        hero = (
+            root
+            / "downloads"
+            / "motivational"
+            / "lambo-huracan-night-city"
+            / "output"
+            / "clip-preview"
+            / "miami_1.jpg"
+        )
+        if not (bridge.is_file() and hero.is_file()):
+            self.skipTest("huracan opener preview frames not on disk")
+        self.assertIn("weak-opener", broll_frame_gate.opener_fail_reasons(bridge.read_bytes()))
+        self.assertEqual(broll_frame_gate.opener_fail_reasons(hero.read_bytes()), [])
+
     def test_opener_jump_cut_detects_shot_change(self) -> None:
         same = [_png((20, 20, 24), busy=True) for _ in range(4)]
         changed = [

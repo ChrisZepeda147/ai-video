@@ -89,14 +89,26 @@ def _ensure_scripts_path() -> None:
 
 
 def _opener_is_full_exterior(video_path: Path, subject: str) -> bool | None:
-    from broll_frame_gate import extract_preview_frame, vision_subject_present, wants_vehicle
+    from broll_frame_gate import (
+        extract_preview_frame,
+        opener_fail_reasons,
+        vision_subject_present,
+        wants_vehicle,
+    )
 
     if not wants_vehicle(subject):
         return None
-    frame = extract_preview_frame(video_path, 0.12)
-    if not frame:
+    first = extract_preview_frame(video_path, 0.12)
+    if not first:
         return False
-    return vision_subject_present(frame, subject, opener=True)
+    for stamp in (0.12, 2.5, 4.85):
+        frame = extract_preview_frame(video_path, stamp) or first
+        if opener_fail_reasons(frame):
+            return False
+    present = vision_subject_present(first, subject, opener=True)
+    if present is False:
+        return False
+    return True
 
 
 def check_render_quality(
