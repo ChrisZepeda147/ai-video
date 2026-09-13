@@ -34,7 +34,6 @@ from build_clips_montage import (
     DEFAULT_PLAYBACK_SPEED,
     build_montage,
     drop_low_fps_clips,
-    min_unique_clips_needed,
     probe_duration,
     segment_length_for_duration,
     unique_clips_required,
@@ -1336,6 +1335,9 @@ def render_job(
         use_vision=use_vision,
         driven_pacing=driven_pacing,
     )
+    if len(used_clips) != len(set(used_clips)):
+        raise RuntimeError("Montage reused a B-roll clip file in one render")
+    print(f"  montage used {len(used_clips)} unique clip file(s)")
     caption_label = "phrase" if caption_mode == "phrase" else "word"
     print(f"Burning {caption_label} captions...")
     burn_captions(
@@ -1717,15 +1719,19 @@ def main() -> int:
             )
         clips_limit, clip_length, max_parts = broll_download_plan(
             duration=duration,
-            segment_length=plan_length,
+            segment_length=segment_length,
             clips_limit=args.clips_limit,
+            driven_pacing=driven_pacing,
+            subject=args.broll_query,
             clip_length=args.clip_length,
             max_parts=args.max_parts,
         )
-        needed_clips = min_unique_clips_needed(
-            duration=duration,
-            segment_length=plan_length,
+        needed_clips = unique_clips_required(
+            target_duration=duration,
+            segment_length=segment_length,
             layout="single",
+            driven_pacing=driven_pacing,
+            subject=args.broll_query,
         )
         broll_ids = ensure_broll_clips(
             jobs_root=jobs_root,
