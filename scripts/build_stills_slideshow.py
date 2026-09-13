@@ -139,7 +139,8 @@ def _seconds_to_ass(seconds: float) -> str:
 
 def _ass_escape(text: str) -> str:
     escaped = text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
-    return escaped.replace(" ", r"\h")
+    escaped = escaped.replace("\n", r"\N")
+    return "  ".join(escaped.split())
 
 
 def _ass_header(*, width: int, height: int, phrase_size: int = 46, hook_size: int = 64) -> str:

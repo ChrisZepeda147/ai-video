@@ -67,7 +67,7 @@ Hook: NOBODY TELLS YOU THIS
         self.assertLessEqual(hi, 30)
 
     def test_ass_keeps_word_gaps(self) -> None:
-        self.assertIn(r"\h", _ass_escape("YOU CANNOT BE"))
+        self.assertEqual(_ass_escape("YOU CANNOT BE"), "YOU  CANNOT  BE")
 
     def test_phrase_grouping(self) -> None:
         words = [

@@ -540,7 +540,7 @@ def _beat_duration(
         from discovery.driven_visuals import vehicle_opener_hold_sec
 
         if wants_vehicle(subject):
-            beat = max(beat, min(vehicle_opener_hold_sec(), remaining))
+            beat = max(beat, min(vehicle_opener_hold_sec() + 0.25, remaining))
     return beat
 
 
