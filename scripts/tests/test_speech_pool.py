@@ -31,6 +31,12 @@ class SpeechPoolTests(unittest.TestCase):
     def test_speaker_pool_slug(self) -> None:
         self.assertEqual(speech_pool.speaker_pool_slug("Andrew Tate"), "andrew-tate")
 
+    def test_clamp_pooled_speech_honors_max_seconds(self) -> None:
+        from build_motivation_job import clamp_pooled_speech_duration
+
+        self.assertEqual(clamp_pooled_speech_duration(26.4, 22.0), 22.0)
+        self.assertEqual(clamp_pooled_speech_duration(18.0, 22.0), 18.0)
+
     def test_youtube_id_from_url(self) -> None:
         self.assertEqual(
             speech_pool.youtube_id_from_url("https://www.youtube.com/watch?v=abcdefghijk"),

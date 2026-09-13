@@ -722,6 +722,11 @@ def _stash_speech_leftovers(
     return stashed
 
 
+def clamp_pooled_speech_duration(duration: float, max_seconds: float) -> float:
+    """Honor --max-seconds on leftover pool excerpts (often cut at 26–28s)."""
+    return min(max(0.2, float(duration)), float(max_seconds))
+
+
 def _take_pooled_speech(
     *,
     jobs_root: Path,
@@ -730,6 +735,7 @@ def _take_pooled_speech(
     speaker: str,
     speech_url: str,
     allow_reuse: bool,
+    max_seconds: float,
 ) -> tuple[VideoCandidate, float, float, str, str] | None:
     want_id = speech_pool.youtube_id_from_url(speech_url) if speech_url else ""
     item = speech_pool.take_from_pool(
@@ -741,6 +747,19 @@ def _take_pooled_speech(
     )
     if item is None:
         return None
+    duration = clamp_pooled_speech_duration(item.duration, max_seconds)
+    excerpt = item.excerpt
+    if duration + 0.2 < float(item.duration):
+        _write_job_speech(
+            audio_dir=audio_dir,
+            source_mp3=item.audio,
+            captions=item.captions,
+            start=0.0,
+            duration=duration,
+            keep_source=False,
+        )
+        excerpt = captions_text(audio_dir / "subs.en.json3", start=0.0, duration=duration)
+        print(f"  clamped pooled speech {item.duration:.1f}s -> {duration:.1f}s")
     candidate = VideoCandidate(
         video_id=item.youtube_id,
         title=item.title,
@@ -755,11 +774,11 @@ def _take_pooled_speech(
     content_reuse.register_video(
         youtube_id=item.youtube_id,
         title=item.title,
-        transcript=item.excerpt,
+        transcript=excerpt,
         role="speech",
         record_id=speech_record_id(item.youtube_id, item.start),
     )
-    return candidate, item.start, item.duration, item.excerpt, item.excerpt
+    return candidate, item.start, duration, excerpt, excerpt
 
 
 def prepare_speech(
@@ -792,6 +811,7 @@ def prepare_speech(
         speaker=speaker,
         speech_url=speech_url,
         allow_reuse=allow_reuse,
+        max_seconds=max_seconds,
     )
     if pooled is not None:
         return pooled
