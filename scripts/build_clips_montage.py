@@ -567,12 +567,14 @@ def build_silent_montage(
 
     plan_length = segment_length
     if driven_pacing:
+        from broll_frame_gate import wants_vehicle
         from discovery.driven_visuals import planning_segment_length
 
         plan_length = planning_segment_length(
             driven_pacing=True,
             fallback=segment_length,
             duration=target_duration,
+            vehicle=wants_vehicle(subject),
         )
 
     needed_clips = min_unique_clips_needed(
@@ -712,12 +714,14 @@ def build_montage(
 
     plan_length = segment_length
     if driven_pacing:
+        from broll_frame_gate import wants_vehicle
         from discovery.driven_visuals import planning_segment_length
 
         plan_length = planning_segment_length(
             driven_pacing=True,
             fallback=segment_length,
             duration=target_duration,
+            vehicle=wants_vehicle(subject),
         )
 
     needed_clips = min_unique_clips_needed(

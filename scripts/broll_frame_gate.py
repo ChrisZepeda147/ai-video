@@ -68,6 +68,7 @@ PASS_RATIO = 0.8
 SCAN_STEP = 1.0
 MIN_CLEAN_SPAN = 3.0
 VEHICLE_MID_VAR_MIN = 1800.0
+OPENER_JUMP_MEAN_DIFF = 42.0
 VEHICLE_WORDS = frozenset(
     {
         "911",
@@ -240,6 +241,25 @@ def _luma_var(png_bytes: bytes, *, x0: float, x1: float, y0: float, y1: float) -
 def vehicle_missing(png_bytes: bytes) -> bool:
     mid_var = _luma_var(png_bytes, x0=0.20, x1=0.80, y0=0.35, y1=0.75)
     return mid_var < VEHICLE_MID_VAR_MIN
+
+
+def opener_has_jump_cut(frames: list[bytes], *, threshold: float = OPENER_JUMP_MEAN_DIFF) -> bool:
+    """True when consecutive opener frames look like different shots."""
+    if len(frames) < 3:
+        return False
+    prev = Image.open(BytesIO(frames[0])).convert("RGB").resize((48, 48))
+    prev_bytes = prev.tobytes()
+    n = len(prev_bytes)
+    if n == 0:
+        return False
+    for raw in frames[1:]:
+        img = Image.open(BytesIO(raw)).convert("RGB").resize((48, 48))
+        data = img.tobytes()
+        diff = sum(abs(a - b) for a, b in zip(prev_bytes, data)) / n
+        if diff >= threshold:
+            return True
+        prev_bytes = data
+    return False
 
 
 def frame_fail_reasons(png_bytes: bytes, subject: str = "") -> list[str]:
@@ -577,7 +597,15 @@ def score_window(
         if frame:
             frames.append(frame)
     report = window_report(frames, strict=strict, subject=subject)
-    if not report["ok"] or not use_vision or not subject or not frames:
+    if not report["ok"]:
+        return report
+    if opener and wants_vehicle(subject) and opener_has_jump_cut(frames):
+        report["ok"] = False
+        reasons = list(report["reasons"])
+        reasons.append("opener-jump-cut")
+        report["reasons"] = reasons
+        return report
+    if not use_vision or not subject or not frames:
         return report
     if opener and wants_vehicle(subject):
         present = vision_subject_present(frames[0], subject, opener=True)

@@ -64,6 +64,7 @@ def planning_segment_length(
     driven_pacing: bool,
     fallback: float,
     duration: float | None = None,
+    vehicle: bool = False,
 ) -> float:
     """Blend fast-open + settle beats so clip-count matches the real cut."""
     if not driven_pacing:
@@ -80,8 +81,15 @@ def planning_segment_length(
         + float(opener.get("settle_beat_max_sec") or 3.5)
     ) / 2
     total = float(duration) if duration and duration > 0 else 0.0
+    hold = vehicle_opener_hold_sec() if vehicle else 0.0
     if total <= 0:
         blended = settle_avg
+    elif hold > 0:
+        hold = min(hold, total)
+        after_hold = max(total - hold, 0.0)
+        fast_left = min(max(fast_window - hold, 0.0), after_hold)
+        rest = max(after_hold - fast_left, 0.0)
+        blended = (hold * hold + fast_left * fast_avg + rest * settle_avg) / total
     else:
         fast = min(fast_window, total)
         rest = max(total - fast, 0.0)

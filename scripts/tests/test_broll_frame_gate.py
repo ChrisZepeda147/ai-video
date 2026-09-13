@@ -107,7 +107,16 @@ class BrollFrameGateTests(unittest.TestCase):
         self.assertFalse(broll_frame_gate.parse_opener_verdict(host))
         self.assertTrue(broll_frame_gate.parse_opener_verdict(hero))
 
-    def test_sample_clip_stamps_cover_clip(self) -> None:
+    def test_opener_jump_cut_detects_shot_change(self) -> None:
+        same = [_png((20, 20, 24), busy=True) for _ in range(4)]
+        changed = [
+            _png((20, 20, 24), busy=True),
+            _png((20, 20, 24), busy=True),
+            _png((180, 40, 30)),
+            _png((180, 40, 30)),
+        ]
+        self.assertFalse(broll_frame_gate.opener_has_jump_cut(same))
+        self.assertTrue(broll_frame_gate.opener_has_jump_cut(changed))
         stamps = broll_frame_gate.sample_clip_stamps(8.0, step=1.0)
         self.assertGreaterEqual(len(stamps), 6)
         self.assertLess(stamps[0], 1.0)
