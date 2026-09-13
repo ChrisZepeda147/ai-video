@@ -142,7 +142,7 @@ Both machines, once:
 powershell -File scripts/github_brother_sync.ps1 install
 ```
 
-Windows task `AiVideoGitHubSync` every 5 min: fetch both remotes, auto-commit source, merge his commits (incoming wins on clash), push origin + chris. Both machines need `install`. Never force-push.
+Windows task `AiVideoGitHubSync` every 5 min (silent `wscript` launcher, no CMD flash): fetch both remotes, auto-commit source, merge his commits (incoming wins on clash), push origin + chris. Both machines need `install`. Never force-push. Re-run `install` after pulling this change so the hidden launcher replaces the old powershell task.
 
 ```powershell
 powershell -File scripts/github_brother_sync.ps1 uninstall

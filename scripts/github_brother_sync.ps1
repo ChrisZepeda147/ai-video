@@ -21,7 +21,29 @@ $Root = Split-Path -Parent $PSScriptRoot
 $LogDir = Join-Path $Root "data\shared_library"
 $LogPath = Join-Path $LogDir "github_sync.log"
 $LockPath = Join-Path $LogDir "github_sync.lock"
+$SilentVbsPath = Join-Path $LogDir "github_brother_sync_silent.vbs"
 $StashMessage = "github-brother-sync"
+$GitExe = $null
+
+function Get-GitExe {
+    if ($script:GitExe) { return $script:GitExe }
+    $cmd = Get-Command git -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.Source) {
+        $script:GitExe = $cmd.Source
+        return $script:GitExe
+    }
+    foreach ($candidate in @(
+        (Join-Path $env:ProgramFiles "Git\cmd\git.exe"),
+        (Join-Path ${env:ProgramFiles(x86)} "Git\cmd\git.exe")
+    )) {
+        if ($candidate -and (Test-Path $candidate)) {
+            $script:GitExe = $candidate
+            return $script:GitExe
+        }
+    }
+    $script:GitExe = "git"
+    return $script:GitExe
+}
 
 function Write-SyncLog([string]$Message) {
     New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
@@ -33,15 +55,35 @@ function Write-SyncLog([string]$Message) {
     }
 }
 
+function ConvertTo-ProcessArgumentString([string[]]$Parts) {
+    ($Parts | ForEach-Object {
+        if ($_ -match '[\s"]') {
+            '"' + ($_ -replace '"', '\"') + '"'
+        } else {
+            $_
+        }
+    }) -join " "
+}
+
 function Invoke-Git {
     param([string[]]$GitArgs)
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    $out = & git -C $Root @GitArgs 2>&1 | ForEach-Object { "$_" }
-    $code = $LASTEXITCODE
-    $ErrorActionPreference = $prev
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = Get-GitExe
+    $psi.Arguments = ConvertTo-ProcessArgumentString(@("-C", $Root) + $GitArgs)
+    $psi.WorkingDirectory = $Root
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $proc = New-Object System.Diagnostics.Process
+    $proc.StartInfo = $psi
+    [void]$proc.Start()
+    $stdout = $proc.StandardOutput.ReadToEnd()
+    $stderr = $proc.StandardError.ReadToEnd()
+    $proc.WaitForExit()
+    $out = @($stdout, $stderr) | Where-Object { $_ } | ForEach-Object { $_.TrimEnd() }
     return [pscustomobject]@{
-        Code   = $code
+        Code   = $proc.ExitCode
         Output = ($out -join "`n").Trim()
     }
 }
@@ -130,14 +172,46 @@ function Get-AheadBehind([string]$Ref) {
     return @{ Behind = $b; Ahead = $a }
 }
 
-function Install-SyncTask {
+function Write-SilentLauncher {
     $script = Join-Path $PSScriptRoot "github_brother_sync.ps1"
-    $tr = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$script`" tick"
+    $powershell = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
+    New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+    $cmd = "$powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$script`" tick"
+    $escaped = $cmd.Replace('"', '""')
+    $rootEsc = $Root.Replace('"', '""')
+    @(
+        "On Error Resume Next"
+        "Set sh = CreateObject(""Wscript.Shell"")"
+        "sh.CurrentDirectory = ""$rootEsc"""
+        "sh.Run ""$escaped"", 0, False"
+    ) -join "`r`n" | Set-Content -Path $SilentVbsPath -Encoding ASCII
+    return $SilentVbsPath
+}
+
+function Set-ScheduledTaskHidden([string]$Name) {
+    $svc = New-Object -ComObject Schedule.Service
+    $svc.Connect()
+    $folder = $svc.GetFolder("\")
+    $task = $folder.GetTask($Name)
+    $def = $task.Definition
+    $def.Settings.Hidden = $true
+    [void]$folder.RegisterTaskDefinition($Name, $def, 4, $null, $null, 3, $null)
+}
+
+function Install-SyncTask {
+    $vbs = Write-SilentLauncher
+    $wscript = Join-Path $env:WINDIR "System32\wscript.exe"
+    $tr = "`"$wscript`" //B //Nologo `"$vbs`""
     $create = schtasks /Create /TN $TaskName /SC MINUTE /MO $Minutes /RL LIMITED /F /TR $tr
     if ($LASTEXITCODE -ne 0) {
         throw "schtasks create failed: $create"
     }
-    Write-Host "installed $TaskName every $Minutes min"
+    try {
+        Set-ScheduledTaskHidden $TaskName
+    } catch {
+        Write-SyncLog "warn  could not mark task Hidden: $_"
+    }
+    Write-Host "installed $TaskName every $Minutes min (silent)"
     Write-Host "log: $LogPath"
 }
 
@@ -147,6 +221,9 @@ function Uninstall-SyncTask {
         Write-Host "removed $TaskName"
     } else {
         Write-Host "task not found"
+    }
+    if (Test-Path $SilentVbsPath) {
+        Remove-Item -Force $SilentVbsPath
     }
 }
 
