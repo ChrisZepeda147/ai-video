@@ -597,15 +597,7 @@ def score_window(
         if frame:
             frames.append(frame)
     report = window_report(frames, strict=strict, subject=subject)
-    if not report["ok"]:
-        return report
-    if opener and wants_vehicle(subject) and opener_has_jump_cut(frames):
-        report["ok"] = False
-        reasons = list(report["reasons"])
-        reasons.append("opener-jump-cut")
-        report["reasons"] = reasons
-        return report
-    if not use_vision or not subject or not frames:
+    if not report["ok"] or not use_vision or not subject or not frames:
         return report
     if opener and wants_vehicle(subject):
         present = vision_subject_present(frames[0], subject, opener=True)
