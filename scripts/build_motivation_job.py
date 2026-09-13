@@ -1349,8 +1349,12 @@ def rerender_existing_job(
             seed=seed,
             grade=grade,
             subject=subject,
-            playback_speed=playback_speed,
+            playback_speed=float(payload.get("playback_speed") or playback_speed),
             use_vision=use_vision,
+            driven_pacing=bool(payload.get("driven_pacing", True)),
+            caption_mode=str(payload.get("caption_mode") or "phrase"),
+            hook_text=str(payload.get("hook") or "") or None,
+            quality_gate=True,
         )
     except (FileNotFoundError, RuntimeError, ValueError, subprocess.CalledProcessError) as exc:
         print(exc, file=sys.stderr)
@@ -1358,7 +1362,7 @@ def rerender_existing_job(
     if cleanup:
         removed = cleanup_job_dir(job_dir, keep_work=keep_work)
         print(f"Cleaned {len(removed)} leftover file(s).")
-    print(f"Saved: {output}")
+        print(f"Saved: {output}")
     return 0
 
 

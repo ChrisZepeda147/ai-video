@@ -102,6 +102,13 @@ REALESTATE_TOUR_RE = re.compile(
     r"mega mansion|hour tour|travel video|night cities|capital of)\b",
     re.IGNORECASE,
 )
+SIM_GAME_FOOTAGE_TITLE_RE = re.compile(
+    r"\b(forza\s+horizon|assetto\s+corsa|beam\.?ng|need\s+for\s+speed|\bnfs\b|"
+    r"gta\s+v\b|\bgta\b.*mods|unreal\s+engine|wuthering\s+waves|"
+    r"rtx\s+\d{3,4}|gran\s+turismo|project\s+cars|"
+    r"speed\s+art\s*\+\s*gameplay|anime\s+lamborghini)\b",
+    re.IGNORECASE,
+)
 
 BACKGROUND_SEARCH_QUERIES = [
     "satisfying mobile game no commentary",
@@ -295,6 +302,10 @@ def is_commentary_heavy(video: VideoCandidate) -> bool:
 
 def is_realestate_tour(video: VideoCandidate) -> bool:
     return bool(REALESTATE_TOUR_RE.search(video.title))
+
+
+def is_sim_game_footage(video: VideoCandidate) -> bool:
+    return bool(SIM_GAME_FOOTAGE_TITLE_RE.search(video.title))
 
 
 def background_gameplay_score(video: VideoCandidate) -> int:
@@ -535,6 +546,7 @@ def filter_unwanted(
     exclude_trailers: bool,
     exclude_live: bool,
     exclude_realestate_tours: bool = False,
+    exclude_sim_footage: bool = True,
     background_gameplay_only: bool,
     min_views: int,
     min_duration: float,
@@ -546,6 +558,7 @@ def filter_unwanted(
     skipped_live = 0
     skipped_commentary = 0
     skipped_tours = 0
+    skipped_sim = 0
     skipped_views = 0
     skipped_duration = 0
     skipped_other = 0
@@ -561,6 +574,9 @@ def filter_unwanted(
             continue
         if exclude_realestate_tours and is_realestate_tour(video):
             skipped_tours += 1
+            continue
+        if exclude_sim_footage and is_sim_game_footage(video):
+            skipped_sim += 1
             continue
         if is_commentary_heavy(video):
             skipped_commentary += 1
@@ -590,6 +606,8 @@ def filter_unwanted(
         parts.append(f"{skipped_commentary} commentary-heavy")
     if skipped_tours:
         parts.append(f"{skipped_tours} real-estate tour(s)")
+    if skipped_sim:
+        parts.append(f"{skipped_sim} sim/game footage")
     if skipped_views:
         parts.append(f"{skipped_views} low-view")
     if skipped_duration:
