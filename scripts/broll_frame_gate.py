@@ -70,6 +70,9 @@ MIN_CLEAN_SPAN = 3.0
 VEHICLE_MID_VAR_MIN = 1800.0
 OPENER_MID_VAR_MIN = 2000.0
 OPENER_JUMP_MEAN_DIFF = 42.0
+SOFT_BLUR_LAPLACIAN_MIN = 18.0
+PILLARBOX_SIDE_DARK_FRAC = 0.72
+PILLARBOX_BAND_FRAC = 0.18
 VEHICLE_WORDS = frozenset(
     {
         "911",
@@ -244,6 +247,55 @@ def vehicle_missing(png_bytes: bytes) -> bool:
     return mid_var < VEHICLE_MID_VAR_MIN
 
 
+def _laplacian_sharpness(png_bytes: bytes) -> float:
+    img = Image.open(BytesIO(png_bytes)).convert("L").resize((180, 320))
+    width, height = img.size
+    pixels = img.load()
+    total = 0.0
+    count = 0
+    for y in range(1, height - 1):
+        for x in range(1, width - 1):
+            center = pixels[x, y]
+            total += abs(2 * center - pixels[x - 1, y] - pixels[x + 1, y])
+            total += abs(2 * center - pixels[x, y - 1] - pixels[x, y + 1])
+            count += 1
+    return total / max(count, 1)
+
+
+def pillarbox_embed_reasons(png_bytes: bytes) -> list[str]:
+    """Reject source clips with tiny dual panels / thick black side bars."""
+    img = Image.open(BytesIO(png_bytes)).convert("L")
+    width, height = img.size
+    side_w = max(int(width * PILLARBOX_BAND_FRAC), 4)
+    dark_rows = 0
+    for y in range(0, height, 3):
+        side_dark = 0
+        side_total = 0
+        for x in list(range(0, side_w)) + list(range(width - side_w, width)):
+            side_total += 1
+            if img.getpixel((x, y)) < 22:
+                side_dark += 1
+        if side_total and side_dark / side_total >= PILLARBOX_SIDE_DARK_FRAC:
+            dark_rows += 1
+    if dark_rows / max((height // 3), 1) >= 0.55:
+        return ["embed-pillarbox"]
+    return []
+
+
+def vehicle_body_framing_reasons(png_bytes: bytes) -> list[str]:
+    """Extra checks for car montage beats (blur, embedded junk, rear macro)."""
+    reasons: list[str] = []
+    if _laplacian_sharpness(png_bytes) < SOFT_BLUR_LAPLACIAN_MIN:
+        reasons.append("soft-blur")
+    reasons.extend(pillarbox_embed_reasons(png_bytes))
+    upper = _luma_var(png_bytes, x0=0.12, x1=0.88, y0=0.05, y1=0.42)
+    lower = _luma_var(png_bytes, x0=0.12, x1=0.88, y0=0.58, y1=0.95)
+    mid = _luma_var(png_bytes, x0=0.20, x1=0.80, y0=0.35, y1=0.72)
+    if mid >= VEHICLE_MID_VAR_MIN and upper < 900 and lower < 900:
+        reasons.append("rear-macro")
+    return reasons
+
+
 def cabin_interior_reasons(png_bytes: bytes) -> list[str]:
     """Local cabin / windshield-from-inside / gauge check. No API."""
     img = Image.open(BytesIO(png_bytes)).convert("RGB").resize((80, 140))
@@ -336,6 +388,7 @@ def frame_fail_reasons(png_bytes: bytes, subject: str = "") -> list[str]:
         reasons.append("missing-subject")
     if wants_vehicle(subject):
         reasons.extend(cabin_interior_reasons(png_bytes))
+        reasons.extend(vehicle_body_framing_reasons(png_bytes))
     return reasons
 
 

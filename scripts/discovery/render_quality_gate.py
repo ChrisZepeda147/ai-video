@@ -95,15 +95,24 @@ def _vehicle_missing_at_sample(video_path: Path, subject: str, duration: float) 
         vision_subject_present,
     )
 
-    step = 3.0
-    stamp = 5.0
-    while stamp < duration - 0.4:
+    step = 1.0
+    stamp = 6.0
+    while stamp < duration - 0.35:
         frame = extract_preview_frame(video_path, stamp)
         if frame:
             fails = frame_fail_reasons(frame, subject=subject)
             if any(
                 reason in fails
-                for reason in ("talking-head", "missing-subject", "cabin", "title-card", "empty")
+                for reason in (
+                    "talking-head",
+                    "missing-subject",
+                    "cabin",
+                    "title-card",
+                    "empty",
+                    "soft-blur",
+                    "embed-pillarbox",
+                    "rear-macro",
+                )
             ):
                 return stamp
             present = vision_subject_present(frame, subject, opener=False)

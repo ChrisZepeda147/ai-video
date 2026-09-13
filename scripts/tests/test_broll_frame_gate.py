@@ -77,6 +77,19 @@ class BrollFrameGateTests(unittest.TestCase):
         longest = broll_frame_gate.longest_clean_span(samples, min_length=2.0)
         self.assertEqual(longest, (0.0, 4.0))
 
+    def test_soft_blur_rejects_mushy_rear_macro(self) -> None:
+        sharp = _png((40, 44, 48), busy=True)
+        mush = Image.new("RGB", (160, 280), (55, 58, 62))
+        for x in range(160):
+            for y in range(280):
+                mush.putpixel((x, y), (50 + (x % 7), 54 + (y % 5), 60))
+        buf = BytesIO()
+        mush.save(buf, format="PNG")
+        mushy = buf.getvalue()
+        subject = "lamborghini huracan"
+        self.assertNotIn("soft-blur", broll_frame_gate.frame_fail_reasons(sharp, subject))
+        self.assertIn("soft-blur", broll_frame_gate.frame_fail_reasons(mushy, subject))
+
     def test_vehicle_gate_rejects_establishing_shots(self) -> None:
         qc = Path(__file__).resolve().parents[2] / "downloads" / "motivational" / "porsche-gt3rs-motivation" / "output" / "qc"
         harbor = qc / "t0-5.png"
