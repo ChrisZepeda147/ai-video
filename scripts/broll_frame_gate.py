@@ -245,11 +245,24 @@ def vehicle_missing(png_bytes: bytes) -> bool:
 
 
 def opener_fail_reasons(png_bytes: bytes) -> list[str]:
-    """Local full-car opener check. No API. Rejects windshield / tiny-car establishing shots."""
+    """Local full-car opener check. No API. Rejects cabin, windshield, tiny-car establishing shots."""
+    reasons: list[str] = []
+    if talking_head_score(png_bytes) >= TALKING_HEAD_LIMIT:
+        reasons.append("talking-head")
     mid_var = _luma_var(png_bytes, x0=0.18, x1=0.82, y0=0.28, y1=0.72)
     if mid_var < OPENER_MID_VAR_MIN:
-        return ["weak-opener"]
-    return []
+        reasons.append("weak-opener")
+    return reasons
+
+
+def ffmpeg_accurate_input(source: Path, timestamp: float) -> list[str]:
+    """Coarse input seek, then accurate output seek. Avoids keyframe-skip lies."""
+    ts = max(0.0, float(timestamp))
+    pad = min(ts, 3.0)
+    args = ["-ss", f"{ts - pad:.6f}", "-i", str(source)]
+    if pad >= 0.001:
+        args.extend(["-ss", f"{pad:.6f}"])
+    return args
 
 
 def opener_has_jump_cut(frames: list[bytes], *, threshold: float = OPENER_JUMP_MEAN_DIFF) -> bool:
@@ -295,10 +308,7 @@ def extract_preview_frame(source: Path, timestamp: float) -> bytes | None:
     cmd = [
         ffmpeg,
         "-y",
-        "-ss",
-        f"{timestamp:.3f}",
-        "-i",
-        str(source),
+        *ffmpeg_accurate_input(source, timestamp),
         "-frames:v",
         "1",
         "-vf",
