@@ -98,10 +98,10 @@ def _opener_is_full_exterior(video_path: Path, subject: str) -> bool | None:
 
     if not wants_vehicle(subject):
         return None
-    first = extract_preview_frame(video_path, 0.12)
+    first = extract_preview_frame(video_path, 0.0)
     if not first:
         return False
-    for stamp in (0.12, 2.5, 4.85):
+    for stamp in (0.0, 2.5, 5.0):
         frame = extract_preview_frame(video_path, stamp) or first
         if opener_fail_reasons(frame):
             return False

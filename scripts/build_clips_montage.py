@@ -11,13 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from broll_frame_gate import (
-    clean_spans,
-    ffmpeg_accurate_input,
-    longest_clean_span,
-    scan_clip_local,
-    score_window,
-)
+from broll_frame_gate import clean_spans, longest_clean_span, scan_clip_local, score_window
 from build_stills_slideshow import burn_captions
 
 FPS = 30
@@ -254,13 +248,20 @@ def _export_segment(
     playback_speed: float = 1.0,
     output_duration: float | None = None,
 ) -> None:
-    vf = _playback_chain(playback_speed) + _scale_crop_filter(width=width, height=height, grade=grade)
     out_len = output_duration if output_duration is not None else duration
     frames = _duration_to_frames(out_len)
+    trim = (
+        f"trim=start={max(start, 0.0):.6f}:duration={duration:.6f},"
+        "setpts=PTS-STARTPTS,"
+    )
+    vf = trim + _playback_chain(playback_speed) + _scale_crop_filter(
+        width=width, height=height, grade=grade
+    )
     cmd = [
         "ffmpeg",
         "-y",
-        *ffmpeg_accurate_input(source, start),
+        "-i",
+        str(source),
         "-t",
         str(out_len),
         "-frames:v",
