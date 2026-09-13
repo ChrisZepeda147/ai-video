@@ -188,6 +188,8 @@ class _ClipPicker:
         exclude = exclude or set()
         available_files = [clip for clip in self.unused_files if clip not in exclude]
         if not available_files:
+            available_files = [clip for clip in self.all_clips if clip not in exclude]
+        if not available_files:
             raise RuntimeError(
                 "Not enough unique B-roll clips for this video length. "
                 "Download more sources or use a shorter speech."
@@ -202,17 +204,27 @@ class _ClipPicker:
         if unused_sources:
             if not self._unused_sources or not unused_sources.intersection(self._unused_sources):
                 self._reshuffle_sources()
-            source_id = next(sid for sid in self._unused_sources if sid in unused_sources)
-            self._unused_sources.remove(source_id)
-            parts = [
-                part
-                for part in self.pools[source_id]
-                if part in self.unused_files and part not in exclude
-            ]
-            if parts:
-                clip = self.rng.choice(parts)
-                self.unused_files.discard(clip)
-                return clip
+            source_id = next(
+                (sid for sid in self._unused_sources if sid in unused_sources),
+                None,
+            )
+            if source_id is not None:
+                self._unused_sources.remove(source_id)
+                parts = [
+                    part
+                    for part in self.pools[source_id]
+                    if part in self.unused_files and part not in exclude
+                ]
+                if not parts:
+                    parts = [
+                        part
+                        for part in self.pools[source_id]
+                        if part in available_files and part not in exclude
+                    ]
+                if parts:
+                    clip = self.rng.choice(parts)
+                    self.unused_files.discard(clip)
+                    return clip
 
         clip = self.rng.choice(available_files)
         self.unused_files.discard(clip)
@@ -636,6 +648,7 @@ def _pick_passing_window(
         if picked:
             return clip, picked[0], picked[1]
         tried.add(clip)
+        picker.unused_files.add(clip)
         if len(tried) >= len(picker.all_clips):
             break
     raise RuntimeError("No B-roll window passed the subject/frame gate.")
