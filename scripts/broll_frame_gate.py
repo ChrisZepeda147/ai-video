@@ -244,6 +244,37 @@ def vehicle_missing(png_bytes: bytes) -> bool:
     return mid_var < VEHICLE_MID_VAR_MIN
 
 
+def cabin_interior_reasons(png_bytes: bytes) -> list[str]:
+    """Local cabin / windshield-from-inside / gauge check. No API."""
+    img = Image.open(BytesIO(png_bytes)).convert("RGB").resize((80, 140))
+    width, height = img.size
+    luma: list[float] = []
+    outdoor = 0
+    for y in range(height):
+        for x in range(width):
+            r, g, b = img.getpixel((x, y))
+            luma.append(0.2126 * r + 0.7152 * g + 0.0722 * b)
+            if g > r + 8 and g > b + 5:
+                outdoor += 1
+    total = width * height
+    outdoor_frac = outdoor / total if total else 0.0
+    lower = luma[int(height * 0.70) * width :]
+    upper = luma[: int(height * 0.38) * width]
+    if lower and upper:
+        lower_mean = sum(lower) / len(lower)
+        upper_mean = sum(upper) / len(upper)
+        lower_var = sum((value - lower_mean) ** 2 for value in lower) / len(lower)
+        if lower_mean < 70 and upper_mean > 120 and lower_var < 900:
+            return ["cabin"]
+    mid = luma[int(height * 0.30) * width : int(height * 0.72) * width]
+    if mid and outdoor_frac < 0.01:
+        mid_mean = sum(mid) / len(mid)
+        dark_frac = sum(1 for value in luma if value < 32) / total
+        if mid_mean > 90 and dark_frac > 0.18:
+            return ["cabin"]
+    return []
+
+
 def opener_fail_reasons(png_bytes: bytes) -> list[str]:
     """Local full-car opener check. No API. Rejects cabin, windshield, tiny-car establishing shots."""
     reasons: list[str] = []
@@ -252,6 +283,7 @@ def opener_fail_reasons(png_bytes: bytes) -> list[str]:
     mid_var = _luma_var(png_bytes, x0=0.18, x1=0.82, y0=0.28, y1=0.72)
     if mid_var < OPENER_MID_VAR_MIN:
         reasons.append("weak-opener")
+    reasons.extend(cabin_interior_reasons(png_bytes))
     return reasons
 
 
@@ -294,6 +326,8 @@ def frame_fail_reasons(png_bytes: bytes, subject: str = "") -> list[str]:
         reasons.append("empty")
     if wants_vehicle(subject) and vehicle_missing(png_bytes):
         reasons.append("missing-subject")
+    if wants_vehicle(subject):
+        reasons.extend(cabin_interior_reasons(png_bytes))
     return reasons
 
 
@@ -620,6 +654,8 @@ def score_window(
         opener_reasons: list[str] = []
         for frame in frames:
             opener_reasons.extend(opener_fail_reasons(frame))
+        if opener_has_jump_cut(frames):
+            opener_reasons.append("opener-jump")
         if opener_reasons:
             report["ok"] = False
             report["reasons"] = sorted(set(list(report["reasons"]) + opener_reasons))

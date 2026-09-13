@@ -265,18 +265,44 @@ def _pick_segment(
         return None
 
     fit = [span for span in spans if span[1] - span[0] >= min(needed, duration) - 0.05]
-    if opener and fit:
-        window_start, window_len = _window_in_span(fit[0], min(needed, duration), rng)
-        window_start = fit[0][0]
-    elif fit:
-        window_start, window_len = _window_in_span(rng.choice(fit), min(needed, duration), rng)
+    hold = min(needed, duration)
+    if opener:
+        starts: list[float] = []
+        for span_start, span_end in fit or spans:
+            span_len = span_end - span_start
+            if span_len < hold - 0.05:
+                continue
+            cursor = span_start
+            while cursor + hold <= span_end + 0.05:
+                starts.append(cursor)
+                cursor += 1.0
+            if span_start not in starts:
+                starts.append(span_start)
+        if not starts and spans:
+            longest = longest_clean_span(samples, min_length=min_length)
+            if longest is not None:
+                starts.append(longest[0])
+        for window_start in starts:
+            report = score_window(
+                clip,
+                start=window_start,
+                duration=hold,
+                clip_duration=duration,
+                subject=subject,
+                strict=strict,
+                use_vision=use_vision,
+                opener=opener,
+            )
+            if report["ok"]:
+                return window_start, hold
+        return None
+    if fit:
+        window_start, window_len = _window_in_span(rng.choice(fit), hold, rng)
     else:
         longest = longest_clean_span(samples, min_length=min_length)
         if longest is None:
             return None
-        window_start, window_len = _window_in_span(longest, min(needed, duration), rng)
-        if opener:
-            window_start = longest[0]
+        window_start, window_len = _window_in_span(longest, hold, rng)
 
     report = score_window(
         clip,
