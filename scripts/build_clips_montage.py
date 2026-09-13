@@ -695,9 +695,14 @@ def build_silent_montage(
         layout=layout,
     )
     if len(clips) < needed_clips:
-        raise RuntimeError(
-            f"Need at least {needed_clips} unique B-roll clips for "
-            f"{target_duration:.0f}s at {plan_length:.1f}s beats, have {len(clips)}."
+        floor = min(needed_clips, 3)
+        if len(clips) < floor:
+            raise RuntimeError(
+                f"Need at least {floor} B-roll clips for "
+                f"{target_duration:.0f}s at {plan_length:.1f}s beats, have {len(clips)}."
+            )
+        print(
+            f"  clip pool: {len(clips)} file(s) for ~{needed_clips} beats — will reuse passes"
         )
 
     rng = random.Random(seed)
@@ -844,9 +849,14 @@ def build_montage(
         layout=layout,
     )
     if len(clips) < needed_clips:
-        raise RuntimeError(
-            f"Need at least {needed_clips} unique B-roll clips for "
-            f"{target_duration:.0f}s at {plan_length:.1f}s beats, have {len(clips)}."
+        floor = min(needed_clips, 3)
+        if len(clips) < floor:
+            raise RuntimeError(
+                f"Need at least {floor} B-roll clips for "
+                f"{target_duration:.0f}s at {plan_length:.1f}s beats, have {len(clips)}."
+            )
+        print(
+            f"  clip pool: {len(clips)} file(s) for ~{needed_clips} beats — will reuse passes"
         )
 
     rng = random.Random(seed)
