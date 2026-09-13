@@ -90,8 +90,8 @@ def _ensure_scripts_path() -> None:
 
 def _opener_is_full_exterior(video_path: Path, subject: str) -> bool | None:
     from broll_frame_gate import (
+        cabin_interior_reasons,
         extract_preview_frame,
-        opener_fail_reasons,
         vision_subject_present,
         wants_vehicle,
     )
@@ -101,9 +101,10 @@ def _opener_is_full_exterior(video_path: Path, subject: str) -> bool | None:
     first = extract_preview_frame(video_path, 0.0)
     if not first:
         return False
+
     for stamp in (0.0, 2.5, 5.0):
         frame = extract_preview_frame(video_path, stamp) or first
-        if opener_fail_reasons(frame):
+        if cabin_interior_reasons(frame):
             return False
     present = vision_subject_present(first, subject, opener=True)
     if present is False:
