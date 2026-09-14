@@ -17,6 +17,18 @@ from build_clips_montage import probe_duration
 from broll_frame_gate import wants_vehicle
 from toolchain_env import resolve_tool, subprocess_env
 
+SPEECH_CHECKLIST = """
+## Agent speech checklist (required before ship)
+
+- [ ] Opens strong — not mid-thought (`and`, `but`, `so`, …)
+- [ ] Standalone hook — makes sense without prior minute of video
+- [ ] Matches luxury/motivation tone; not apology or tangent
+- [ ] Ends on a finished sentence; no cliffhanger word
+- [ ] Not a repeat of a prior posted excerpt (read text; reuse check is advisory)
+
+If wrong: rerun job with `--speech-option N` or `--speech-start SEC --speech-duration SEC`.
+""".strip()
+
 
 def _ffmpeg() -> str:
     return resolve_tool("ffmpeg") or "ffmpeg"
@@ -76,6 +88,126 @@ def _car_opener_extra(duration: float) -> list[tuple[str, float]]:
     ]
 
 
+def write_speech_review_pack(
+    out_dir: Path,
+    *,
+    title: str,
+    video_id: str,
+    url: str,
+    captions: Path,
+    min_seconds: float,
+    max_seconds: float,
+    avoid_ranges: list[tuple[float, float]] | None = None,
+    chosen_start: float | None,
+    chosen_duration: float | None,
+    chosen_option: int | None,
+    pick_method: str,
+) -> Path:
+    from build_motivation_job import captions_text, ranked_speech_excerpts
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    options = ranked_speech_excerpts(
+        captions,
+        min_seconds=min_seconds,
+        max_seconds=max_seconds,
+        avoid_ranges=avoid_ranges,
+    )
+    if chosen_option is None and chosen_start is not None:
+        for index, opt in enumerate(options, start=1):
+            if abs(opt.start - chosen_start) < 0.6 and abs(opt.duration - (chosen_duration or 0)) < 1.5:
+                chosen_option = index
+                break
+    lines = [
+        "# Cursor speech review",
+        "",
+        f"**Source:** [{title}]({url}) (`{video_id}`)",
+        "",
+        f"**Pick method:** `{pick_method}`",
+        "",
+    ]
+    if chosen_start is not None and chosen_duration is not None:
+        chosen_text = captions_text(captions, start=chosen_start, duration=chosen_duration).strip()
+        opt_note = f" (option #{chosen_option})" if chosen_option else ""
+        lines.extend(
+            [
+                "## Chosen excerpt (current job)",
+                "",
+                f"- Window: `{chosen_start:.1f}s` + `{chosen_duration:.1f}s`{opt_note}",
+                "",
+                f"> {chosen_text}",
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "## Chosen excerpt",
+                "",
+                "None yet — pick an option below, then rerun:",
+                "",
+                "```powershell",
+                f"python scripts/build_motivation_job.py --slug ... --speech-option 1",
+                "# or",
+                f"python scripts/build_motivation_job.py --slug ... --speech-start 120 --speech-duration 24",
+                "```",
+                "",
+            ]
+        )
+
+    lines.append("## Ranked options (code scores — you decide)")
+    lines.append("")
+    if not options:
+        lines.append("(No complete sentence windows in captions.)")
+    else:
+        for index, opt in enumerate(options, start=1):
+            marker = " **← USED**" if chosen_option == index else ""
+            preview = opt.text if len(opt.text) <= 280 else opt.text[:277] + "..."
+            lines.extend(
+                [
+                    f"### Option {index}{marker}",
+                    "",
+                    f"- Score `{opt.score}` (advisory) | `{opt.start:.1f}s` + `{opt.duration:.1f}s`",
+                    "",
+                    f"> {preview}",
+                    "",
+                ]
+            )
+
+    lines.append(SPEECH_CHECKLIST)
+    lines.append("")
+    lines.append("## Verdict")
+    lines.append("")
+    lines.append("- [ ] **SPEECH OK**")
+    lines.append("- [ ] **PICK DIFFERENT** — note option # or new URL")
+    lines.append("")
+
+    payload = {
+        "title": title,
+        "video_id": video_id,
+        "url": url,
+        "pick_method": pick_method,
+        "chosen": {
+            "start": chosen_start,
+            "duration": chosen_duration,
+            "option": chosen_option,
+        },
+        "options": [
+            {
+                "option": i,
+                "score": o.score,
+                "start": o.start,
+                "duration": o.duration,
+                "text": o.text,
+            }
+            for i, o in enumerate(options, start=1)
+        ],
+    }
+    path = out_dir / "SPEECH.md"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (out_dir / "SPEECH.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
+
+
 def write_review_pack(
     *,
     out_dir: Path,
@@ -113,16 +245,31 @@ def write_review_pack(
         "",
     ]
 
+    speech_review = out_dir / "SPEECH.md"
+    if speech_review.is_file():
+        lines.extend(
+            [
+                "## Speech",
+                "",
+                "**Required:** read [`SPEECH.md`](SPEECH.md) and approve excerpt before ship.",
+                "",
+            ]
+        )
     excerpt = str(meta.get("speech_excerpt") or "").strip()
     if excerpt:
         lines.extend(
             [
-                "## Speech excerpt (on-screen)",
+                "### On-screen excerpt (from job.json)",
                 "",
                 f"> {excerpt}",
                 "",
-                "- Punchy hook? Standalone thought? No mid-sentence start?",
-                "- If weak: rerun with `--speech-url` or different search; do not ship.",
+            ]
+        )
+    if excerpt or speech_review.is_file():
+        lines.extend(
+            [
+                "- Agent must pass speech checklist in SPEECH.md (not code score alone).",
+                "- Weak line → `--speech-option N`, `--speech-start` / `--speech-duration`, or new `--speech-url`.",
                 "",
             ]
         )
@@ -214,10 +361,26 @@ def main() -> int:
         default=0,
         help="Max source clips to sample (0 = final only; skill default)",
     )
+    parser.add_argument(
+        "--captions",
+        type=Path,
+        default=None,
+        help="subs.en.json3 — write SPEECH.md only (with --min-seconds / --max-seconds)",
+    )
+    parser.add_argument("--speech-title", default="Speech source")
+    parser.add_argument("--speech-url", default="")
+    parser.add_argument("--speech-id", default="")
+    parser.add_argument("--min-seconds", type=float, default=20.0)
+    parser.add_argument("--max-seconds", type=float, default=28.0)
     args = parser.parse_args()
 
-    if not args.job_dir and not args.video and not args.clips_dir:
-        print("Pass --job-dir and/or --video and/or --clips-dir", file=sys.stderr)
+    if (
+        not args.job_dir
+        and not args.video
+        and not args.clips_dir
+        and not args.captions
+    ):
+        print("Pass --job-dir, --video, --clips-dir, and/or --captions", file=sys.stderr)
         return 2
 
     out_dir = args.out_dir
@@ -226,6 +389,26 @@ def main() -> int:
             out_dir = args.job_dir / "cursor-review"
         else:
             out_dir = Path("cursor-review")
+
+    if args.captions:
+        if not args.captions.is_file():
+            print(f"Captions not found: {args.captions}", file=sys.stderr)
+            return 1
+        speech_path = write_speech_review_pack(
+            out_dir,
+            title=args.speech_title,
+            video_id=args.speech_id,
+            url=args.speech_url,
+            captions=args.captions,
+            min_seconds=args.min_seconds,
+            max_seconds=args.max_seconds,
+            chosen_start=None,
+            chosen_duration=None,
+            chosen_option=None,
+            pick_method="manual-review",
+        )
+        print(f"Speech review: {speech_path}")
+        return 0
 
     pack = write_review_pack(
         out_dir=out_dir,
@@ -236,6 +419,8 @@ def main() -> int:
         clip_sample=args.clip_sample,
     )
     print(f"Review pack: {pack / 'REVIEW.md'}")
+    if (out_dir / "SPEECH.md").is_file():
+        print(f"Speech review: {out_dir / 'SPEECH.md'}")
     return 0
 
 

@@ -85,8 +85,8 @@ class MontageGateFlags:
 
 
 def resolve_montage_gate_flags(args: argparse.Namespace) -> MontageGateFlags:
-    """--cursor-review: agent reads cursor-review/ instead of code gates."""
-    cursor = bool(getattr(args, "cursor_review", False))
+    """Default: Cursor agent review pack. Opt out with --code-gates."""
+    cursor = not bool(getattr(args, "code_gates", False))
     speech_vet = cursor or bool(getattr(args, "no_speech_score", False))
     return MontageGateFlags(
         use_vision=not args.no_vision and not cursor,
@@ -111,18 +111,48 @@ def emit_cursor_review_pack(
     job_dir: Path,
     output: Path,
     subject: str,
+    min_seconds: float = 20.0,
+    max_seconds: float = 28.0,
 ) -> None:
-    from prepare_cursor_montage_review import write_review_pack
+    from prepare_cursor_montage_review import write_review_pack, write_speech_review_pack
+
+    review_dir = job_dir / "cursor-review"
+    meta = {}
+    job_path = job_dir / "job.json"
+    if job_path.is_file():
+        try:
+            meta = json.loads(job_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            meta = {}
+    caps = job_dir / "audio" / "subs.en.json3"
+    if caps.is_file() and not (review_dir / "SPEECH.md").is_file():
+        write_speech_review_pack(
+            review_dir,
+            title=str(meta.get("speech_title") or "Speech"),
+            video_id=str(meta.get("speech_id") or ""),
+            url=str(meta.get("speech_url") or ""),
+            captions=caps,
+            min_seconds=float(meta.get("min_seconds") or min_seconds),
+            max_seconds=float(meta.get("max_seconds") or max_seconds),
+            chosen_start=float(meta["speech_start"]) if meta.get("speech_start") is not None else None,
+            chosen_duration=float(meta["audio_duration"])
+            if meta.get("audio_duration") is not None
+            else None,
+            chosen_option=None,
+            pick_method=str(meta.get("speech_pick_method") or "job-json"),
+        )
 
     pack = write_review_pack(
-        out_dir=job_dir / "cursor-review",
+        out_dir=review_dir,
         job_dir=job_dir,
         video=output,
         clips_dir=job_dir / "clips",
         subject=subject,
     )
     print(f"Cursor review pack: {pack / 'REVIEW.md'}")
-    print("Open REVIEW.md + final/*.png in chat before marking ship.")
+    if (review_dir / "SPEECH.md").is_file():
+        print(f"Speech review: {review_dir / 'SPEECH.md'}")
+    print("Open SPEECH.md + REVIEW.md + final/*.png before ship.")
 
 
 def _preview(text: str, limit: int = 120) -> str:
@@ -255,6 +285,7 @@ def search_speeches(
     speaker: str,
     limit: int,
     reuse_policy: str = "allow",
+    agent_vet: bool = False,
 ) -> list[VideoCandidate]:
     raw = discover_search(query=query, limit=max(limit * 3, 12))
     used = used_ids()
@@ -264,7 +295,12 @@ def search_speeches(
         for item in raw
         if item.video_id not in skip and speaker_matches(item, speaker)
     ]
-    if reuse_policy == "prefer_new":
+    if agent_vet:
+        if reuse_policy == "prefer_new":
+            matches.sort(key=lambda item: (item.video_id in used, -(item.view_count or 0)))
+        else:
+            matches.sort(key=lambda item: item.view_count or 0, reverse=True)
+    elif reuse_policy == "prefer_new":
         matches.sort(
             key=lambda item: (
                 item.video_id in used,
@@ -1337,6 +1373,12 @@ def prepare_speech(
     max_seconds: float,
     reuse_policy: str = "allow",
     allow_reuse: bool | None = None,
+    speech_start: float | None = None,
+    speech_duration: float | None = None,
+    speech_option: int | None = None,
+    agent_speech_vet: bool = False,
+    speech_review_only: bool = False,
+    review_out_dir: Path | None = None,
 ) -> tuple[VideoCandidate, float, float, str, str]:
     if allow_reuse is None:
         allow_reuse = reuse_policy != "require_new"
@@ -1370,6 +1412,7 @@ def prepare_speech(
             speaker=speaker,
             limit=8,
             reuse_policy=reuse_policy,
+            agent_vet=agent_speech_vet,
         )
         print(f"Speech candidates: {len(candidates)} (search: {speech_query})")
     if not candidates:
@@ -1428,12 +1471,41 @@ def prepare_speech(
             continue
         source_text = captions_text(captions)
         avoid_ranges = prior_ranges if reuse_policy == "require_new" else None
-        start, duration = pick_speech_excerpt(
-            captions,
-            min_seconds=min_seconds,
-            max_seconds=max_seconds,
-            avoid_ranges=avoid_ranges,
-        )
+        try:
+            start, duration, option_index, pick_method = resolve_speech_window(
+                captions,
+                min_seconds=min_seconds,
+                max_seconds=max_seconds,
+                avoid_ranges=avoid_ranges,
+                speech_start=speech_start,
+                speech_duration=speech_duration,
+                speech_option=speech_option,
+                agent_vet=agent_speech_vet,
+            )
+        except ValueError as exc:
+            print(f"  skip speech window: {exc}")
+            _clear_audio_dir(audio_dir)
+            continue
+        if speech_review_only:
+            from prepare_cursor_montage_review import write_speech_review_pack
+
+            out = review_out_dir or (audio_dir.parent / "cursor-review")
+            path = write_speech_review_pack(
+                out,
+                title=candidate.title,
+                video_id=candidate.video_id,
+                url=candidate.url,
+                captions=captions,
+                min_seconds=min_seconds,
+                max_seconds=max_seconds,
+                avoid_ranges=avoid_ranges,
+                chosen_start=None,
+                chosen_duration=None,
+                chosen_option=None,
+                pick_method="pending-agent",
+            )
+            url_file.write_text(f"{candidate.url}\n", encoding="utf-8")
+            raise SpeechReviewReady(path)
         try:
             source_duration = probe_duration(source_mp3)
         except (subprocess.CalledProcessError, ValueError):
@@ -1446,6 +1518,23 @@ def prepare_speech(
             source_duration=source_duration,
         )
         excerpt_text = captions_text(captions, start=start, duration=duration)
+        if agent_speech_vet or speech_option or speech_start is not None:
+            from prepare_cursor_montage_review import write_speech_review_pack
+
+            write_speech_review_pack(
+                review_out_dir or (audio_dir.parent / "cursor-review"),
+                title=candidate.title,
+                video_id=candidate.video_id,
+                url=candidate.url,
+                captions=captions,
+                min_seconds=min_seconds,
+                max_seconds=max_seconds,
+                avoid_ranges=avoid_ranges,
+                chosen_start=start,
+                chosen_duration=duration,
+                chosen_option=option_index,
+                pick_method=pick_method,
+            )
         hits = content_reuse.find_speech_reuse(
             excerpt_text,
             youtube_id=candidate.video_id,
@@ -2224,6 +2313,34 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-seconds", type=float, default=_min_speech)
     parser.add_argument("--max-seconds", type=float, default=_max_speech)
     parser.add_argument(
+        "--speech-start",
+        type=float,
+        default=None,
+        help="Source timestamp (seconds) for speech excerpt — agent pick after SPEECH.md review",
+    )
+    parser.add_argument(
+        "--speech-duration",
+        type=float,
+        default=None,
+        help="Speech excerpt length (seconds). Use with --speech-start",
+    )
+    parser.add_argument(
+        "--speech-option",
+        type=int,
+        default=None,
+        help="1-based index from cursor-review/SPEECH.md ranked options",
+    )
+    parser.add_argument(
+        "--speech-review-only",
+        action="store_true",
+        help="Download speech + write cursor-review/SPEECH.md only; no B-roll/render",
+    )
+    parser.add_argument(
+        "--no-speech-score",
+        action="store_true",
+        help="Do not auto-pick highest-scored excerpt; use sequential window + SPEECH.md",
+    )
+    parser.add_argument(
         "--segment-length",
         type=float,
         default=None,
@@ -2268,9 +2385,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip per-beat frame gate when cutting montage beats.",
     )
     parser.add_argument(
-        "--cursor-review",
+        "--code-gates",
         action="store_true",
-        help="Agent review mode: no vision, no frame/segment/render gates; writes cursor-review/ pack.",
+        help="Legacy automated gates: vision, frame/segment trim, speech max-score, render quality check.",
     )
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--no-grade", action="store_true")
@@ -2301,9 +2418,12 @@ def main() -> int:
     args = build_parser().parse_args()
     subprocess_env()
     gate_flags = resolve_montage_gate_flags(args)
-    if gate_flags.cursor_review and not args.keep_work:
-        args.keep_work = True
-        print("Cursor review: keeping clips/ for agent inspection.")
+    if gate_flags.cursor_review:
+        if not args.keep_work:
+            args.keep_work = True
+            print("Cursor review (default): keeping clips/ for agent inspection.")
+    elif args.code_gates:
+        print("Code gates enabled (--code-gates).")
     reuse_policy = normalize_reuse_policy(args.reuse_policy)
     jobs_root = args.jobs_root or (project_root() / "downloads" / "motivational")
     speaker, speech_query, config_path = resolve_speech_settings(
@@ -2349,8 +2469,15 @@ def main() -> int:
             cursor_review=gate_flags.cursor_review,
         )
 
-    if not args.slug or not args.broll_query:
-        print("--slug and --broll-query are required unless --cleanup-only or --rerender", file=sys.stderr)
+    if args.speech_review_only:
+        if not args.slug:
+            print("--slug is required with --speech-review-only", file=sys.stderr)
+            return 2
+    elif not args.slug or not args.broll_query:
+        print(
+            "--slug and --broll-query are required unless --cleanup-only, --rerender, or --speech-review-only",
+            file=sys.stderr,
+        )
         return 2
 
     if args.job_date and not is_date_folder(args.job_date):
@@ -2371,6 +2498,31 @@ def main() -> int:
     print(f"B-roll query: {args.broll_query}")
     print(f"Reuse policy: {reuse_policy}")
     print(format_toolchain_report())
+    if args.speech_review_only:
+        try:
+            prepare_speech(
+                jobs_root=jobs_root,
+                audio_dir=audio_dir,
+                url_file=job_dir / "url.txt",
+                speaker=speaker,
+                speech_query=speech_query,
+                speech_url=args.speech_url,
+                min_seconds=args.min_seconds,
+                max_seconds=args.max_seconds,
+                reuse_policy=reuse_policy,
+                speech_review_only=True,
+                review_out_dir=job_dir / "cursor-review",
+            )
+        except SpeechReviewReady as exc:
+            print(exc)
+            print("Pick an option in SPEECH.md, then rerun with --speech-option or --speech-start.")
+            return 0
+        except MotivationJobError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        print("Speech review did not stop early — check logs.", file=sys.stderr)
+        return 1
+
     try:
         speech, start, duration, excerpt_text, source_text = prepare_speech(
             jobs_root=jobs_root,
@@ -2382,6 +2534,11 @@ def main() -> int:
             min_seconds=args.min_seconds,
             max_seconds=args.max_seconds,
             reuse_policy=reuse_policy,
+            speech_start=args.speech_start,
+            speech_duration=args.speech_duration,
+            speech_option=args.speech_option,
+            agent_speech_vet=gate_flags.speech_vet,
+            review_out_dir=job_dir / "cursor-review",
         )
         speaker_resolution: dict[str, object] = {}
         try:
@@ -2471,6 +2628,9 @@ def main() -> int:
             quality_gate=gate_flags.quality_gate,
             segment_gate=gate_flags.segment_gate,
         )
+    except SpeechReviewReady as exc:
+        print(exc)
+        return 0
     except MotivationJobError as exc:
         print(exc, file=sys.stderr)
         return 1
@@ -2484,6 +2644,8 @@ def main() -> int:
             job_dir=job_dir,
             output=output,
             subject=args.broll_query,
+            min_seconds=args.min_seconds,
+            max_seconds=args.max_seconds,
         )
 
     write_job_json(
@@ -2502,6 +2664,9 @@ def main() -> int:
             "speech_excerpt": excerpt_text,
             "speech_source_hash": content_reuse.speech_fingerprint(source_text)["transcript_hash"],
             "speech_start": start,
+            "speech_pick_method": "agent" if gate_flags.speech_vet else "code",
+            "min_seconds": args.min_seconds,
+            "max_seconds": args.max_seconds,
             "audio_duration": duration,
             "segment_length": segment_length,
             "playback_speed": args.playback_speed,

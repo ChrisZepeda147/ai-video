@@ -15,6 +15,8 @@ python scripts/build_motivation_job.py `
   --reuse-policy allow
 ```
 
+**Cursor review is default** — job writes `cursor-review/SPEECH.md` + `REVIEW.md`. Agent approves before ship. Legacy automation: add `--code-gates`.
+
 Script searches speech + B-roll, renders 9:16 + grade + **phrase captions** (DrivenVisuals default), rebuilds catalog, deletes leftovers.
 
 Creative preset: `content/driven-visuals-defaults.json` — fast opener pacing, hook styling, quality gate.
@@ -76,16 +78,7 @@ First seconds of the output must show the subject with **movement** when possibl
 
 ## Agent rules (Cursor checks — preferred)
 
-Use **`--cursor-review`** so code gates defer to you:
-
-```powershell
-python scripts/build_motivation_job.py `
-  --slug ... `
-  --broll-query "..." `
-  --cursor-review
-```
-
-Script writes `{job}/cursor-review/REVIEW.md` + `final/*.png`. **You** read those images + excerpt before ship. No OpenAI vision in pipeline.
+Every job writes `{job}/cursor-review/SPEECH.md` + `REVIEW.md` + `final/*.png` (unless `--code-gates`). **You** read those before ship. No OpenAI vision in the default pipeline.
 
 Manual pack anytime:
 
@@ -94,8 +87,10 @@ python scripts/prepare_cursor_montage_review.py --job-dir downloads/motivational
 ```
 
 1. Run the script. New `--slug` + new `--broll-query` every job.
-2. Open `cursor-review/REVIEW.md` (or run prepare script). Read final stills + speech excerpt.
-3. Ship only if line is punchy **and** opener frames pass car-exterior rules (cars). Otherwise remake. Do not vet every source clip unless user asked.
+2. Open `cursor-review/SPEECH.md` — approve excerpt (options listed; code score is advisory).
+3. Open `REVIEW.md` + final PNGs. Ship only if **speech + visuals** pass. Car opener: `.cursor/rules/car-exterior-frames.mdc`.
+
+Optional speech-first: `--speech-review-only` → pick `--speech-option N` → full job (cursor review still default).
 
 ## Flags
 
@@ -113,7 +108,11 @@ python scripts/prepare_cursor_montage_review.py --job-dir downloads/motivational
 | `--playback-speed` | `1` | Source speed. Lower (e.g. `0.80`) = slower motion |
 | `--intro-skip` | `8` | Skip more intro if hosts keep talking |
 | `--min-seconds` / `--max-seconds` | `20` / `28` | Excerpt window. Longer cuts need explicit flags |
-| `--cursor-review` | off | **Agent** ship gate; skips code vision/frame/segment/render gates |
+| `--code-gates` | off | **Legacy** — turn automated vision/frame/speech-score/render gates back on |
+| `--speech-review-only` | off | Download speech + SPEECH.md only |
+| `--speech-option` | none | Pick excerpt from SPEECH.md (1-based) |
+| `--speech-start` / `--speech-duration` | none | Manual excerpt window (source seconds) |
+| `--no-speech-score` | off | No max-score excerpt pick; sequential + SPEECH.md |
 | `--no-vision` | off | Skip GPT-4o-mini only (local frame gate still on) |
 | `--no-frame-gate` | off | Skip B-roll scan/trim; fps still required |
 | `--no-segment-gate` | off | Skip per-beat frame gate in montage |

@@ -1,25 +1,39 @@
 # Cursor montage review (agent ship gate)
 
-When the user wants **you** to vet clips/speech instead of Python heuristics + OpenAI vision:
+**Default for all motivation jobs:** Cursor agent vets speech + visuals. Code gates are off unless the user passes **`--code-gates`**.
 
-## Build
+## Build (default — no extra flags)
 
 ```powershell
 python scripts/build_motivation_job.py `
   --slug ... `
   --broll-query "..." `
-  --cursor-review `
   --reuse-policy allow
 ```
 
-`--cursor-review` = no API vision, no frame/segment/render code gates, auto `cursor-review/` pack. Still enforces **50fps** and speech reuse fingerprint.
+Writes `cursor-review/` (SPEECH.md + REVIEW.md). Sequential speech excerpt + ranked options in SPEECH.md. Still **50fps** + speech reuse fingerprint.
+
+Legacy automation: add `--code-gates`.
+
+## Speech first (optional two-step)
+
+```powershell
+python scripts/build_motivation_job.py --slug ... --speech-review-only
+```
+
+Read `{job}/cursor-review/SPEECH.md` — ranked options + checklist. Then:
+
+```powershell
+python scripts/build_motivation_job.py --slug ... --broll-query "..." --speech-option 2
+```
+
+Or `--speech-start 142 --speech-duration 24`.
 
 ## After render — required before ship
 
-1. Open `{job}/cursor-review/REVIEW.md`.
-2. Read PNGs under `cursor-review/final/` (0s, 2.5s, 5s; car opener extras if car job).
-3. Read `speech_excerpt` in REVIEW.md — punchy standalone hook?
-4. Mark **SHIP** or **REMAKE** in REVIEW.md mentally; tell user verdict.
+1. Open `{job}/cursor-review/SPEECH.md` — **approve speech** (not code score).
+2. Open `REVIEW.md` + PNGs under `final/` (0s, 2.5s, 5s; car opener if car job).
+3. Tell user **SHIP** or **REMAKE** for speech + visuals together.
 
 Cars: `.cursor/rules/car-exterior-frames.mdc` — full exterior 0–5s, no cabin.
 
@@ -45,3 +59,8 @@ Sample stills only — user or agent rejects bad files before montage.
 | `--no-frame-gate` | Skip download trim/drop; fps still on |
 | `--no-segment-gate` | Random beat windows; no per-beat gate |
 | `--skip-quality-gate` | Skip post-render `check_render_quality` |
+| `--code-gates` | Automated vision/frame/speech-score/render gates (not default) |
+| `--no-speech-score` | Sequential excerpt + SPEECH.md (default mode already does this) |
+| `--speech-review-only` | Download + SPEECH.md only |
+| `--speech-option N` | Pick ranked option from SPEECH.md |
+| `--speech-start` / `--speech-duration` | Manual excerpt window |
