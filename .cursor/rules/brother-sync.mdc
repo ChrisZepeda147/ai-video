@@ -44,8 +44,7 @@ With `start-api.ps1` up (default env):
 
 | Sync | Interval | What |
 |------|----------|------|
-| Stephen video packages | ~10 min | `SHARED_LIBRARY_AUTO_SYNC` — scoped library pull + import |
-| Brother **code** | ~60 min | `BROTHER_AUTO_PULL` — `git pull --ff-only` + Chris import |
+| Brother **videos + code + deletions** | **~10 min** | `BROTHER_SYNC_MINUTES=10` (default) — scoped library pull, deletion log, import, code ff-pull |
 
 Skips code pull if tracked files are dirty locally.
 

@@ -20,6 +20,7 @@ from discovery.driven_visuals import (
     parse_daily_video_briefs,
     write_batch_manifest,
 )
+from discovery.command_montage import run_direct_montage_command, should_use_direct_montage
 
 
 def now_iso() -> str:
@@ -210,12 +211,15 @@ def create_command_job(
     if not user_command.strip():
         raise ValueError("command is required")
     job_key = _next_job_key(store)
-    enriched = build_agent_prompt(
-        user_command=user_command,
-        store=store,
-        video_id=video_id,
-        parent_video_id=parent_video_id,
-    )
+    if should_use_direct_montage(user_command):
+        enriched = user_command.strip()
+    else:
+        enriched = build_agent_prompt(
+            user_command=user_command,
+            store=store,
+            video_id=video_id,
+            parent_video_id=parent_video_id,
+        )
     prompt_path = _write_prompt_file(job_key, enriched)
     ts = now_iso()
     store._conn.execute(
@@ -242,6 +246,7 @@ def create_command_job(
         "session_id": session_id,
         "poll_url": f"/api/commands/{job_key}",
         "created_at": ts,
+        "execution_mode": "direct_montage" if should_use_direct_montage(user_command) else "cursor_agent",
     }
 
 
@@ -287,6 +292,11 @@ def start_command_job(
         return job
 
     def _run() -> None:
+        user_command = str(job.get("user_command") or "")
+        if should_use_direct_montage(user_command):
+            run_direct_montage_command(job_key=job_key, user_command=user_command)
+            return
+
         thread_store = DiscoveryStore(default_db_path())
         try:
             thread_store._conn.execute(
@@ -299,7 +309,7 @@ def start_command_job(
             )
             thread_store._conn.commit()
 
-            enriched = job.get("enriched_prompt") or job.get("user_command") or ""
+            enriched = job.get("enriched_prompt") or user_command
             active_session = session_id or job.get("cursor_session_id")
             if not active_session and agent_available():
                 active_session = create_chat()

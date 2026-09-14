@@ -87,7 +87,7 @@ export function MakeShortWorkspace() {
       return;
     }
     setJob(result.data);
-    setMessage("Sent to Cursor Agent — audio search, B-roll, render, register…");
+    setMessage("Building Short — download, grade, captions, register… (direct pipeline, no Agent wait).");
   }
 
   const previewPath = job?.final_output_path;
@@ -112,8 +112,11 @@ export function MakeShortWorkspace() {
       <section className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-6">
         <h2 className="text-lg font-semibold text-zinc-100">Make motivation Short</h2>
         <p className="mt-2 text-sm text-zinc-400">
-          Fields below become a Cursor Agent command — agent runs existing Python tools, checks library
-          transcripts, renders 9:16 with grade + captions, then registers. Edit defaults in{" "}
+          Runs the luxury-clips montage pipeline directly (same as{" "}
+          <code className="text-zinc-300">build_motivation_job.py</code>) — library reuse checks, 9:16
+          grade + captions, register. Set{" "}
+          <code className="text-zinc-300">COMMAND_FORCE_AGENT=1</code> to use Cursor Agent instead. Edit
+          defaults in{" "}
           <code className="text-zinc-300">downloads/motivational/config.json</code>.
         </p>
 
@@ -205,7 +208,7 @@ export function MakeShortWorkspace() {
             onClick={handleBuild}
             className="w-full rounded-xl bg-violet-600 py-3 text-sm font-semibold text-white hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {busy || inProgress ? "Running in Cursor…" : "Send to Cursor"}
+            {busy || inProgress ? "Building…" : "Build Short"}
           </button>
         </div>
       </section>

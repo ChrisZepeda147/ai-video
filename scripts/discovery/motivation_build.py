@@ -116,6 +116,9 @@ def _build_command(body: dict[str, Any], root: Path) -> tuple[list[str], str, st
         cmd.append("--keep-work")
     if body.get("rerender"):
         cmd.append("--rerender")
+    hook = str(body.get("hook") or "").strip()
+    if hook:
+        cmd.extend(["--hook", hook])
     reuse_policy = normalize_reuse_policy(
         str(body.get("reuse_policy") or ""),
         default=parse_reuse_policy(str(body.get("command") or "")),

@@ -69,6 +69,10 @@ def _resolve_remote_ref() -> str:
 def stage_shared_library() -> list[str]:
     root = project_root()
     staged: list[str] = []
+    deletions = root / "shared_library" / "deletions.json"
+    if deletions.is_file():
+        _run_git(["add", "shared_library/deletions.json"])
+        staged.append("shared_library/deletions.json")
     for owner in SHARED_LIBRARY_OWNERS:
         owner_dir = root / "shared_library" / owner
         if owner_dir.is_dir() and any(owner_dir.glob("*/manifest.json")):
@@ -80,6 +84,50 @@ def stage_shared_library() -> list[str]:
         _run_git(["add", ".gitattributes"])
         staged.append(".gitattributes")
     return staged
+
+
+def commit_shared_library_only(message: str, *, dry_run: bool = False) -> dict[str, Any]:
+    """Commit staged shared_library paths even when other repo files are dirty."""
+    diff = _run_git(["diff", "--cached", "--name-only"], check=False)
+    staged_files = [line.strip().replace("\\", "/") for line in diff.stdout.splitlines() if line.strip()]
+    if not staged_files:
+        stage_shared_library()
+        diff = _run_git(["diff", "--cached", "--name-only"], check=False)
+        staged_files = [line.strip().replace("\\", "/") for line in diff.stdout.splitlines() if line.strip()]
+    if not staged_files:
+        return {"ok": True, "committed": False, "pushed": False, "message": "Nothing to stage."}
+    if not all(path.startswith("shared_library/") or path == ".gitattributes" for path in staged_files):
+        return {
+            "ok": False,
+            "error": "non_shared_staged",
+            "message": "Refusing commit — staged paths are not limited to shared_library.",
+        }
+    if dry_run:
+        return {"ok": True, "dry_run": True, "would_commit_files": staged_files}
+    commit = _run_git(["commit", "-m", message], check=False)
+    if commit.returncode != 0:
+        if "nothing to commit" in (commit.stdout + commit.stderr).lower():
+            return {"ok": True, "committed": False, "pushed": False, "message": "Nothing to commit."}
+        return {"ok": False, "error": (commit.stderr or commit.stdout or "commit failed").strip()}
+    pushed_remotes: list[str] = []
+    for remote in PUSH_REMOTES:
+        probe = _run_git(["remote", "get-url", remote], check=False)
+        if probe.returncode != 0:
+            continue
+        push = _run_git(["push", remote], check=False)
+        if push.returncode == 0:
+            pushed_remotes.append(remote)
+    if not pushed_remotes:
+        return {"ok": False, "error": "git push failed", "committed": True, "pushed": False}
+    return {"ok": True, "committed": True, "pushed": True, "pushed_remotes": pushed_remotes, "files": staged_files}
+
+
+def push_shared_library_deletion(*, owner: str, slug: str, message: str) -> dict[str, Any]:
+    rel = f"shared_library/{owner}/{slug}"
+    _run_git(["rm", "-r", "-f", "--ignore-unmatch", rel], check=False)
+    _run_git(["add", "-u", "shared_library"], check=False)
+    stage_shared_library()
+    return commit_shared_library_only(message)
 
 
 def commit_and_push(message: str, *, dry_run: bool = False) -> dict[str, Any]:
