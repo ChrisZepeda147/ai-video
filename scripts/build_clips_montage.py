@@ -23,6 +23,7 @@ BASELINE_AUDIO_SECONDS = 60.0
 BASELINE_SEGMENT_SECONDS = 12.0
 MIN_SEGMENT_SECONDS = 8.0
 MAX_SEGMENT_SECONDS = 18.0
+SPEECH_TRIM_TAIL_SEC = 0.45
 
 
 def segment_length_for_duration(duration: float) -> float:
@@ -560,6 +561,14 @@ def _mux_audio(
     audio_start: float,
     audio_duration: float | None,
 ) -> None:
+    video_dur = probe_duration(video)
+    target = video_dur
+    if audio_duration is not None:
+        target = max(target, float(audio_duration))
+    filt = (
+        f"[1:a]atrim=duration={target:.3f},asetpts=PTS-STARTPTS,"
+        f"apad=whole_dur={target:.3f}[aout]"
+    )
     cmd = [
         "ffmpeg",
         "-y",
@@ -569,24 +578,24 @@ def _mux_audio(
         str(audio_start),
         "-i",
         str(audio),
+        "-filter_complex",
+        filt,
+        "-map",
+        "0:v:0",
+        "-map",
+        "[aout]",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-t",
+        str(target),
+        "-movflags",
+        "+faststart",
+        str(output),
     ]
-    cmd.extend(
-        [
-            "-map",
-            "0:v:0",
-            "-map",
-            "1:a:0",
-            "-c:v",
-            "copy",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-        ]
-    )
-    if audio_duration is not None:
-        cmd.extend(["-t", str(audio_duration)])
-    cmd.extend(["-movflags", "+faststart", str(output)])
     subprocess.run(cmd, check=True, capture_output=True)
 
 

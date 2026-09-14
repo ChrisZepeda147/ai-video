@@ -25,6 +25,7 @@ from motivation_pool import (  # noqa: E402
     register_combination,
     resolve_build_selection,
 )
+from build_clips_montage import _mux_audio as mux_montage_audio  # noqa: E402
 from youtube_popular_downloader import (  # noqa: E402
     VideoCandidate,
     export_clip,
@@ -139,17 +140,6 @@ def _trim_video(input_path: Path, output_path: Path, *, duration: float) -> None
         "-i", str(input_path), "-t", str(duration),
         "-c:v", "libx264", "-preset", "fast", "-crf", "23",
         "-an", "-movflags", "+faststart", str(output_path),
-    ]
-    subprocess.run(cmd, check=True, capture_output=True)
-
-
-def _mux_audio(video: Path, audio: Path, output: Path) -> None:
-    cmd = [
-        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-        "-i", str(video), "-i", str(audio),
-        "-map", "0:v:0", "-map", "1:a:0",
-        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-        "-shortest", "-movflags", "+faststart", str(output),
     ]
     subprocess.run(cmd, check=True, capture_output=True)
 
@@ -318,7 +308,13 @@ def run_motivation_job(
         _trim_video(concat_path, montage_raw, duration=target)
 
     muxed = work / "muxed.mp4"
-    _mux_audio(montage_raw, trimmed_audio, muxed)
+    mux_montage_audio(
+        montage_raw,
+        trimmed_audio,
+        muxed,
+        audio_start=0.0,
+        audio_duration=target,
+    )
 
     graded = work / "graded.mp4"
     _apply_grade(muxed, graded, enabled=apply_grade)

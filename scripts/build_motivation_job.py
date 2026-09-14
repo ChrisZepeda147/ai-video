@@ -32,6 +32,7 @@ from broll_frame_gate import (
 )
 from build_clips_montage import (
     DEFAULT_PLAYBACK_SPEED,
+    SPEECH_TRIM_TAIL_SEC,
     build_montage,
     drop_low_fps_clips,
     probe_duration,
@@ -429,7 +430,38 @@ def pick_speech_excerpt(
     )
     if picked:
         return picked
-    return start, max_seconds
+    return start, _fallback_speech_duration(
+        words,
+        start=start,
+        min_seconds=min_seconds,
+        max_seconds=max_seconds,
+        captions=captions,
+    )
+
+
+def _fallback_speech_duration(
+    words: list[tuple[float, str]],
+    *,
+    start: float,
+    min_seconds: float,
+    max_seconds: float,
+    captions: Path | None,
+) -> float:
+    """Keep the last spoken word inside the window instead of hard-cutting at max_seconds."""
+    window_end = start + max_seconds
+    last_index: int | None = None
+    for index, (when, _text) in enumerate(words):
+        if when + 0.05 < start:
+            continue
+        if when <= window_end + 0.05:
+            last_index = index
+        else:
+            break
+    if last_index is None:
+        return max_seconds
+    tail = _speech_tail_after_word(words, last_index, captions=captions)
+    end = min(words[last_index][0] + tail + 0.12, window_end)
+    return max(min_seconds, min(max_seconds, end - start))
 
 
 def leftover_speech_windows(
@@ -505,7 +537,14 @@ def shift_json3(src: Path, dest: Path, *, start: float, duration: float) -> None
     dest.write_text(json.dumps(data), encoding="utf-8")
 
 
-def trim_audio(src: Path, dest: Path, *, start: float, duration: float) -> None:
+def trim_audio(
+    src: Path,
+    dest: Path,
+    *,
+    start: float,
+    duration: float,
+    tail_pad: float = SPEECH_TRIM_TAIL_SEC,
+) -> None:
     ffmpeg = resolve_tool("ffmpeg") or "ffmpeg"
     out = dest
     tmp: Path | None = None
@@ -514,6 +553,7 @@ def trim_audio(src: Path, dest: Path, *, start: float, duration: float) -> None:
         out = tmp
     start = max(0.0, float(start))
     duration = max(0.2, float(duration))
+    encode_duration = duration + max(0.0, float(tail_pad))
     pad = min(1.5, start)
     cmd = [
         ffmpeg,
@@ -525,7 +565,7 @@ def trim_audio(src: Path, dest: Path, *, start: float, duration: float) -> None:
         "-ss",
         f"{pad:.3f}",
         "-t",
-        f"{duration:.3f}",
+        f"{encode_duration:.3f}",
         "-acodec",
         "libmp3lame",
         "-b:a",
@@ -645,19 +685,21 @@ def _write_job_speech(
     start: float,
     duration: float,
     keep_source: bool = False,
-) -> None:
+) -> float:
     speech_mp3 = audio_dir / "speech.mp3"
     trim_audio(source_mp3, speech_mp3, start=start, duration=duration)
+    probed = probe_duration(speech_mp3)
     if not keep_source and source_mp3.resolve() != speech_mp3.resolve():
         source_mp3.unlink(missing_ok=True)
     stable_caps = audio_dir / "subs.en.json3"
     if captions.suffix.lower() == ".json3":
-        shift_json3(captions, stable_caps, start=start, duration=duration)
+        shift_json3(captions, stable_caps, start=start, duration=probed)
         if not keep_source and captions.resolve() != stable_caps.resolve():
             captions.unlink(missing_ok=True)
-        return
+        return probed
     if not keep_source and captions.resolve() != stable_caps.resolve():
         captions.replace(stable_caps)
+    return probed
 
 
 def _stash_speech_leftovers(
@@ -754,7 +796,7 @@ def _take_pooled_speech(
     duration = clamp_pooled_speech_duration(item.duration, max_seconds)
     excerpt = item.excerpt
     if duration + 0.2 < float(item.duration):
-        _write_job_speech(
+        duration = _write_job_speech(
             audio_dir=audio_dir,
             source_mp3=item.audio,
             captions=item.captions,
@@ -764,6 +806,10 @@ def _take_pooled_speech(
         )
         excerpt = captions_text(audio_dir / "subs.en.json3", start=0.0, duration=duration)
         print(f"  clamped pooled speech {item.duration:.1f}s -> {duration:.1f}s")
+    else:
+        speech_mp3 = audio_dir / "speech.mp3"
+        if speech_mp3.is_file():
+            duration = probe_duration(speech_mp3)
     candidate = VideoCandidate(
         video_id=item.youtube_id,
         title=item.title,
@@ -936,7 +982,7 @@ def prepare_speech(
         max_seconds=max_seconds,
         source_text=source_text,
     )
-    _write_job_speech(
+    duration = _write_job_speech(
         audio_dir=audio_dir,
         source_mp3=source_mp3,
         captions=captions,
@@ -1412,6 +1458,7 @@ def rerender_existing_job(
     start_offset: float,
     playback_speed: float,
     use_vision: bool,
+    quality_gate: bool = True,
 ) -> int:
     job_dir = resolve_job_dir(slug, jobs_root)
     if not job_dir:
@@ -1512,7 +1559,7 @@ def rerender_existing_job(
             driven_pacing=bool(payload.get("driven_pacing", True)),
             caption_mode=str(payload.get("caption_mode") or "phrase"),
             hook_text=str(payload.get("hook") or "") or None,
-            quality_gate=True,
+            quality_gate=quality_gate,
         )
     except (FileNotFoundError, RuntimeError, ValueError, subprocess.CalledProcessError) as exc:
         print(exc, file=sys.stderr)
@@ -1679,6 +1726,7 @@ def main() -> int:
             start_offset=args.intro_skip,
             playback_speed=args.playback_speed,
             use_vision=not args.no_vision,
+            quality_gate=not args.skip_quality_gate,
         )
 
     if not args.slug or not args.broll_query:
