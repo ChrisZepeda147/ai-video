@@ -426,10 +426,10 @@ def scan_speech_transcripts(root: Path) -> list[dict[str, Any]]:
     jobs = root / "downloads" / "motivational"
     if not jobs.is_dir():
         return []
+    from discovery.motivation_paths import iter_motivation_job_dirs
+
     rows: list[dict[str, Any]] = []
-    for job_dir in sorted(jobs.iterdir()):
-        if not job_dir.is_dir() or job_dir.name in POOL_DIR_NAMES:
-            continue
+    for job_dir in iter_motivation_job_dirs(jobs):
         job_path = job_dir / "job.json"
         if not job_path.is_file():
             continue
@@ -907,10 +907,12 @@ def is_speech_row(row: dict[str, Any]) -> bool:
 
 
 def _strip_job_speech_fields(jobs_root: Path) -> int:
+    from discovery.motivation_paths import iter_motivation_job_dirs
+
     if not jobs_root.is_dir():
         return 0
     cleared = 0
-    for job_dir in jobs_root.iterdir():
+    for job_dir in iter_motivation_job_dirs(jobs_root):
         job_path = job_dir / "job.json"
         if not job_path.is_file():
             continue
@@ -930,10 +932,12 @@ def _strip_job_speech_fields(jobs_root: Path) -> int:
 
 
 def _delete_job_speech_files(jobs_root: Path) -> list[Path]:
+    from discovery.motivation_paths import iter_motivation_job_dirs
+
     removed: list[Path] = []
     if not jobs_root.is_dir():
         return removed
-    for job_dir in jobs_root.iterdir():
+    for job_dir in iter_motivation_job_dirs(jobs_root):
         audio = job_dir / "audio"
         if not audio.is_dir():
             continue

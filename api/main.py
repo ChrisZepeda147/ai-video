@@ -1075,8 +1075,12 @@ def shorts_build_defaults_endpoint():
 def shorts_build_endpoint(body: dict):
     slug = str(body.get("slug") or "").strip()
     if slug and not body.get("rerender"):
-        existing = project_root() / "downloads" / "motivational" / slug / "output" / f"{slug}-motivation.mp4"
-        if existing.is_file():
+        from discovery.motivation_paths import motivation_jobs_root, motivation_output_path, resolve_job_dir
+
+        root = project_root()
+        job_dir = resolve_job_dir(slug, motivation_jobs_root(root))
+        existing = motivation_output_path(job_dir, slug) if job_dir else None
+        if existing and existing.is_file():
             raise HTTPException(status_code=409, detail=f"Short already exists for slug '{slug}'. Use rerender=true to rebuild.")
     try:
         return start_motivation_build(body)

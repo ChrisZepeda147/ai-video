@@ -26,6 +26,10 @@ class MediaPathsTests(unittest.TestCase):
         rel = "downloads/motivational/combo-chris-1-2-20260101-120000/output/combo-chris-1-2-20260101-120000-motivation.mp4"
         self.assertEqual(motivation_job_slug_from_rel(rel), "combo-chris-1-2-20260101-120000")
 
+    def test_motivation_job_slug_from_dated_output_path(self) -> None:
+        rel = "downloads/motivational/2026-09-13/yacht-motivation/output/yacht-motivation-motivation.mp4"
+        self.assertEqual(motivation_job_slug_from_rel(rel), "yacht-motivation")
+
     def test_incomplete_combo_job_is_not_previewable(self) -> None:
         slug = "combo-chris-4-1-20260910-204530"
         job_dir = self.root / "downloads" / "motivational" / slug
@@ -41,7 +45,7 @@ class MediaPathsTests(unittest.TestCase):
 
     def test_complete_motivation_job_is_previewable(self) -> None:
         slug = "valid-motivation-job"
-        job_dir = self.root / "downloads" / "motivational" / slug
+        job_dir = self.root / "downloads" / "motivational" / "2026-09-13" / slug
         clips_dir = job_dir / "clips"
         out_dir = job_dir / "output"
         audio_dir = job_dir / "audio"

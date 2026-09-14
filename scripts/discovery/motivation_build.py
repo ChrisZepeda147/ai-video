@@ -12,6 +12,13 @@ from pathlib import Path
 from typing import Any
 
 from discovery.config import project_root
+from discovery.motivation_paths import (
+    default_job_date,
+    job_dir_for,
+    motivation_jobs_root,
+    motivation_output_rel,
+    resolve_job_dir,
+)
 from discovery.reuse_policy import normalize_reuse_policy, parse_reuse_policy
 
 try:
@@ -115,7 +122,11 @@ def _build_command(body: dict[str, Any], root: Path) -> tuple[list[str], str, st
     )
     cmd.extend(["--reuse-policy", reuse_policy])
 
-    rel_output = f"downloads/motivational/{slug}/output/{slug}-motivation.mp4"
+    jobs_root = motivation_jobs_root(root)
+    job_date = default_job_date()
+    job_dir = job_dir_for(slug, jobs_root, job_date=job_date)
+    rel_output = motivation_output_rel(root, job_dir, slug)
+    cmd.extend(["--job-date", job_date])
     return cmd, slug, rel_output
 
 
@@ -171,8 +182,9 @@ def start_motivation_build(body: dict[str, Any]) -> dict[str, Any]:
             if result.returncode != 0:
                 raise RuntimeError(log or f"build_motivation_job exited {result.returncode}")
 
-            job_json = root / "downloads" / "motivational" / slug / "job.json"
-            if job_json.is_file():
+            job_dir = resolve_job_dir(slug, motivation_jobs_root(root))
+            job_json = job_dir / "job.json" if job_dir else None
+            if job_json and job_json.is_file():
                 payload = json.loads(job_json.read_text(encoding="utf-8"))
                 current["speech_youtube_id"] = payload.get("speech_id")
                 current["broll_youtube_ids"] = payload.get("broll_ids") or []

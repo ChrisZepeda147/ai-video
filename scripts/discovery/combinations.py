@@ -318,7 +318,10 @@ def sync_visual_packs(store, *, root: Path | None = None) -> list[dict[str, Any]
         visual_style = str(meta.get("visual_style") or meta.get("broll_query") or "")
         category = _infer_category(visual_style, row["title"])
 
-        clips_root = root / "downloads" / "motivational" / slug / "clips"
+        from discovery.motivation_paths import motivation_jobs_root, resolve_job_dir
+
+        job_dir = resolve_job_dir(slug, motivation_jobs_root(root))
+        clips_root = (job_dir / "clips") if job_dir else root / "downloads" / "motivational" / slug / "clips"
         clip_paths = sorted(clips_root.glob("*_part*.mp4")) if clips_root.is_dir() else []
         if not clip_paths and not broll_ids:
             clip_components = store._conn.execute(

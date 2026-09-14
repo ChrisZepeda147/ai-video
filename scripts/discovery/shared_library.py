@@ -22,6 +22,14 @@ from discovery.auto_register import (
 )
 from discovery.combinations import import_usage_from_videos, sync_visual_packs
 from discovery.config import project_root
+from discovery.motivation_paths import (
+    default_job_date,
+    iter_motivation_job_dirs,
+    job_date_from_iso,
+    job_dir_for,
+    motivation_jobs_root,
+    resolve_job_dir,
+)
 from discovery.production_library import get_video, register_video
 from discovery.reuse_detection import transcript_hash
 
@@ -152,8 +160,8 @@ def build_manifest_from_job(
     change_summary: str | None = None,
 ) -> dict[str, Any] | None:
     root = root or project_root()
-    job_dir = root / "downloads" / "motivational" / slug
-    if not job_dir.is_dir():
+    job_dir = resolve_job_dir(slug, motivation_jobs_root(root))
+    if not job_dir:
         return None
 
     final_src = _find_job_output(job_dir)
@@ -336,7 +344,7 @@ def export_manifest_package(
     package_dir.mkdir(parents=True, exist_ok=True)
 
     if job_dir is None:
-        job_dir = root / "downloads" / "motivational" / slug
+        job_dir = resolve_job_dir(slug, motivation_jobs_root(root))
 
     copied: list[str] = []
     paths = manifest.get("paths") or {}
@@ -399,13 +407,11 @@ def export_manifest_package(
 
 def find_stephen_job_slugs(root: Path | None = None) -> list[str]:
     root = root or project_root()
-    jobs_root = root / "downloads" / "motivational"
+    jobs_root = motivation_jobs_root(root)
     if not jobs_root.is_dir():
         return []
     slugs: list[str] = []
-    for job_dir in sorted(jobs_root.iterdir()):
-        if not job_dir.is_dir() or job_dir.name in SKIP_JOB_NAMES:
-            continue
+    for job_dir in iter_motivation_job_dirs(jobs_root):
         if job_dir.name.startswith("combo-"):
             continue
         if _find_job_output(job_dir):
@@ -650,7 +656,13 @@ def find_video_by_manifest_id(store, manifest_id: str) -> dict[str, Any] | None:
 
 def _materialize_job_from_package(manifest: dict[str, Any], package_dir: Path, root: Path) -> Path:
     slug = str(manifest["slug"])
-    job_dir = root / "downloads" / "motivational" / slug
+    jobs_root = motivation_jobs_root(root)
+    job_date = job_date_from_iso(str(manifest.get("created_at") or manifest.get("exported_at") or ""))
+    job_dir = resolve_job_dir(slug, jobs_root) or job_dir_for(
+        slug,
+        jobs_root,
+        job_date=job_date or default_job_date(),
+    )
     paths = manifest.get("paths") or {}
 
     output_dir = job_dir / "output"

@@ -287,7 +287,12 @@ def sync_finished_video_location(store, video: dict[str, Any], *, root: Path | N
 def _motivation_output_candidates(slug: str | None, root: Path) -> list[Path]:
     if not slug:
         return []
-    out_dir = root / "downloads" / "motivational" / slug / "output"
+    from discovery.motivation_paths import motivation_jobs_root, resolve_job_dir
+
+    job_dir = resolve_job_dir(slug, motivation_jobs_root(root))
+    if not job_dir:
+        return []
+    out_dir = job_dir / "output"
     if not out_dir.is_dir():
         return []
     names = [

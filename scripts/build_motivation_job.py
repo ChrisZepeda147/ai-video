@@ -39,6 +39,14 @@ from build_clips_montage import (
     unique_clips_required,
 )
 from discovery.driven_visuals import speech_window_defaults
+from discovery.motivation_paths import (
+    default_job_date,
+    is_date_folder,
+    iter_motivation_job_dirs,
+    job_dir_for,
+    motivation_output_path,
+    resolve_job_dir,
+)
 from discovery.reuse_policy import REUSE_POLICIES, normalize_reuse_policy
 from toolchain_env import (
     check_toolchain,
@@ -94,10 +102,6 @@ class MotivationJobError(RuntimeError):
 
 def project_root() -> Path:
     return Path(__file__).resolve().parent.parent
-
-
-def job_dir_for(slug: str, jobs_root: Path) -> Path:
-    return jobs_root / slug
 
 
 def default_config_path(jobs_root: Path) -> Path:
@@ -1409,7 +1413,10 @@ def rerender_existing_job(
     playback_speed: float,
     use_vision: bool,
 ) -> int:
-    job_dir = job_dir_for(slug, jobs_root)
+    job_dir = resolve_job_dir(slug, jobs_root)
+    if not job_dir:
+        print(f"No job folder for slug {slug} under {jobs_root}", file=sys.stderr)
+        return 1
     job_path = job_dir / "job.json"
     audio = job_dir / "audio" / "speech.mp3"
     captions = job_dir / "audio" / "subs.en.json3"
@@ -1521,19 +1528,14 @@ def write_job_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-SKIP_CLEANUP_DIRS = frozenset({broll_pool.POOL_DIRNAME, speech_pool.POOL_DIRNAME})
-
-
 def cleanup_all(jobs_root: Path, *, keep_work: bool) -> int:
     if not jobs_root.is_dir():
         print(f"No jobs folder: {jobs_root}", file=sys.stderr)
         return 1
     total = 0
-    for child in sorted(jobs_root.iterdir()):
-        if not child.is_dir() or child.name in SKIP_CLEANUP_DIRS:
-            continue
-        removed = cleanup_job_dir(child, keep_work=keep_work)
-        print(f"Cleaned {child.name}: {len(removed)} item(s)")
+    for job_dir in iter_motivation_job_dirs(jobs_root):
+        removed = cleanup_job_dir(job_dir, keep_work=keep_work)
+        print(f"Cleaned {job_dir.name}: {len(removed)} item(s)")
         total += len(removed)
     content_reuse.rebuild()
     print(f"Cleanup done. Removed {total} item(s).")
@@ -1568,6 +1570,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSON with speaker + optional speech_query",
     )
     parser.add_argument("--jobs-root", type=Path, default=None)
+    parser.add_argument(
+        "--job-date",
+        default=None,
+        help="Folder date YYYY-MM-DD under downloads/motivational (default: today, local)",
+    )
     _min_speech, _max_speech = speech_window_defaults()
     parser.add_argument("--min-seconds", type=float, default=_min_speech)
     parser.add_argument("--max-seconds", type=float, default=_max_speech)
@@ -1643,8 +1650,11 @@ def main() -> int:
     )
 
     if args.cleanup_only:
-        target = jobs_root / args.slug if args.slug else jobs_root
+        target = resolve_job_dir(args.slug, jobs_root) if args.slug else jobs_root
         if args.slug:
+            if not target:
+                print(f"No job folder for slug {args.slug}", file=sys.stderr)
+                return 1
             removed = cleanup_job_dir(target, keep_work=args.keep_work)
             content_reuse.rebuild()
             print(f"Cleaned {target}: {len(removed)} item(s)")
@@ -1675,10 +1685,14 @@ def main() -> int:
         print("--slug and --broll-query are required unless --cleanup-only or --rerender", file=sys.stderr)
         return 2
 
-    job_dir = job_dir_for(args.slug, jobs_root)
+    if args.job_date and not is_date_folder(args.job_date):
+        print("--job-date must be YYYY-MM-DD", file=sys.stderr)
+        return 2
+    job_date = args.job_date or default_job_date()
+    job_dir = job_dir_for(args.slug, jobs_root, job_date=job_date)
     audio_dir = job_dir / "audio"
     clips_dir = job_dir / "clips"
-    output = job_dir / "output" / f"{args.slug}-motivation.mp4"
+    output = motivation_output_path(job_dir, args.slug)
     audio_dir.mkdir(parents=True, exist_ok=True)
     clips_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1799,6 +1813,7 @@ def main() -> int:
         job_dir / "job.json",
         {
             "slug": args.slug,
+            "job_date": job_date,
             "speaker": speaker,
             "speech_query": speech_query,
             "speech_id": speech.video_id,

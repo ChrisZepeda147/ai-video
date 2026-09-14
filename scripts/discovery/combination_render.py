@@ -80,7 +80,10 @@ def _resolve_visual_clips_root(root: Path, pack: dict[str, Any], store) -> Path 
     meta = _parse_pack_meta(pack)
     slug = str(meta.get("source_slug") or "").strip()
     if slug:
-        job_clips = root / "downloads" / "motivational" / slug / "clips"
+        from discovery.motivation_paths import motivation_jobs_root, resolve_job_dir
+
+    job_dir = resolve_job_dir(slug, motivation_jobs_root(root))
+    job_clips = (job_dir / "clips") if job_dir else root / "downloads" / "motivational" / slug / "clips"
         if _clip_parts(job_clips):
             return job_clips
 
@@ -205,7 +208,10 @@ def render_combination(
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     slug = slug or f"combo-{owner}-{audio_component_id}-{visual_pack_id}-{stamp}"
-    job_dir = root / "downloads" / "motivational" / slug
+    from discovery.motivation_paths import default_job_date, job_dir_for, motivation_jobs_root
+
+    jobs_root = motivation_jobs_root(root)
+    job_dir = job_dir_for(slug, jobs_root, job_date=default_job_date())
     audio_dir = job_dir / "audio"
     clips_dir = job_dir / "clips"
     output_dir = job_dir / "output"

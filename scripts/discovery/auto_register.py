@@ -193,9 +193,14 @@ def auto_register_motivation_job(
 ) -> dict[str, Any] | None:
     """Register a build_motivation_job.py output with all available components."""
     root = root or project_root()
-    job_dir = root / "downloads" / "motivational" / slug
+    from discovery.motivation_paths import motivation_jobs_root, motivation_output_path, resolve_job_dir
+
+    job_dir = resolve_job_dir(slug, motivation_jobs_root(root))
+    if not job_dir:
+        logger.warning("Motivation job folder missing: %s", slug)
+        return None
     output_dir = job_dir / "output"
-    output = output_dir / f"{slug}-motivation.mp4"
+    output = motivation_output_path(job_dir, slug)
     if not output.is_file() and output_dir.is_dir():
         candidates = sorted(output_dir.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
         output = candidates[0] if candidates else output

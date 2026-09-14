@@ -63,20 +63,9 @@ def is_playable_media(root: Path, rel_path: str | None, *, role: str | None = No
 
 
 def motivation_job_slug_from_rel(rel_path: str | None) -> str | None:
-    """Job folder name for downloads/motivational/<slug>/output/… paths."""
-    normalized = normalize_rel_path(rel_path)
-    if not normalized:
-        return None
-    parts = normalized.split("/")
-    try:
-        idx = parts.index("motivational")
-    except ValueError:
-        return None
-    if idx + 1 >= len(parts):
-        return None
-    if idx + 2 < len(parts) and parts[idx + 2] == "output":
-        return parts[idx + 1]
-    return None
+    from discovery.motivation_paths import motivation_job_slug_from_rel as _slug_from_rel
+
+    return _slug_from_rel(normalize_rel_path(rel_path))
 
 
 def is_complete_motivation_job(
@@ -86,8 +75,10 @@ def is_complete_motivation_job(
     output_path: Path | None = None,
 ) -> bool:
     """Motivation/combo job must have speech, visual clips, and a real output."""
-    job_dir = root / "downloads" / "motivational" / job_slug
-    if not job_dir.is_dir():
+    from discovery.motivation_paths import motivation_jobs_root, resolve_job_dir
+
+    job_dir = resolve_job_dir(job_slug, motivation_jobs_root(root))
+    if not job_dir:
         return False
     speech = job_dir / "audio" / "speech.mp3"
     if not is_playable_file(speech, min_bytes=MIN_AUDIO_BYTES):

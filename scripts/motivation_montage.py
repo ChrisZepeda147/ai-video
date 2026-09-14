@@ -78,11 +78,16 @@ def load_config(root: Path | None = None) -> dict[str, str]:
 
 
 def job_dir(root: Path, slug: str) -> Path:
-    return root / "downloads" / "motivational" / slug
+    from discovery.motivation_paths import default_job_date, job_dir_for, motivation_jobs_root, resolve_job_dir
+
+    jobs_root = motivation_jobs_root(root)
+    return resolve_job_dir(slug, jobs_root) or job_dir_for(slug, jobs_root, job_date=default_job_date())
 
 
 def output_path_for(root: Path, slug: str) -> Path:
-    return job_dir(root, slug) / "output" / f"{slug}-motivation.mp4"
+    from discovery.motivation_paths import motivation_output_path
+
+    return motivation_output_path(job_dir(root, slug), slug)
 
 
 def _download_subtitles(url: str, out_dir: Path) -> Path | None:
