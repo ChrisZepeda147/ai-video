@@ -297,6 +297,22 @@ def _sentence_start_indexes(words: list[tuple[float, str]]) -> list[int]:
     return starts
 
 
+def _clean_speech_start_index(words: list[tuple[float, str]], start_index: int) -> int:
+    """Skip duplicated opener tokens (They / They've / stutter) at excerpt start."""
+    index = start_index
+    while index + 1 < len(words):
+        current = words[index][1].lower().strip(".,!?\"'")
+        nxt = words[index + 1][1].lower().strip(".,!?\"'")
+        if current in {"they", "you", "i", "we"} and (nxt.startswith(current) or nxt == current):
+            index += 1
+            continue
+        if current == nxt:
+            index += 1
+            continue
+        break
+    return index
+
+
 def json3_cue_end_sec(captions: Path, word_time: float) -> float | None:
     """End time of the json3 caption cue that contains word_time (absolute source seconds)."""
     if captions.suffix.lower() != ".json3":
@@ -326,6 +342,24 @@ def json3_cue_end_sec(captions: Path, word_time: float) -> float | None:
             end_sec = cue_end_ms / 1000.0
             best = end_sec if best is None else max(best, end_sec)
     return best
+
+
+def _hard_stop_after_sentence(
+    words: list[tuple[float, str]],
+    close_index: int,
+    *,
+    captions: Path | None,
+) -> float:
+    """End of spoken cue for this sentence, without bleeding into the next sentence."""
+    when, _text = words[close_index]
+    stop = when + 0.35
+    if captions is not None:
+        cue_end = json3_cue_end_sec(captions, when)
+        if cue_end is not None:
+            stop = cue_end + 0.06
+    if close_index + 1 < len(words):
+        stop = min(stop, words[close_index + 1][0] - 0.04)
+    return stop
 
 
 def _speech_tail_after_word(
@@ -370,6 +404,7 @@ def _pick_window_from_words(
                 if words[index][0] >= default_start - 0.05:
                     start_index = index
                     break
+    start_index = _clean_speech_start_index(words, start_index)
     start = words[start_index][0]
     window_min = start + min_seconds
     window_max = start + max_seconds
@@ -382,8 +417,8 @@ def _pick_window_from_words(
             break
         if not _word_ends_sentence(text):
             continue
-        tail = _speech_tail_after_word(words, i, captions=captions)
-        duration = min(when - start + tail + 0.12, max_seconds)
+        stop = _hard_stop_after_sentence(words, i, captions=captions)
+        duration = min(stop - start, max_seconds)
         if duration < min_seconds:
             continue
         best = (start, duration)
@@ -552,26 +587,36 @@ def extend_excerpt_duration(
     max_seconds: float,
     source_duration: float = 0.0,
 ) -> float:
-    """Include the full json3 cue for the last word so speech does not end mid-phrase."""
+    """Finish the closing sentence cue without pulling in the next unrelated sentence."""
     if captions.suffix.lower() != ".json3":
         return duration
     words = json3_word_times(captions)
     if not words:
         return duration
     window_end = start + duration
-    last_index: int | None = None
-    for index, (when, _text) in enumerate(words):
+    close_index: int | None = None
+    for index, (when, text) in enumerate(words):
         if when + 0.02 < start:
             continue
-        if when <= window_end + 0.05:
-            last_index = index
-        elif when > window_end + 0.05:
+        if when > window_end + 0.05:
             break
-    if last_index is None:
-        return duration
-    tail = _speech_tail_after_word(words, last_index, captions=captions)
-    needed = words[last_index][0] + tail + 0.15 - start
-    needed = max(duration, needed)
+        if _word_ends_sentence(text):
+            close_index = index
+    if close_index is None:
+        last_index: int | None = None
+        for index, (when, _text) in enumerate(words):
+            if when + 0.02 < start:
+                continue
+            if when <= window_end + 0.05:
+                last_index = index
+            else:
+                break
+        if last_index is None:
+            return duration
+        stop = _hard_stop_after_sentence(words, last_index, captions=captions)
+    else:
+        stop = _hard_stop_after_sentence(words, close_index, captions=captions)
+    needed = max(0.2, stop - start)
     needed = min(needed, max_seconds)
     if source_duration > 0:
         needed = min(needed, max(0.2, source_duration - start))
