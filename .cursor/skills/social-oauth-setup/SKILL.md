@@ -38,6 +38,10 @@ Unset `DISCOVERY_PUBLISH_PROVIDER=mock` and `DISCOVERY_PUBLISH_DRY_RUN`.
 
 Set matching `AI_VIDEO_INTERNAL_KEY` + `web/.env.local` → `NEXT_PUBLIC_AI_VIDEO_INTERNAL_KEY`.
 
+Tokens stay on the machine that clicked Connect. Stephen and Chris accounts are separate (`owner` on each row). Do not OAuth your brother's login on your PC.
+
+Already-connected Instagram / Facebook accounts must **Disconnect → Connect** again so Reels publish scopes are granted.
+
 ## Connect flow (×2 per platform per owner)
 
 1. Open `/settings` — confirm credentials show **configured**
@@ -65,7 +69,7 @@ Set matching `AI_VIDEO_INTERNAL_KEY` + `web/.env.local` → `NEXT_PUBLIC_AI_VIDE
 1. [developers.facebook.com](https://developers.facebook.com/)
 2. Facebook Login + Instagram Graph API products
 3. Redirect `http://localhost:3000/accounts/callback`
-4. Permissions: `pages_show_list`, `pages_read_engagement`, `read_insights`, `instagram_basic`, `instagram_manage_insights`
+4. Permissions: `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`, `publish_video`, `read_insights`, `instagram_basic`, `instagram_content_publish`, `instagram_manage_insights`
 5. `META_APP_ID`, `META_APP_SECRET` → `scripts/.env`
 6. IG must be Business/Creator linked to a Facebook Page
 

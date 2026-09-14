@@ -1,7 +1,8 @@
-"""Facebook Page analytics via Meta Graph API."""
+"""Facebook Page Reels publish + analytics via Meta Graph API."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from discovery.analytics.base import AccountMetrics, PostMetrics
@@ -13,7 +14,9 @@ from discovery.publishing.base import (
 )
 from discovery.publishing import meta as meta_api
 
-FACEBOOK_SCOPES = "pages_show_list,pages_read_engagement,read_insights"
+FACEBOOK_SCOPES = (
+    "pages_show_list,pages_read_engagement,pages_manage_posts,publish_video,read_insights"
+)
 
 
 class FacebookPublishingProvider:
@@ -29,7 +32,7 @@ class FacebookPublishingProvider:
             state=state,
             instructions=(
                 "Connect a Facebook Page linked to this Meta app. "
-                "Page insights power analytics on the dashboard."
+                "Reconnect after this update so Reels publish scope is granted."
             ),
         )
 
@@ -55,6 +58,7 @@ class FacebookPublishingProvider:
 
     def verify_account(self, credentials: dict[str, Any]) -> AccountVerification:
         token = credentials.get("page_access_token") or credentials.get("access_token")
+        user_token = credentials.get("access_token") or token
         page_id = credentials.get("page_id")
         if not token or not page_id:
             return AccountVerification(
@@ -76,20 +80,67 @@ class FacebookPublishingProvider:
                 posting_available=False,
                 message=str(exc),
             )
+        publish_ok = meta_api.has_publish_permission(
+            str(user_token), meta_api.FB_PUBLISH_PERMISSIONS
+        )
+        if publish_ok is False:
+            return AccountVerification(
+                ok=True,
+                username=str(profile.get("name") or credentials.get("page_name") or ""),
+                platform_account_id=str(profile.get("id") or page_id),
+                posting_available=False,
+                auth_status="connected",
+                capabilities={"analytics": True, "upload": False, "reels": False},
+                audit_note="Reconnect Facebook to grant Reels publish (pages_manage_posts).",
+            )
         return AccountVerification(
             ok=True,
             username=str(profile.get("name") or credentials.get("page_name") or ""),
             platform_account_id=str(profile.get("id") or page_id),
-            posting_available=False,
+            posting_available=True,
             auth_status="connected",
-            capabilities={"analytics": True, "upload": False},
+            capabilities={"analytics": True, "upload": True, "reels": True},
         )
 
     def publish_video(self, credentials: dict[str, Any], request: PublishRequest) -> PublishResult:
-        raise RuntimeError("In-app Facebook publishing is not enabled yet — link posts from Videos.")
+        page_id = str(credentials.get("page_id") or "")
+        token = str(credentials.get("page_access_token") or credentials.get("access_token") or "")
+        if not page_id or not token:
+            raise RuntimeError("Missing Facebook Page credentials")
+        video = Path(request.video_path)
+        if not video.is_file():
+            raise FileNotFoundError(f"Video not found: {video}")
+        description = meta_api.join_caption(request.caption, request.hashtags, limit=10000)
+        published = meta_api.publish_facebook_reel(
+            page_id=page_id,
+            token=token,
+            video_path=video,
+            title=request.title,
+            description=description,
+        )
+        video_id = str(published.get("id") or "")
+        if not video_id:
+            raise RuntimeError(f"Facebook video_reels returned no video_id: {published}")
+        return PublishResult(
+            platform_post_id=video_id,
+            platform_url=published.get("permalink"),
+            status="published",
+            processing_status="published",
+            raw=published,
+        )
 
     def fetch_publish_status(self, credentials: dict[str, Any], platform_post_id: str) -> dict[str, Any]:
-        return {"status": "linked_only"}
+        token = credentials.get("page_access_token") or credentials.get("access_token")
+        if not token:
+            return {"status": "missing_token"}
+        try:
+            return meta_api.graph_get(
+                platform_post_id,
+                token=str(token),
+                fields="id,permalink_url,status",
+            )
+        except Exception as exc:
+            return {"status": "error", "error": str(exc)}
 
     def fetch_post_metrics(self, credentials: dict[str, Any], platform_post_id: str) -> PostMetrics:
         token = credentials.get("page_access_token") or credentials.get("access_token")

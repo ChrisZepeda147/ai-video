@@ -80,6 +80,12 @@ class PublishingTests(unittest.TestCase):
         self.tt_account = import_mock_account(
             self.store, platform="tiktok", display_name="LuxuryMindset", username="LuxuryMindset", niche="luxury"
         )
+        self.ig_account = import_mock_account(
+            self.store, platform="instagram", display_name="LuxuryMindset", username="LuxuryMindset", niche="luxury"
+        )
+        self.fb_account = import_mock_account(
+            self.store, platform="facebook", display_name="LuxuryMindset", username="LuxuryMindset", niche="luxury"
+        )
 
     def tearDown(self) -> None:
         self.store.close()
@@ -141,10 +147,10 @@ class PublishingTests(unittest.TestCase):
         results = create_publishing_jobs(
             self.store,
             production_project_id=self.project_id,
-            account_ids=[self.yt_account, self.tt_account],
+            account_ids=[self.yt_account, self.tt_account, self.ig_account, self.fb_account],
         )
         platforms = {self.store.get_publishing_job(r.job_id).platform for r in results}
-        self.assertEqual(platforms, {"youtube", "tiktok"})
+        self.assertEqual(platforms, {"youtube", "tiktok", "instagram", "facebook"})
 
     def test_duplicate_request_does_not_double_publish(self) -> None:
         first = create_publishing_jobs(

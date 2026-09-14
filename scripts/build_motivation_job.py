@@ -58,7 +58,7 @@ from toolchain_env import (
     resolve_tool,
     subprocess_env,
 )
-from build_stills_slideshow import burn_captions, parse_json3_words
+from build_stills_slideshow import burn_captions, normalize_caption_align, parse_json3_words
 from youtube_popular_downloader import (
     VideoCandidate,
     discover_search,
@@ -1875,6 +1875,21 @@ def filter_broll_clip_list(
     return kept
 
 
+def _broll_ids_from_clips(clips_dir: Path) -> list[str]:
+    """Recover YouTube IDs from existing *_part*.mp4 clip names."""
+    found: list[str] = []
+    seen: set[str] = set()
+    for clip in sorted(clips_dir.glob("*_part*.mp4")):
+        stem = clip.stem
+        marker = stem.rfind("_part")
+        video_id = stem[:marker] if marker > 0 else stem
+        if not video_id or video_id in seen:
+            continue
+        seen.add(video_id)
+        found.append(video_id)
+    return found
+
+
 def filter_broll_clips(
     clips_dir: Path,
     *,
@@ -2048,6 +2063,7 @@ def render_job(
     hook_text: str | None = None,
     quality_gate: bool = True,
     segment_gate: bool = True,
+    caption_align: str | None = None,
 ) -> set[Path]:
     output.parent.mkdir(parents=True, exist_ok=True)
     actual_duration = probe_duration(audio)
@@ -2085,7 +2101,8 @@ def render_job(
         raise RuntimeError("Montage reused a B-roll clip file in one render")
     print(f"  montage used {len(used_clips)} unique clip file(s)")
     caption_label = "phrase" if caption_mode == "phrase" else "word"
-    print(f"Burning {caption_label} captions...")
+    align = normalize_caption_align(caption_align, caption_mode=caption_mode)
+    print(f"Burning {caption_label} captions ({align})...")
     captioned = output.with_suffix(".captioned.mp4")
     burn_captions(
         temp_output,
@@ -2097,6 +2114,7 @@ def render_job(
         audio_duration=duration,
         caption_mode=caption_mode,
         hook_text=hook_text,
+        caption_align=align,
     )
     temp_output.unlink(missing_ok=True)
     remux_speech_over_video(captioned, audio, output, audio_start=0.0)
@@ -2143,6 +2161,7 @@ def rerender_existing_job(
     segment_gate: bool = True,
     cursor_review: bool = False,
     caption_mode: str | None = None,
+    caption_align: str | None = None,
 ) -> int:
     job_dir = resolve_job_dir(slug, jobs_root)
     if not job_dir:
@@ -2189,14 +2208,22 @@ def rerender_existing_job(
     duration = float(payload.get("audio_duration") or probe_duration(audio))
     if caption_mode:
         payload["caption_mode"] = caption_mode
+    if caption_align:
+        payload["caption_align"] = normalize_caption_align(
+            caption_align,
+            caption_mode=str(caption_mode or payload.get("caption_mode") or "phrase"),
+        )
+    if caption_mode or caption_align:
         write_job_json(job_path, payload)
     segment_length = resolve_segment_length(duration, segment_length)
     subject = str(payload.get("subject") or payload.get("broll_query") or slug)
-    if not broll_ids:
-        print("job.json has no broll_ids", file=sys.stderr)
-        return 1
     clips_dir = job_dir / "clips"
     clips_dir.mkdir(parents=True, exist_ok=True)
+    if not broll_ids:
+        broll_ids = _broll_ids_from_clips(clips_dir)
+    if not broll_ids and not list(clips_dir.glob("*_part*.mp4")):
+        print("job.json has no broll_ids and clips/ is empty", file=sys.stderr)
+        return 1
     driven_pacing = bool(payload.get("driven_pacing", True))
     clips_limit, clip_length, max_parts = broll_download_plan(
         duration=duration,
@@ -2249,6 +2276,7 @@ def rerender_existing_job(
             hook_text=str(payload.get("hook") or "") or None,
             quality_gate=quality_gate,
             segment_gate=segment_gate,
+            caption_align=str(caption_align or payload.get("caption_align") or "") or None,
         )
     except (FileNotFoundError, RuntimeError, ValueError, subprocess.CalledProcessError) as exc:
         print(exc, file=sys.stderr)
@@ -2368,6 +2396,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Revert to single-word captions instead of DrivenVisuals phrase blocks.",
     )
     parser.add_argument(
+        "--caption-align",
+        default=None,
+        choices=("center", "lower_middle"),
+        help="Caption placement. Default: center for --classic-captions, lower_middle for phrases.",
+    )
+    parser.add_argument(
         "--uniform-pacing",
         action="store_true",
         help="Disable DrivenVisuals fast-open pacing (use uniform segment length).",
@@ -2472,6 +2506,7 @@ def main() -> int:
             segment_gate=gate_flags.segment_gate,
             cursor_review=gate_flags.cursor_review,
             caption_mode="word" if args.classic_captions else None,
+            caption_align=args.caption_align,
         )
 
     if args.speech_review_only:
@@ -2614,6 +2649,7 @@ def main() -> int:
             reuse_policy=reuse_policy,
         )
         caption_mode = "word" if args.classic_captions else "phrase"
+        caption_align = normalize_caption_align(args.caption_align, caption_mode=caption_mode)
         render_job(
             jobs_root=jobs_root,
             clips_dir=clips_dir,
@@ -2632,6 +2668,7 @@ def main() -> int:
             hook_text=args.hook,
             quality_gate=gate_flags.quality_gate,
             segment_gate=gate_flags.segment_gate,
+            caption_align=caption_align,
         )
     except SpeechReviewReady as exc:
         print(exc)
@@ -2677,6 +2714,7 @@ def main() -> int:
             "playback_speed": args.playback_speed,
             "driven_pacing": driven_pacing,
             "caption_mode": caption_mode,
+            "caption_align": caption_align,
             "hook": args.hook,
             "driven_visuals_preset": "driven_visuals_v1",
             "output": str(output.as_posix()),

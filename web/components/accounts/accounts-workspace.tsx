@@ -20,8 +20,8 @@ const OWNERS: PublishingOwner[] = ["stephen", "chris"];
 const PLATFORM_HINTS: Record<(typeof PLATFORMS)[number], string> = {
   youtube: "Google OAuth — channel analytics after connect",
   tiktok: "TikTok developer app — link posts for per-video stats",
-  instagram: "Meta login — Business/Creator account linked to a Page",
-  facebook: "Meta login — Facebook Page insights",
+  instagram: "Meta login — Business IG linked to a Page. Reels upload after reconnect.",
+  facebook: "Meta login — Facebook Page. Reels upload after reconnect.",
 };
 
 export function AccountsWorkspace() {
@@ -224,6 +224,8 @@ export function AccountsWorkspace() {
                           </p>
                           <p className="mt-1 text-xs text-zinc-600">
                             Analytics: {a.auth_status === "connected" || a.auth_status === "verified" ? "ready" : "needs reconnect"}
+                            {" · "}
+                            Posting: {a.posting_available ? "ready" : "reconnect for Reels"}
                             {a.last_verified_at ? ` · verified ${new Date(a.last_verified_at).toLocaleString()}` : ""}
                           </p>
                           {a.audit_note ? (

@@ -54,7 +54,10 @@ def publishing_env_status() -> dict[str, Any]:
                 "env_ready": _env_ready("META_APP_ID", "META_APP_SECRET"),
                 "env_keys": ["META_APP_ID", "META_APP_SECRET"],
                 "redirect_uri": redirect,
-                "notes": "Meta app + Instagram Business/Creator linked to a Facebook Page.",
+                "notes": (
+                    "Meta app + Instagram Business account linked to a Facebook Page. "
+                    "Need instagram_content_publish. Reconnect existing IG accounts after this update."
+                ),
             },
             "facebook": {
                 "label": "Facebook",
@@ -62,7 +65,10 @@ def publishing_env_status() -> dict[str, Any]:
                 "env_ready": _env_ready("META_APP_ID", "META_APP_SECRET"),
                 "env_keys": ["META_APP_ID", "META_APP_SECRET"],
                 "redirect_uri": redirect,
-                "notes": "Same Meta app as Instagram. Connect each Facebook Page separately.",
+                "notes": (
+                    "Same Meta app as Instagram. Connect each Facebook Page separately. "
+                    "Need pages_manage_posts. Reconnect existing Pages after this update."
+                ),
             },
         },
     }

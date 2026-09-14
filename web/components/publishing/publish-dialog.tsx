@@ -4,10 +4,11 @@ import { useEffect, useState } from "react";
 import { RiskBadge, riskLevel } from "@/components/shared/risk-badge";
 import {
   fetchPublishingAccounts,
+  fetchPublishingOwner,
   postCreatePublishingJobs,
   productionMediaUrl,
 } from "@/lib/api";
-import type { ProductionProjectItem, PublishingAccountItem } from "@/lib/types";
+import type { ProductionProjectItem, PublishingAccountItem, PublishingOwner } from "@/lib/types";
 
 type Props = {
   project: ProductionProjectItem;
@@ -26,13 +27,19 @@ export function PublishDialog({ project, onClose, onPublished }: Props) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    fetchPublishingAccounts().then((r) => {
-      if (r.ok) {
-        setAccounts(r.data.items.filter((a) => a.enabled && a.posting_available));
-        const nicheMatches = r.data.items.filter((a) => a.niche && project.niche && a.niche === project.niche);
-        if (nicheMatches.length) {
-          setSelected(new Set(nicheMatches.map((a) => a.id)));
-        }
+    Promise.all([fetchPublishingAccounts(), fetchPublishingOwner()]).then(([accountsResult, ownerResult]) => {
+      if (!accountsResult.ok) return;
+      const ready = accountsResult.data.items.filter((a) => a.enabled && a.posting_available);
+      setAccounts(ready);
+      const localOwner =
+        ownerResult.ok && (ownerResult.data.owner === "stephen" || ownerResult.data.owner === "chris")
+          ? (ownerResult.data.owner as PublishingOwner)
+          : null;
+      const nicheMatches = ready.filter((a) => a.niche && project.niche && a.niche === project.niche);
+      const ownAccounts = localOwner ? ready.filter((a) => (a.owner || localOwner) === localOwner) : ready;
+      const defaults = nicheMatches.length ? nicheMatches : ownAccounts;
+      if (defaults.length) {
+        setSelected(new Set(defaults.map((a) => a.id)));
       }
     });
   }, [project.niche]);
@@ -132,6 +139,7 @@ export function PublishDialog({ project, onClose, onPublished }: Props) {
                   <input type="checkbox" checked={selected.has(a.id)} onChange={() => toggleAccount(a.id)} />
                   <span className="capitalize text-zinc-300">{a.platform}</span>
                   <span className="text-zinc-100">{a.display_name}</span>
+                  <span className="text-xs capitalize text-zinc-500">{a.owner || "local"}</span>
                   {a.audit_note ? <span className="text-xs text-amber-500">({a.audit_note.slice(0, 40)}…)</span> : null}
                 </li>
               ))}

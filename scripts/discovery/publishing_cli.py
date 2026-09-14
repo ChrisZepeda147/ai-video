@@ -119,7 +119,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_job_status)
 
     p = sub.add_parser("add-mock-account", help="Create mock connected account for dev/tests")
-    p.add_argument("platform", choices=["youtube", "tiktok", "instagram"])
+    p.add_argument("platform", choices=["youtube", "tiktok", "instagram", "facebook"])
     p.add_argument("name", help="Display name")
     p.add_argument("--username")
     p.add_argument("--niche")
