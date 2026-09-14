@@ -86,6 +86,101 @@ class SpeechPoolTests(unittest.TestCase):
         self.assertIsNotNone(mid)
         self.assertAlmostEqual(mid[0], 1.2, places=2)
 
+    def test_speech_window_skips_mid_thought_open_and_hanging_end(self) -> None:
+        from build_motivation_job import _fallback_speech_duration, _pick_window_from_words
+
+        words = [
+            (0.00, "And"),
+            (0.08, "I'm"),
+            (0.40, "light."),
+            (0.92, "I'm"),
+            (2.16, "like,"),
+            (7.88, "Uber."),
+            (9.28, "If"),
+            (11.96, "will."),
+            (13.08, "Because"),
+            (13.84, "bus"),
+            (15.96, "wait"),
+        ]
+        picked = _pick_window_from_words(words, min_seconds=20, max_seconds=28)
+        self.assertIsNotNone(picked)
+        start, duration = picked
+        self.assertGreaterEqual(start, 0.90)
+        self.assertLess(start + duration, 13.2)
+        self.assertGreaterEqual(start + duration, 11.96)
+
+        fallback = _fallback_speech_duration(
+            words,
+            start=0.0,
+            min_seconds=20,
+            max_seconds=28,
+            captions=None,
+        )
+        self.assertLess(fallback, 13.2)
+        self.assertGreaterEqual(fallback, 11.96)
+
+    def test_extend_drops_unfinished_trailing_sentence(self) -> None:
+        from build_motivation_job import extend_excerpt_duration
+
+        words = [
+            (0.0, "You"),
+            (0.4, "work."),
+            (12.0, "I"),
+            (12.4, "will."),
+            (13.0, "Because"),
+            (15.5, "wait"),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            captions = Path(tmp) / "subs.en.json3"
+            captions.write_text(json.dumps(_json3_words(words)), encoding="utf-8")
+            needed = extend_excerpt_duration(
+                captions,
+                start=0.0,
+                duration=16.0,
+                max_seconds=28.0,
+            )
+        self.assertLess(needed, 13.0)
+        self.assertGreaterEqual(needed, 12.4)
+
+    def test_shift_json3_keeps_only_words_inside_window(self) -> None:
+        from build_motivation_job import captions_text, shift_json3
+
+        payload = {
+            "events": [
+                {
+                    "tStartMs": -2520,
+                    "dDurationMs": 4680,
+                    "segs": [
+                        {"utf8": "and"},
+                        {"utf8": " stop.", "tOffsetMs": 1120},
+                    ],
+                },
+                {
+                    "tStartMs": 0,
+                    "dDurationMs": 3880,
+                    "segs": [
+                        {"utf8": "And"},
+                        {"utf8": " light.", "tOffsetMs": 720},
+                    ],
+                },
+                {
+                    "tStartMs": 13080,
+                    "dDurationMs": 3200,
+                    "segs": [{"utf8": "Because"}],
+                },
+            ]
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "src.json3"
+            dest = Path(tmp) / "dest.json3"
+            src.write_text(json.dumps(payload), encoding="utf-8")
+            shift_json3(src, dest, start=0.0, duration=13.04)
+            text = captions_text(dest)
+        self.assertIn("And", text)
+        self.assertIn("light.", text)
+        self.assertNotIn("stop.", text)
+        self.assertNotIn("Because", text)
+
     def test_stash_and_take_roundtrip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             jobs_root = Path(tmp) / "motivational"
