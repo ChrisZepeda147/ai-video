@@ -13,7 +13,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from discovery.config import default_db_path, load_env  # noqa: E402
-from discovery.production_library import check_reuse, get_video, list_videos  # noqa: E402
+from discovery.production_library import check_reuse, delete_video, get_video, list_videos  # noqa: E402
 from discovery.store import DiscoveryStore  # noqa: E402
 
 
@@ -32,6 +32,10 @@ def main() -> int:
 
     show_p = sub.add_parser("show", help="Show one video with components")
     show_p.add_argument("--video-id", type=int, required=True)
+
+    delete_p = sub.add_parser("delete", help="Remove a library video and its local files")
+    delete_p.add_argument("--video-id", type=int, required=True)
+    delete_p.add_argument("--keep-files", action="store_true", help="Drop the site row only")
 
     check_p = sub.add_parser("check-reuse", help="Look up prior production usage (advisory — does not block reuse)")
     check_p.add_argument("--source-url")
@@ -63,6 +67,11 @@ def main() -> int:
             )
         elif args.cmd == "show":
             payload = get_video(store, args.video_id)
+            if not payload:
+                print(json.dumps({"error": "not found"}))
+                return 1
+        elif args.cmd == "delete":
+            payload = delete_video(store, args.video_id, delete_files=not args.keep_files)
             if not payload:
                 print(json.dumps({"error": "not found"}))
                 return 1

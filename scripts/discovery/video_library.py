@@ -463,6 +463,25 @@ def update_video_library_item(
     raise ValueError("Updated item not found in library")
 
 
+def _delete_listed_local_media(root: Path, rel_paths: list[str], *, slug: str | None = None) -> list[str]:
+    from discovery.production_library import JOB_PIPELINES_SAFE_TO_WIPE, job_dir_for_rel, safe_remove_paths
+
+    targets: list[Path] = []
+    for rel in rel_paths:
+        if not rel:
+            continue
+        posix = str(rel).replace("\\", "/").lstrip("/")
+        path = root / posix
+        job = job_dir_for_rel(posix, root)
+        targets.append(job if job is not None else path)
+    if slug:
+        for pipeline in JOB_PIPELINES_SAFE_TO_WIPE:
+            candidate = root / "downloads" / pipeline / slug
+            if candidate.is_dir():
+                targets.append(candidate)
+    return safe_remove_paths(root, targets)
+
+
 def delete_video_library_item(
     store,
     *,
@@ -472,10 +491,11 @@ def delete_video_library_item(
     project_id: int | None = None,
     legacy_id: str | None = None,
     slug: str | None = None,
+    delete_files: bool = True,
 ) -> dict[str, Any]:
-    """Remove one Videos tab entry. Does not delete files on disk."""
+    """Remove one Videos tab entry and delete its local files."""
     root = root or project_root()
-    deleted: dict[str, Any] = {"source": source}
+    deleted: dict[str, Any] = {"source": source, "removed_paths": []}
 
     if source == "legacy":
         if not legacy_id and not slug:
@@ -489,15 +509,26 @@ def delete_video_library_item(
             raise ValueError("Legacy catalog entry not found")
         deleted["legacy_id"] = removed.get("id") or legacy_id
         deleted["slug"] = removed.get("slug") or slug
+        if delete_files:
+            paths = resolve_output_paths(removed)
+            deleted["removed_paths"] = _delete_listed_local_media(
+                root,
+                paths,
+                slug=str(removed.get("slug") or slug or "") or None,
+            )
 
     elif source == "library":
         if not library_id:
             raise ValueError("library_id is required for library source")
         from discovery.production_library import delete_video
 
-        if not delete_video(store, int(library_id)):
+        result = delete_video(store, int(library_id), delete_files=delete_files, root=root)
+        if not result:
             raise ValueError(f"Video {library_id} not found")
         deleted["library_id"] = int(library_id)
+        deleted["slug"] = result.get("slug")
+        deleted["video_key"] = result.get("video_key")
+        deleted["removed_paths"] = result.get("removed_paths") or []
 
     elif source == "production":
         if not project_id:
@@ -505,6 +536,9 @@ def delete_video_library_item(
         project = store.get_production_project(int(project_id))
         if not project:
             raise ValueError(f"Project {project_id} not found")
+        if delete_files:
+            rels = [str(project.output_path)] if project.output_path else []
+            deleted["removed_paths"] = _delete_listed_local_media(root, rels, slug=project.slug)
         if not store.delete_production_project(int(project_id)):
             raise ValueError(f"Project {project_id} not found")
         deleted["project_id"] = int(project_id)

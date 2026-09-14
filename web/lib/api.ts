@@ -480,13 +480,26 @@ export async function postDeleteVideoLibraryItem(body: {
   project_id?: number;
   legacy_id?: string;
   slug?: string;
+  delete_files?: boolean;
 }) {
   return fetchJson<{ deleted: Record<string, unknown> }>(
     buildUrl("/api/videos/library/delete"),
     {
       method: "POST",
-      body: JSON.stringify(body),
+      body: JSON.stringify({ delete_files: true, ...body }),
       headers: internalHeaders(),
+      signal: AbortSignal.timeout(60_000),
+    },
+  );
+}
+
+export async function deleteProductionVideo(videoId: number, deleteFiles = true) {
+  return fetchJson<{ deleted: Record<string, unknown> }>(
+    buildUrl(`/api/library/videos/${videoId}`, { delete_files: deleteFiles }),
+    {
+      method: "DELETE",
+      headers: internalHeaders(),
+      signal: AbortSignal.timeout(60_000),
     },
   );
 }

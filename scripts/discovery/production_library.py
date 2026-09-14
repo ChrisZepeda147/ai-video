@@ -7,6 +7,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -668,14 +669,181 @@ def list_videos(
     return items
 
 
-def delete_video(store, video_id: int) -> bool:
-    """Remove one production library video and its components (files on disk are kept)."""
+PROTECTED_REL_PREFIXES = (
+    "downloads/broll_pool/",
+    "downloads/speech_pool/",
+    "downloads/motivation_pool/",
+)
+JOB_PIPELINES_SAFE_TO_WIPE = frozenset({"motivational", "production", "imessage", "stills", "story"})
+
+
+def _is_protected_rel(rel: str | None) -> bool:
+    posix = (rel or "").replace("\\", "/").lstrip("/")
+    if not posix:
+        return True
+    return any(posix == prefix.rstrip("/") or posix.startswith(prefix) for prefix in PROTECTED_REL_PREFIXES)
+
+
+def job_dir_for_rel(rel: str | None, root: Path | None = None) -> Path | None:
+    """Job folder for downloads/<pipeline>/<slug>/… paths. None for pools or library copies."""
+    from discovery.media_paths import normalize_rel_path
+
+    posix = normalize_rel_path(rel)
+    if not posix:
+        return None
+    parts = posix.split("/")
+    if len(parts) < 3 or parts[0] != "downloads":
+        return None
+    pipeline = parts[1]
+    if pipeline == "production_library" or pipeline.endswith("_pool"):
+        return None
+    if pipeline not in JOB_PIPELINES_SAFE_TO_WIPE:
+        return None
+    root = root or project_root()
+    return root / "downloads" / pipeline / parts[2]
+
+
+def safe_remove_paths(root: Path, paths: list[Path]) -> list[str]:
+    """Delete files/dirs under project root. Skip shared pools and anything outside root."""
+    removed: list[str] = []
+    seen: set[str] = set()
+    for path in paths:
+        rel = _rel_to_root(path, root)
+        if not rel or _is_protected_rel(rel):
+            continue
+        marker = rel.replace("\\", "/")
+        if marker in seen:
+            continue
+        seen.add(marker)
+        try:
+            if path.is_file():
+                path.unlink()
+                removed.append(marker)
+            elif path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+                removed.append(marker)
+        except OSError:
+            continue
+    return removed
+
+
+def _path_used_by_other_video(store, video_id: int, rel_prefix: str) -> bool:
+    needle = rel_prefix.replace("\\", "/").rstrip("/")
+    if not needle:
+        return False
+    like = needle + "/%"
     row = store._conn.execute(
-        "SELECT id FROM production_library_videos WHERE id = ?",
+        """
+        SELECT v.id
+        FROM production_library_videos v
+        LEFT JOIN production_video_components c ON c.video_id = v.id
+        WHERE v.id != ?
+          AND (
+            REPLACE(COALESCE(v.final_output_path, ''), '\\', '/') = ?
+            OR REPLACE(COALESCE(v.final_output_path, ''), '\\', '/') LIKE ?
+            OR REPLACE(COALESCE(v.thumbnail_path, ''), '\\', '/') = ?
+            OR REPLACE(COALESCE(v.thumbnail_path, ''), '\\', '/') LIKE ?
+            OR REPLACE(COALESCE(c.local_path, ''), '\\', '/') = ?
+            OR REPLACE(COALESCE(c.local_path, ''), '\\', '/') LIKE ?
+          )
+        LIMIT 1
+        """,
+        (video_id, needle, like, needle, like, needle, like),
+    ).fetchone()
+    return bool(row)
+
+
+def _slug_used_by_other_video(store, video_id: int, slug: str | None) -> bool:
+    if not slug:
+        return False
+    row = store._conn.execute(
+        "SELECT id FROM production_library_videos WHERE id != ? AND slug = ? LIMIT 1",
+        (video_id, slug),
+    ).fetchone()
+    return bool(row)
+
+
+def collect_video_local_targets(store, video: dict[str, Any], *, root: Path) -> list[Path]:
+    """Library folders, exclusive job dirs, and exclusive component files for one video."""
+    targets: list[Path] = []
+    key = str(video.get("video_key") or "")
+    if not key and video.get("id") is not None:
+        key = _video_key(int(video["id"]))
+    lib = production_library_dir()
+    if key:
+        targets.extend(
+            [
+                lib / FINISHED_UNUSED / key,
+                lib / FINISHED_USED / key,
+                lib / key,
+            ]
+        )
+
+    rels: list[str] = []
+    for raw in (video.get("final_output_path"), video.get("thumbnail_path")):
+        if raw:
+            rels.append(str(raw))
+    video_id = int(video["id"]) if video.get("id") is not None else None
+    if video_id is not None:
+        rows = store._conn.execute(
+            "SELECT local_path FROM production_video_components WHERE video_id = ? AND local_path IS NOT NULL",
+            (video_id,),
+        ).fetchall()
+        rels.extend(str(row["local_path"]) for row in rows if row["local_path"])
+
+    job_dirs: list[Path] = []
+    for rel in rels:
+        posix = rel.replace("\\", "/").lstrip("/")
+        if _is_protected_rel(posix):
+            continue
+        path = Path(rel)
+        if not path.is_absolute():
+            path = root / posix
+        if not _path_is_under(path, root):
+            continue
+        job = job_dir_for_rel(posix, root)
+        if job is not None:
+            job_dirs.append(job)
+            continue
+        if path.exists():
+            targets.append(path)
+
+    slug = str(video.get("slug") or "").strip()
+    if slug and video_id is not None and not _slug_used_by_other_video(store, video_id, slug):
+        for pipeline in JOB_PIPELINES_SAFE_TO_WIPE:
+            candidate = root / "downloads" / pipeline / slug
+            if candidate.is_dir():
+                job_dirs.append(candidate)
+
+    seen_jobs: set[str] = set()
+    for job in job_dirs:
+        marker = str(job.resolve()) if job.exists() else str(job)
+        if marker in seen_jobs:
+            continue
+        seen_jobs.add(marker)
+        rel = _rel_to_root(job, root)
+        if not rel or video_id is None:
+            continue
+        if _path_used_by_other_video(store, video_id, rel):
+            continue
+        targets.append(job)
+    return targets
+
+
+def delete_video(store, video_id: int, *, delete_files: bool = True, root: Path | None = None) -> dict[str, Any] | None:
+    """Remove one production library video, its components, and local files."""
+    row = store._conn.execute(
+        "SELECT * FROM production_library_videos WHERE id = ?",
         (video_id,),
     ).fetchone()
     if not row:
-        return False
+        return None
+    video = _row_to_video(row)
+    root = root or project_root()
+    removed_paths: list[str] = []
+    if delete_files:
+        removed_paths = safe_remove_paths(root, collect_video_local_targets(store, video, root=root))
+
     store._conn.execute(
         "DELETE FROM production_video_components WHERE video_id = ?",
         (video_id,),
@@ -685,7 +853,35 @@ def delete_video(store, video_id: int) -> bool:
         (video_id,),
     )
     store._conn.commit()
-    return True
+
+    slug = str(video.get("slug") or "").strip() or None
+    if slug:
+        try:
+            scripts_dir = Path(__file__).resolve().parent.parent
+            if str(scripts_dir) not in sys.path:
+                sys.path.insert(0, str(scripts_dir))
+            import content_reuse
+
+            content_reuse.delete_catalog_video_entry("", root=root, slug=slug)
+        except Exception:
+            pass
+        try:
+            from discovery.shared_library import forget_shared_import
+
+            meta = video.get("metadata") if isinstance(video.get("metadata"), dict) else {}
+            shared = meta.get("shared_library") if isinstance(meta, dict) else {}
+            manifest_id = shared.get("manifest_id") if isinstance(shared, dict) else None
+            forget_shared_import(root=root, slug=slug, manifest_id=str(manifest_id) if manifest_id else None)
+        except Exception:
+            pass
+
+    return {
+        "video_id": int(video_id),
+        "video_key": video.get("video_key"),
+        "slug": slug,
+        "title": video.get("title"),
+        "removed_paths": removed_paths,
+    }
 
 
 def get_video(store, video_id: int) -> dict[str, Any] | None:

@@ -13,7 +13,9 @@ import {
   MediaPreviewCard,
   type MediaPreviewItem,
 } from "@/components/shared/media-preview-card";
+import { ConfirmDeleteButton } from "@/components/shared/confirm-delete-button";
 import {
+  deleteProductionVideo,
   fetchHealth,
   fetchLibrarySpeakers,
   fetchProductionVideo,
@@ -62,6 +64,8 @@ export function VideoDetailWorkspace({ videoId }: { videoId: number }) {
   const [rememberSpeaker, setRememberSpeaker] = useState(true);
   const [speakerBusy, setSpeakerBusy] = useState(false);
   const [speakerMessage, setSpeakerMessage] = useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteMessage, setDeleteMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const health = await fetchHealth();
@@ -104,6 +108,19 @@ export function VideoDetailWorkspace({ videoId }: { videoId: number }) {
     );
   }
 
+  async function handleDeleteVideo() {
+    if (deleteBusy) return;
+    setDeleteBusy(true);
+    setDeleteMessage(null);
+    const result = await deleteProductionVideo(videoId);
+    setDeleteBusy(false);
+    if (!result.ok) {
+      setDeleteMessage(result.message);
+      return;
+    }
+    router.push("/library");
+  }
+
   if (!video && backendOnline !== false) {
     return <p className="text-sm text-zinc-500">Loading…</p>;
   }
@@ -138,6 +155,14 @@ export function VideoDetailWorkspace({ videoId }: { videoId: number }) {
         {finalPath ? (
           <p className="mt-1 break-all font-mono text-xs text-violet-300/90">{finalPath}</p>
         ) : null}
+        <div className="mt-3">
+          <ConfirmDeleteButton
+            busy={deleteBusy}
+            hint="Delete this video from the site and local disk?"
+            onConfirm={() => void handleDeleteVideo()}
+          />
+          {deleteMessage ? <p className="mt-2 text-xs text-red-300">{deleteMessage}</p> : null}
+        </div>
       </div>
 
       <section className="max-w-xl rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">

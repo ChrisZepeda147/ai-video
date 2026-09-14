@@ -533,7 +533,7 @@ def delete_catalog_video_entry(
     root: Path | None = None,
     slug: str | None = None,
 ) -> dict[str, Any] | None:
-    """Remove one legacy catalog video row from used.json (files on disk are kept)."""
+    """Remove one legacy catalog video row from used.json."""
     base = root or project_root()
     catalog = load_persisted(base)
     needle = str(entry_id or "").strip()

@@ -581,6 +581,50 @@ def validate_manifest(manifest: dict[str, Any], package_dir: Path) -> list[str]:
     return issues
 
 
+def forget_shared_import(
+    *,
+    root: Path | None = None,
+    slug: str | None = None,
+    manifest_id: str | None = None,
+) -> dict[str, Any]:
+    """Stop auto-import from resurrecting a deleted video. Drops local package + tombstone."""
+    root = root or project_root()
+    state = load_sync_state(root)
+    imports = state.setdefault("imports", {})
+    deleted = state.setdefault("deleted_imports", {})
+    removed_packages: list[str] = []
+    tombstones: list[str] = []
+
+    if manifest_id:
+        imports.pop(manifest_id, None)
+        deleted[manifest_id] = {"slug": slug, "deleted_at": now_iso()}
+        tombstones.append(manifest_id)
+
+    if slug:
+        for mid, record in list(imports.items()):
+            if isinstance(record, dict) and record.get("slug") == slug:
+                imports.pop(mid, None)
+                deleted[mid] = {"slug": slug, "deleted_at": now_iso()}
+                tombstones.append(mid)
+        for owner in SHARED_LIBRARY_OWNERS:
+            package_dir = root / "shared_library" / owner / slug
+            if package_dir.is_dir():
+                shutil.rmtree(package_dir, ignore_errors=True)
+                removed_packages.append(package_dir.relative_to(root).as_posix())
+
+    if tombstones or removed_packages:
+        save_sync_state(state, root)
+    return {"tombstones": tombstones, "removed_packages": removed_packages}
+
+
+def is_deleted_shared_import(manifest_id: str | None, *, root: Path | None = None) -> bool:
+    if not manifest_id:
+        return False
+    state = load_sync_state(root)
+    deleted = state.get("deleted_imports") or {}
+    return manifest_id in deleted
+
+
 def find_video_by_manifest_id(store, manifest_id: str) -> dict[str, Any] | None:
     rows = store._conn.execute(
         """
@@ -668,6 +712,13 @@ def import_manifest(
     root = root or project_root()
     manifest_id = str(manifest["manifest_id"])
     slug = str(manifest["slug"])
+
+    if is_deleted_shared_import(manifest_id, root=root):
+        return {
+            "manifest_id": manifest_id,
+            "slug": slug,
+            "status": "deleted",
+        }
 
     existing = find_video_by_manifest_id(store, manifest_id)
     if existing:
@@ -809,7 +860,7 @@ def import_all_shared_packages(
             items.append(result)
             if result.get("status") == "imported":
                 imported += 1
-            elif result.get("status") == "already_imported":
+            elif result.get("status") in {"already_imported", "deleted"}:
                 skipped += 1
             elif result.get("status") in {"invalid", "error"}:
                 errors += 1

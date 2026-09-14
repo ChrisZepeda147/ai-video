@@ -5,12 +5,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { BackendOfflineBanner } from "@/components/backend-banner";
 import { formatDuration, formatTimecode } from "@/lib/format";
 import {
+  deleteProductionVideo,
   fetchProductionLibrary,
   fetchSharedSyncStatus,
   postImportProductionVideo,
   postSharedSyncPullImport,
   productionMediaUrl,
 } from "@/lib/api";
+import { ConfirmDeleteButton } from "@/components/shared/confirm-delete-button";
 import { PostingStatusEditor } from "@/components/library/posting-status-editor";
 import { FinishedBucketBadge, FinishedBucketFilter } from "@/components/library/finished-bucket-filter";
 import type { FinishedBucketFilterValue } from "@/components/library/finished-bucket-filter";
@@ -20,6 +22,7 @@ export function LibraryWorkspace() {
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
   const [videos, setVideos] = useState<ProductionLibraryVideo[]>([]);
   const [busy, setBusy] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<SharedSyncStatus | null>(null);
@@ -134,6 +137,19 @@ export function LibraryWorkspace() {
     }
     setMessage(`Imported ${result.data.video_key} — ${result.data.title}`);
     await load();
+  }
+
+  async function handleDeleteVideo(video: ProductionLibraryVideo) {
+    setDeletingId(video.id);
+    setMessage(null);
+    const result = await deleteProductionVideo(video.id);
+    setDeletingId(null);
+    if (!result.ok) {
+      setMessage(result.message);
+      return;
+    }
+    setVideos((prev) => prev.filter((row) => row.id !== video.id));
+    setMessage(`Deleted Video ${video.id} and local files.`);
   }
 
   return (
@@ -298,7 +314,7 @@ export function LibraryWorkspace() {
                     .join(" · ")}
                 </p>
               </Link>
-              <div className="mt-3 border-t border-zinc-800/80 pt-3">
+              <div className="mt-3 space-y-3 border-t border-zinc-800/80 pt-3">
                 <PostingStatusEditor
                   videoId={video.id}
                   status={video.posting_status}
@@ -306,6 +322,11 @@ export function LibraryWorkspace() {
                   onUpdated={(updated) =>
                     setVideos((prev) => prev.map((row) => (row.id === updated.id ? updated : row)))
                   }
+                />
+                <ConfirmDeleteButton
+                  busy={deletingId === video.id}
+                  hint="Delete from site and this machine?"
+                  onConfirm={() => void handleDeleteVideo(video)}
                 />
               </div>
             </article>

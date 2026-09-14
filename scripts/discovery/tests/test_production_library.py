@@ -14,6 +14,8 @@ from unittest.mock import patch
 
 from discovery.production_library import (
     check_reuse,
+    delete_video,
+    get_video,
     list_videos,
     register_video,
     update_video_posting_status,
@@ -156,6 +158,43 @@ class ProductionLibraryTests(unittest.TestCase):
                 self.assertFalse(used.exists())
                 self.assertFalse(unmarked.get("used"))
                 self.assertEqual(unmarked.get("finished_bucket"), "unused")
+
+    def test_delete_video_removes_local_files(self) -> None:
+        root = Path(self.tmp.name) / "repo-delete"
+        lib = root / "downloads" / "production_library"
+        job = root / "downloads" / "motivational" / "night-drive"
+        output = job / "output"
+        output.mkdir(parents=True)
+        lib.mkdir(parents=True)
+        src = output / "night-drive-motivation.mp4"
+        src.write_bytes(b"\x00" * 120_000)
+        (job / "audio").mkdir()
+        (job / "audio" / "speech.mp3").write_bytes(b"speech")
+        pool = root / "downloads" / "broll_pool" / "clip.mp4"
+        pool.parent.mkdir(parents=True)
+        pool.write_bytes(b"\x00" * 120_000)
+
+        with patch("discovery.production_library.project_root", return_value=root):
+            with patch("discovery.production_library.production_library_dir", return_value=lib):
+                video = register_video(
+                    self.store,
+                    title="Night Drive",
+                    slug="night-drive",
+                    speaker="Test Speaker",
+                    final_output_path=str(src.relative_to(root).as_posix()),
+                    components=[{"component_type": "visual", "local_path": str(pool.relative_to(root).as_posix())}],
+                    copy_final_to_library=True,
+                )
+                unused_dir = lib / "unused" / video["video_key"]
+                unused = unused_dir / "final.mp4"
+                self.assertTrue(unused.is_file())
+
+                result = delete_video(self.store, int(video["id"]))
+                self.assertIsNotNone(result)
+                self.assertFalse(unused_dir.exists())
+                self.assertFalse(job.exists())
+                self.assertTrue(pool.is_file())
+                self.assertIsNone(get_video(self.store, int(video["id"])))
 
 
 if __name__ == "__main__":

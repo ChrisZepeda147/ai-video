@@ -112,6 +112,7 @@ from discovery.combinations import (
 )
 from discovery.production_library import (
     check_reuse,
+    delete_video,
     get_video,
     import_uploaded_video,
     list_videos,
@@ -1058,6 +1059,7 @@ def delete_video_library_item_endpoint(
             project_id=body.get("project_id"),
             legacy_id=body.get("legacy_id"),
             slug=body.get("slug"),
+            delete_files=body.get("delete_files", True),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1162,6 +1164,19 @@ def library_video_detail_endpoint(
     if not video:
         raise HTTPException(status_code=404, detail="Production video not found")
     return video
+
+
+@app.delete("/api/library/videos/{video_id}")
+def library_delete_video_endpoint(
+    video_id: int,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    _: Annotated[None, Depends(require_internal_key)],
+    delete_files: bool = Query(True),
+):
+    result = delete_video(store, video_id, delete_files=delete_files)
+    if not result:
+        raise HTTPException(status_code=404, detail="Production video not found")
+    return {"deleted": result}
 
 
 @app.post("/api/library/videos/{video_id}/prune-components")

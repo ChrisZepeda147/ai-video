@@ -175,7 +175,7 @@ export function VideosWorkspace() {
     }
     setConfirmDeleteKey(null);
     setEditingKey(null);
-    setMessage(`Removed ${item.speaker || item.title} from Videos.`);
+    setMessage(`Deleted ${item.speaker || item.title} from site and local disk.`);
     await load();
   }
 
@@ -522,7 +522,7 @@ export function VideosWorkspace() {
                       ) : null}
                       {confirmDeleteKey === item.key ? (
                         <div className="flex flex-wrap items-center gap-2 rounded border border-red-900/60 bg-red-950/30 px-2 py-1">
-                          <span className="text-xs text-red-200">Are you sure?</span>
+                          <span className="text-xs text-red-200">Delete from site and this machine?</span>
                           <button
                             type="button"
                             disabled={busy}
@@ -532,7 +532,7 @@ export function VideosWorkspace() {
                             }}
                             className="rounded bg-red-600 px-2 py-0.5 text-xs font-medium text-white disabled:opacity-50"
                           >
-                            Yes, remove
+                            Yes, delete files
                           </button>
                           <button
                             type="button"

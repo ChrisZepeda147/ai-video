@@ -19,6 +19,7 @@ from discovery.shared_library import (
     export_stephen_after_register,
     export_stephen_existing,
     find_video_by_manifest_id,
+    forget_shared_import,
     import_all_shared_packages,
     import_all_stephen_packages,
     import_manifest,
@@ -126,6 +127,21 @@ class SharedLibraryTests(unittest.TestCase):
         self.assertEqual(first["status"], "imported")
         self.assertEqual(second["status"], "already_imported")
         self.assertEqual(first["video_id"], second["video_id"])
+
+    @patch("discovery.shared_library.project_root")
+    def test_forget_shared_import_blocks_reimport(self, mock_root) -> None:
+        mock_root.return_value = self.root
+        export_stephen_existing(self.store, root=self.root)
+        package = self.root / "shared_library" / "stephen" / self.slug
+        manifest = json.loads((package / "manifest.json").read_text(encoding="utf-8"))
+        first = import_manifest(self.store, manifest, package_dir=package, root=self.root)
+        self.assertEqual(first["status"], "imported")
+        forget_shared_import(root=self.root, slug=self.slug, manifest_id=manifest["manifest_id"])
+        self.assertFalse(package.exists())
+        # Recreate the package as auto-sync would after a git pull.
+        export_stephen_existing(self.store, root=self.root)
+        blocked = import_manifest(self.store, manifest, package_dir=package, root=self.root)
+        self.assertEqual(blocked["status"], "deleted")
 
     @patch("discovery.shared_library.project_root")
     def test_import_all_and_combination_board(self, mock_root) -> None:
