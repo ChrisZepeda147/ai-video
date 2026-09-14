@@ -208,7 +208,7 @@ def _scale_crop_filter(*, width: int, height: int, grade: bool) -> str:
     )
     if grade:
         chain += f",{DARK_LUXURY_GRADE}"
-    return chain + ",format=yuv420p"
+    return chain + ",setsar=1,format=yuv420p"
 
 
 def _source_id(clip: Path) -> str:

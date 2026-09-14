@@ -347,7 +347,7 @@ def burn_captions(
         "-i",
         str(video),
         "-vf",
-        f"ass='{escaped}'",
+        f"ass='{escaped}',setsar=1",
         "-c:v",
         "libx264",
         "-preset",
