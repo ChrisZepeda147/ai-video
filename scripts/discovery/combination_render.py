@@ -82,8 +82,8 @@ def _resolve_visual_clips_root(root: Path, pack: dict[str, Any], store) -> Path 
     if slug:
         from discovery.motivation_paths import motivation_jobs_root, resolve_job_dir
 
-    job_dir = resolve_job_dir(slug, motivation_jobs_root(root))
-    job_clips = (job_dir / "clips") if job_dir else root / "downloads" / "motivational" / slug / "clips"
+        job_dir = resolve_job_dir(slug, motivation_jobs_root(root))
+        job_clips = (job_dir / "clips") if job_dir else root / "downloads" / "motivational" / slug / "clips"
         if _clip_parts(job_clips):
             return job_clips
 
