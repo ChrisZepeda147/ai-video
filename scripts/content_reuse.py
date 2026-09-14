@@ -816,6 +816,22 @@ def find_speech_reuse(
     return hits
 
 
+def _reusable_broll_component_row(row: dict[str, Any]) -> bool:
+    """Pool segments and job clip parts stay on disk for remontage; they do not burn the YouTube id."""
+    if str(row.get("role") or "") == "speech":
+        return False
+    paths = [str(row.get("path") or ""), *(row.get("paths") or [])]
+    for raw in paths:
+        if not raw:
+            continue
+        rel = raw.replace("\\", "/")
+        if "/broll-pool/" in rel:
+            return True
+        if "/motivational/" in rel and "/clips/" in rel:
+            return True
+    return False
+
+
 def find_video_reuse(
     *,
     youtube_id: str = "",
@@ -833,6 +849,8 @@ def find_video_reuse(
     for row in catalog.videos:
         paths = [str(row.get("path") or ""), *(row.get("paths") or [])]
         if any(_ignore(item, ignore) for item in paths):
+            continue
+        if _reusable_broll_component_row(row):
             continue
         reasons: list[str] = []
         if yt and yt == row.get("youtube_id"):
@@ -855,7 +873,15 @@ def find_video_reuse(
 
 def used_youtube_ids(catalog: Catalog | None = None, root: Path | None = None) -> set[str]:
     catalog = catalog or current_catalog(root)
-    return {str(row["youtube_id"]) for row in catalog.videos if row.get("youtube_id")}
+    out: set[str] = set()
+    for row in catalog.videos:
+        yt = row.get("youtube_id")
+        if not yt or _reusable_broll_component_row(row):
+            continue
+        if str(row.get("role") or "") == "speech":
+            continue
+        out.add(str(yt))
+    return out
 
 
 SPEECH_JOB_KEYS = (
