@@ -61,7 +61,7 @@ class BrollPoolTests(unittest.TestCase):
             )
         self.assertEqual(len(taken), 1)
         self.assertTrue(taken[0].name == "bbb_part01.mp4")
-        self.assertFalse(
+        self.assertTrue(
             broll_pool.list_pool_clips(broll_pool.pool_dir_for_subject(jobs_root, subject))
         )
 
@@ -91,6 +91,7 @@ class BrollPoolTests(unittest.TestCase):
 
     def test_take_from_pool_deletes_low_fps(self) -> None:
         root = Path("broll-pool-low-fps")
+        __import__("shutil").rmtree(root, ignore_errors=True)
         jobs_root = root / "motivational"
         subject = "Porsche sports car cinematic 4k short"
         pool_dir = broll_pool.pool_dir_for_subject(jobs_root, subject)

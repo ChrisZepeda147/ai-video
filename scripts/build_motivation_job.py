@@ -1234,10 +1234,30 @@ def download_broll_candidates(
     jobs_root: Path | None = None,
     split_full_source: bool = True,
 ) -> list[str]:
-    print(f"Downloading {len(candidates)} B-roll source(s)...")
     split_parts = None if split_full_source else max_parts
     ok_ids: list[str] = []
+    to_download: list[VideoCandidate] = []
     for candidate in candidates:
+        video_id = candidate.video_id
+        existing = sorted(clips_dir.glob(f"{video_id}_part*.mp4"))
+        if existing:
+            kept = filter_broll_clip_list(
+                existing,
+                subject=subject,
+                use_vision=use_vision,
+            )
+            if kept:
+                print(f"  skip download {video_id}: {len(kept)} cached part(s) in job")
+                ok_ids.append(video_id)
+                if jobs_root and kept:
+                    broll_pool.add_gated_clips_to_pool(jobs_root, subject=subject, clips=kept)
+                continue
+        to_download.append(candidate)
+    if not to_download:
+        print("B-roll: all requested sources already cached — skip download")
+    else:
+        print(f"Downloading {len(to_download)} B-roll source(s)...")
+    for candidate in to_download:
         results = download_videos(
             [candidate],
             output_dir=clips_dir,
@@ -1401,13 +1421,44 @@ def ensure_broll_clips(
     reuse_policy: str = "allow",
     split_full_source: bool = True,
 ) -> list[str]:
-    """Fill clips_dir from pool first, then download only what is still missing."""
-    broll_pool.take_from_pool(jobs_root, subject=subject, clips_dir=clips_dir)
-    kept = filter_broll_clips(clips_dir, subject=subject, use_vision=use_vision)
+    """Job clips → shared pool cache → known IDs → YouTube search (last resort)."""
+    clips_dir.mkdir(parents=True, exist_ok=True)
+
+    def ready() -> list[Path]:
+        return filter_broll_clips(clips_dir, subject=subject, use_vision=use_vision)
+
+    kept = ready()
     if len(kept) >= needed_clips:
-        print(f"B-roll: {len(kept)} clip(s) ready (need {needed_clips}) — skip download")
+        print(f"B-roll: {len(kept)} clip(s) ready (need {needed_clips}) — using job cache")
         return broll_ids or []
+
+    missing = max(0, needed_clips - len(kept))
+    broll_pool.take_from_pool(
+        jobs_root,
+        subject=subject,
+        clips_dir=clips_dir,
+        count=missing,
+        copy=True,
+    )
+    kept = ready()
+    if len(kept) >= needed_clips:
+        print(f"B-roll: {len(kept)} clip(s) ready (need {needed_clips}) — pool cache")
+        return broll_ids or []
+
     if broll_ids:
+        missing = max(0, needed_clips - len(kept))
+        broll_pool.copy_youtube_clips(
+            jobs_root,
+            clips_dir=clips_dir,
+            youtube_ids=broll_ids,
+            subject=subject,
+            count=missing,
+        )
+        kept = ready()
+        if len(kept) >= needed_clips:
+            print(f"B-roll: {len(kept)} clip(s) ready (need {needed_clips}) — known ID cache")
+            return broll_ids
+
         candidates = discover_urls(
             [f"https://www.youtube.com/watch?v={video_id}" for video_id in broll_ids]
         )
@@ -1423,7 +1474,7 @@ def ensure_broll_clips(
                 jobs_root=jobs_root,
                 split_full_source=split_full_source,
             )
-            kept = filter_broll_clips(clips_dir, subject=subject, use_vision=use_vision)
+            kept = ready()
             if len(kept) >= needed_clips:
                 return broll_ids
     downloaded = prepare_broll(

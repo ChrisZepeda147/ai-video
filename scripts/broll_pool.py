@@ -136,8 +136,9 @@ def take_from_pool(
     subject: str,
     clips_dir: Path,
     count: int | None = None,
+    copy: bool = True,
 ) -> list[Path]:
-    """Move pooled clips into a job clips folder for the same subject."""
+    """Pull pooled clips into a job folder (copy by default — pool stays cached)."""
     clips_dir.mkdir(parents=True, exist_ok=True)
     taken: list[Path] = []
     from build_clips_montage import is_usable_fps
@@ -154,11 +155,57 @@ def take_from_pool(
             dest = clips_dir / clip.name
             if dest.exists():
                 continue
-            shutil.move(str(clip), str(dest))
+            if copy:
+                shutil.copy2(clip, dest)
+            else:
+                shutil.move(str(clip), str(dest))
             taken.append(dest)
     if taken:
-        print(f"Pooled {len(taken)} clip(s) for subject: {subject_pool_slug(subject)}")
+        mode = "Copied" if copy else "Pooled"
+        print(f"{mode} {len(taken)} clip(s) for subject: {subject_pool_slug(subject)}")
     return taken
+
+
+def _youtube_id_from_clip_name(name: str) -> str:
+    if "_part" in name:
+        return name.split("_part", 1)[0]
+    return ""
+
+
+def copy_youtube_clips(
+    jobs_root: Path,
+    *,
+    clips_dir: Path,
+    youtube_ids: list[str],
+    subject: str,
+    count: int | None = None,
+) -> list[Path]:
+    """Copy cached pool parts for specific YouTube IDs (no re-download)."""
+    clips_dir.mkdir(parents=True, exist_ok=True)
+    wanted = {item.strip() for item in youtube_ids if item and item.strip()}
+    if not wanted:
+        return []
+    copied: list[Path] = []
+    from build_clips_montage import is_usable_fps
+
+    for pool_dir in find_matching_pools(jobs_root, subject):
+        for clip in list_pool_clips(pool_dir):
+            if count is not None and len(copied) >= count:
+                return copied
+            yt_id = _youtube_id_from_clip_name(clip.name)
+            if yt_id not in wanted:
+                continue
+            fps = _clip_fps(clip)
+            if not is_usable_fps(fps):
+                continue
+            dest = clips_dir / clip.name
+            if dest.exists():
+                continue
+            shutil.copy2(clip, dest)
+            copied.append(dest)
+    if copied:
+        print(f"Cached {len(copied)} clip(s) from pool for known B-roll IDs")
+    return copied
 
 
 def add_gated_clips_to_pool(
