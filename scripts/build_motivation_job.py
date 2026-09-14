@@ -36,6 +36,7 @@ from build_clips_montage import (
     build_montage,
     drop_low_fps_clips,
     probe_duration,
+    remux_speech_over_video,
     segment_length_for_duration,
     unique_clips_required,
 )
@@ -528,13 +529,53 @@ def shift_json3(src: Path, dest: Path, *, start: float, duration: float) -> None
     shifted: list[dict[str, Any]] = []
     for event in data.get("events") or []:
         t0 = float(event.get("tStartMs") or 0)
-        if t0 > end_ms or t0 + 4000 < start_ms:
+        dur_ms = float(event.get("dDurationMs") or 0)
+        if t0 >= end_ms or t0 + dur_ms <= start_ms:
             continue
         row = dict(event)
-        row["tStartMs"] = t0 - start_ms
+        rel_start = max(t0, start_ms)
+        row["tStartMs"] = rel_start - start_ms
+        visible_end = min(t0 + dur_ms, end_ms)
+        row["dDurationMs"] = max(0.0, visible_end - rel_start)
+        if row["dDurationMs"] <= 0:
+            continue
         shifted.append(row)
     data["events"] = shifted
     dest.write_text(json.dumps(data), encoding="utf-8")
+
+
+def extend_excerpt_duration(
+    captions: Path,
+    *,
+    start: float,
+    duration: float,
+    max_seconds: float,
+    source_duration: float = 0.0,
+) -> float:
+    """Include the full json3 cue for the last word so speech does not end mid-phrase."""
+    if captions.suffix.lower() != ".json3":
+        return duration
+    words = json3_word_times(captions)
+    if not words:
+        return duration
+    window_end = start + duration
+    last_index: int | None = None
+    for index, (when, _text) in enumerate(words):
+        if when + 0.02 < start:
+            continue
+        if when <= window_end + 0.05:
+            last_index = index
+        elif when > window_end + 0.05:
+            break
+    if last_index is None:
+        return duration
+    tail = _speech_tail_after_word(words, last_index, captions=captions)
+    needed = words[last_index][0] + tail + 0.15 - start
+    needed = max(duration, needed)
+    needed = min(needed, max_seconds)
+    if source_duration > 0:
+        needed = min(needed, max(0.2, source_duration - start))
+    return needed
 
 
 def trim_audio(
@@ -938,6 +979,17 @@ def prepare_speech(
             min_seconds=min_seconds,
             max_seconds=max_seconds,
             avoid_ranges=avoid_ranges,
+        )
+        try:
+            source_duration = probe_duration(source_mp3)
+        except (subprocess.CalledProcessError, ValueError):
+            source_duration = 0.0
+        duration = extend_excerpt_duration(
+            captions,
+            start=start,
+            duration=duration,
+            max_seconds=max_seconds,
+            source_duration=source_duration,
         )
         excerpt_text = captions_text(captions, start=start, duration=duration)
         hits = content_reuse.find_speech_reuse(
@@ -1410,10 +1462,11 @@ def render_job(
     print(f"  montage used {len(used_clips)} unique clip file(s)")
     caption_label = "phrase" if caption_mode == "phrase" else "word"
     print(f"Burning {caption_label} captions...")
+    captioned = output.with_suffix(".captioned.mp4")
     burn_captions(
         temp_output,
         captions,
-        output,
+        captioned,
         width=1080,
         height=1920,
         audio_start=0.0,
@@ -1422,6 +1475,9 @@ def render_job(
         hook_text=hook_text,
     )
     temp_output.unlink(missing_ok=True)
+    remux_speech_over_video(captioned, audio, output, audio_start=0.0)
+    captioned.unlink(missing_ok=True)
+    duration = probe_duration(output)
     if quality_gate:
         from discovery.render_quality_gate import check_render_quality
 

@@ -561,14 +561,15 @@ def _mux_audio(
     audio_start: float,
     audio_duration: float | None,
 ) -> None:
-    video_dur = probe_duration(video)
-    target = video_dur
+    """Speech is the master clock — never trim audio to match a short video."""
+    speech_dur = max(0.0, probe_duration(audio) - max(0.0, audio_start))
     if audio_duration is not None:
-        target = max(target, float(audio_duration))
-    filt = (
-        f"[1:a]atrim=duration={target:.3f},asetpts=PTS-STARTPTS,"
-        f"apad=whole_dur={target:.3f}[aout]"
-    )
+        speech_dur = max(speech_dur, float(audio_duration))
+    video_dur = probe_duration(video)
+    if video_dur + 0.08 < speech_dur:
+        padded = output.with_suffix(".padded.mp4")
+        _pad_video_to_duration(video, padded, target_duration=speech_dur)
+        video = padded
     cmd = [
         "ffmpeg",
         "-y",
@@ -578,25 +579,40 @@ def _mux_audio(
         str(audio_start),
         "-i",
         str(audio),
-        "-filter_complex",
-        filt,
         "-map",
         "0:v:0",
         "-map",
-        "[aout]",
+        "1:a:0",
         "-c:v",
         "copy",
         "-c:a",
         "aac",
         "-b:a",
         "192k",
-        "-t",
-        str(target),
         "-movflags",
         "+faststart",
         str(output),
     ]
     subprocess.run(cmd, check=True, capture_output=True)
+    if video != output and video.name.endswith(".padded.mp4"):
+        video.unlink(missing_ok=True)
+
+
+def remux_speech_over_video(
+    video: Path,
+    speech: Path,
+    output: Path,
+    *,
+    audio_start: float = 0.0,
+) -> None:
+    """After caption re-encode, reattach full speech.mp3 so audio never ends early."""
+    _mux_audio(
+        video,
+        speech,
+        output,
+        audio_start=audio_start,
+        audio_duration=None,
+    )
 
 
 def _source_needed(output_duration: float, playback_speed: float) -> float:
