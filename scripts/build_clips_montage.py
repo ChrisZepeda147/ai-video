@@ -675,6 +675,20 @@ def _pick_opener_window(
     from broll_frame_gate import wants_vehicle
 
     if not segment_gate:
+        if wants_vehicle(subject):
+            ranked = sorted(
+                picker.unused_clips(exclude),
+                key=lambda item: probe_duration(item),
+                reverse=True,
+            )
+            if not ranked:
+                raise RuntimeError("No B-roll clip left for vehicle opener.")
+            clip = ranked[0]
+            picker.consume(clip)
+            hold = min(source_needed, probe_duration(clip))
+            if hold <= 0.05:
+                raise RuntimeError(f"Clip too short for opener: {clip.name}")
+            return clip, 0.0, hold
         clip = picker.pick(exclude=exclude)
         picked = _random_window(clip, source_needed=source_needed, rng=rng)
         if not picked:
