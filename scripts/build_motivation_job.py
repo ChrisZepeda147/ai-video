@@ -2142,6 +2142,7 @@ def rerender_existing_job(
     frame_gate: bool = True,
     segment_gate: bool = True,
     cursor_review: bool = False,
+    caption_mode: str | None = None,
 ) -> int:
     job_dir = resolve_job_dir(slug, jobs_root)
     if not job_dir:
@@ -2186,6 +2187,9 @@ def rerender_existing_job(
         write_job_json(job_path, payload)
     broll_ids = [str(item) for item in (payload.get("broll_ids") or []) if item]
     duration = float(payload.get("audio_duration") or probe_duration(audio))
+    if caption_mode:
+        payload["caption_mode"] = caption_mode
+        write_job_json(job_path, payload)
     segment_length = resolve_segment_length(duration, segment_length)
     subject = str(payload.get("subject") or payload.get("broll_query") or slug)
     if not broll_ids:
@@ -2241,7 +2245,7 @@ def rerender_existing_job(
             playback_speed=float(payload.get("playback_speed") or playback_speed),
             use_vision=use_vision,
             driven_pacing=bool(payload.get("driven_pacing", True)),
-            caption_mode=str(payload.get("caption_mode") or "phrase"),
+            caption_mode=str(caption_mode or payload.get("caption_mode") or "phrase"),
             hook_text=str(payload.get("hook") or "") or None,
             quality_gate=quality_gate,
             segment_gate=segment_gate,
@@ -2467,6 +2471,7 @@ def main() -> int:
             frame_gate=gate_flags.frame_gate,
             segment_gate=gate_flags.segment_gate,
             cursor_review=gate_flags.cursor_review,
+            caption_mode="word" if args.classic_captions else None,
         )
 
     if args.speech_review_only:
