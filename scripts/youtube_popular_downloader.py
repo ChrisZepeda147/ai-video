@@ -594,12 +594,13 @@ def split_into_parts(
     aspect_ratio: str,
     max_height: int,
     start_offset: float = 0.0,
+    require_usable_fps: bool = True,
 ) -> list[dict[str, Any]]:
     try:
         source_fps = probe_fps(source)
     except (OSError, ValueError, subprocess.CalledProcessError):
         source_fps = None
-    if source_fps is not None and not is_usable_fps(source_fps):
+    if require_usable_fps and source_fps is not None and not is_usable_fps(source_fps):
         print(f"    drop {source.name}: {source_fps:.1f} fps")
         if not keep_source and source.exists():
             source.unlink()
@@ -659,6 +660,7 @@ def filter_unwanted(
     background_gameplay_only: bool,
     min_views: int,
     min_duration: float,
+    max_duration: float | None = None,
     quiet: bool = False,
 ) -> list[VideoCandidate]:
     kept: list[VideoCandidate] = []
@@ -670,6 +672,7 @@ def filter_unwanted(
     skipped_sim = 0
     skipped_views = 0
     skipped_duration = 0
+    skipped_too_long = 0
     skipped_other = 0
     for video in candidates:
         if exclude_music and is_music_video(video):
@@ -696,6 +699,13 @@ def filter_unwanted(
         if video.duration_seconds is not None and video.duration_seconds < min_duration:
             skipped_duration += 1
             continue
+        if (
+            max_duration is not None
+            and video.duration_seconds is not None
+            and video.duration_seconds > max_duration
+        ):
+            skipped_too_long += 1
+            continue
         if background_gameplay_only and background_gameplay_score(video) < 4:
             skipped_other += 1
             continue
@@ -721,6 +731,8 @@ def filter_unwanted(
         parts.append(f"{skipped_views} low-view")
     if skipped_duration:
         parts.append(f"{skipped_duration} too-short")
+    if skipped_too_long:
+        parts.append(f"{skipped_too_long} too-long")
     if skipped_other:
         parts.append(f"{skipped_other} non-background gameplay")
     if parts:
@@ -757,6 +769,7 @@ def download_videos(
     quiet: bool = False,
     id_only_filenames: bool = False,
     start_offset: float = 0.0,
+    require_usable_fps: bool = True,
 ) -> list[dict[str, Any]]:
     _configure_stdout()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -767,13 +780,22 @@ def download_videos(
         name_tpl = "%(id)s.%(ext)s" if id_only_filenames else "%(id)s_%(title)s.%(ext)s"
         outtmpl = str(output_dir / name_tpl)
         postprocessors = [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}]
-    else:
+    elif require_usable_fps:
         min_fps = int(MIN_USABLE_FPS)
         format_selector = (
             f"bestvideo[fps>={min_fps}][height<={max_height}]+bestaudio/"
             f"bestvideo[fps>={min_fps}]+bestaudio/"
             f"best[fps>={min_fps}][height<={max_height}]/"
             f"best[fps>={min_fps}]"
+        )
+        outtmpl = str(output_dir / "%(id)s_source.%(ext)s")
+        postprocessors = []
+    else:
+        format_selector = (
+            f"bestvideo[height<={max_height}]+bestaudio/"
+            f"bestvideo+bestaudio/"
+            f"best[height<={max_height}]/"
+            f"best"
         )
         outtmpl = str(output_dir / "%(id)s_source.%(ext)s")
         postprocessors = []
@@ -883,6 +905,7 @@ def download_videos(
                         aspect_ratio=aspect_ratio,
                         max_height=max_height,
                         start_offset=start_offset,
+                        require_usable_fps=require_usable_fps,
                     )
                     record["parts"] = parts
                     record["status"] = "ok" if parts else "error"
@@ -975,6 +998,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum source video length in seconds (default: 60)",
     )
     common.add_argument(
+        "--max-duration",
+        type=int,
+        default=None,
+        help="Skip sources longer than this many seconds (e.g. 900 = 15 min)",
+    )
+    common.add_argument(
         "--clip-length",
         type=int,
         default=120,
@@ -1035,6 +1064,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--any-topic",
         action="store_true",
         help="Skip background-gameplay title filter (car B-roll, nature, etc.)",
+    )
+    common.add_argument(
+        "--no-fps-gate",
+        action="store_true",
+        help="Download and split any fps (skip 50fps+ drop). Use when you will vet clips yourself.",
     )
 
     trending = sub.add_parser(
@@ -1162,6 +1196,7 @@ def main() -> int:
             background_gameplay_only=background_only,
             min_views=args.min_views,
             min_duration=float(args.min_duration),
+            max_duration=float(args.max_duration) if args.max_duration is not None else None,
         )
     else:
         candidates = candidates[: args.limit]
@@ -1258,6 +1293,7 @@ def main() -> int:
         split_parts=split_parts,
         keep_source=args.keep_source,
         aspect_ratio=args.aspect_ratio,
+        require_usable_fps=not args.no_fps_gate,
     )
     manifest_path = write_manifest(output_dir, args.mode, args, results)
     for record in results:
