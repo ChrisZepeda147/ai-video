@@ -120,19 +120,32 @@ function Get-AgentToolBins {
     return $bins | Select-Object -Unique
 }
 
+function Test-PathListContainsDir {
+    param([string]$PathList, [string]$Dir)
+    if (-not $Dir) { return $false }
+    $want = $Dir.TrimEnd('\')
+    foreach ($part in @($PathList -split ';')) {
+        if ($part -and ($part.TrimEnd('\') -ieq $want)) { return $true }
+    }
+    return $false
+}
+
 function Import-AgentPythonPath {
     param(
         [string]$Root,
-        [switch]$Persist
+        [switch]$Persist,
+        [switch]$NoPersist
     )
     Import-ApiEnvFile -Root $Root
     $bins = @(Get-AgentToolBins)
     foreach ($bin in $bins) {
         $env:Path = "$bin;" + (($env:Path -split ';' | Where-Object { $_ -and ($_ -ne $bin) }) -join ';')
     }
-    if (-not $Persist) { return $bins }
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     if (-not $userPath) { $userPath = "" }
+    $missingFromUser = @($bins | Where-Object { -not (Test-PathListContainsDir -PathList $userPath -Dir $_) })
+    $doPersist = (-not $NoPersist) -and ($Persist -or ($missingFromUser.Count -gt 0))
+    if (-not $doPersist) { return $bins }
     $parts = @($bins) + @($userPath -split ';' | Where-Object { $_ -and ($bins -notcontains $_) })
     [Environment]::SetEnvironmentVariable('Path', ($parts -join ';'), 'User')
     if ($env:AI_VIDEO_PYTHON) {

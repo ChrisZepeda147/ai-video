@@ -7,20 +7,20 @@ alwaysApply: true
 
 Windows Store stub (`WindowsApps\python.exe`) is not Python. Real exe is `AI_VIDEO_PYTHON` in `scripts/.env`.
 
-First shell of every session, before any `python` call:
+`powershell -File scripts/load_agent_path.ps1` runs a **child** process. PATH dies when that child exits. Then `python` fails in the parent. Happens every time if you chain with `;`.
+
+**Every python call — same process, one line:**
 
 ```powershell
-powershell -File scripts/load_agent_path.ps1
+. .\scripts\load_agent_path.ps1; python scripts/foo.py
 ```
 
-Then `python` works. Do not hunt interpreters. Do not announce "python missing from PATH".
+Do not hunt interpreters. Do not announce "python missing from PATH".
 
 ```
-# ❌ BAD
-python scripts/foo.py
-# fails, then search PATH, then retry
+# ❌ BAD — child PATH dies, next token fails
+powershell -File scripts/load_agent_path.ps1; python scripts/foo.py
 
-# ✅ GOOD
-powershell -File scripts/load_agent_path.ps1
-python scripts/foo.py
+# ✅ GOOD — dot-source, then python in same shell
+. .\scripts\load_agent_path.ps1; python scripts/foo.py
 ```
