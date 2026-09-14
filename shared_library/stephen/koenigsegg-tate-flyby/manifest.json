@@ -1,0 +1,52 @@
+{
+  "manifest_version": 1,
+  "manifest_id": "stephen:koenigsegg-tate-flyby:39561f20c59232fb",
+  "owner": "stephen",
+  "slug": "koenigsegg-tate-flyby",
+  "title": "30 Minutes of Andrew Tate That Will FIX Your Life. (NO MUSIC)",
+  "speaker": "Andrew Tate",
+  "source_url": "https://www.youtube.com/watch?v=DJuQu8X2s_I",
+  "source_external_id": "DJuQu8X2s_I",
+  "source_start_sec": 962.4,
+  "source_end_sec": null,
+  "transcript": "and you don't feel panic to get rich? And you're just fine with that and you're going to come home, took the bus today. Bro, born to lose. Born to lose. If that won't motivate you, especially as my",
+  "transcript_hash": "f0f8f1c681de81f3420ddf872a2c94dd3bd5aae91f198320a34f04d4a5eb63fa",
+  "duration_sec": 16.0,
+  "topic": null,
+  "visual_style": "Koenigsegg Jesko Absolut Accelerations Fly-By BRUTAL SOUNDS",
+  "visual_category": "Custom",
+  "broll_ids": [],
+  "parent_manifest_id": null,
+  "version": 1,
+  "version_label": null,
+  "change_summary": null,
+  "paths": {
+    "final": "final.mp4",
+    "audio": "audio/speech.mp3",
+    "caption": "captions/subs.en.json3",
+    "visuals": [
+      "visuals/1xYVJ5norn8_part01.mp4",
+      "visuals/1xYVJ5norn8_part02.mp4",
+      "visuals/1xYVJ5norn8_part03.mp4",
+      "visuals/1xYVJ5norn8_part12.mp4",
+      "visuals/aPxYqlgOuWo_part07.mp4",
+      "visuals/aPxYqlgOuWo_part13.mp4"
+    ],
+    "transcript": "transcript.txt"
+  },
+  "hashes": {
+    "final": "39561f20c59232fb1b1f333318fec33f5d4546d7a7feaf00a93c5f9bff678e5b",
+    "audio": "86d767aee797d6c15415aa285952feac8bcd89bba0deec15be07680002cd430a",
+    "caption": "ccd596a165ee4a6540f47d396f80e7f5019f3b3bc410bb9a276b8bcb0eba3495",
+    "visuals/1xYVJ5norn8_part01.mp4": "2b731cc8fbbcdf0388462ec0348cd9239e3890a6f80ef8a017306a4e0b219539",
+    "visuals/1xYVJ5norn8_part02.mp4": "c5eb46a77a42093d102c9e66eac0142e81332339eae4bdaa85573771abde9c22",
+    "visuals/1xYVJ5norn8_part03.mp4": "33055901a68cf4fb6fc64f7acf7cb13bdeef966096719ab4596736d82caf1a8f",
+    "visuals/1xYVJ5norn8_part12.mp4": "bcfc0b1b36e1ecc9370aa30a9737700ba0b7c1b2e8ba25a950cda791a2c4b18d",
+    "visuals/aPxYqlgOuWo_part07.mp4": "810213526657508f7f5c747c0cdffbe18b2af881fd26353c912378a9df772395",
+    "visuals/aPxYqlgOuWo_part13.mp4": "8de1db4ff5c668e8f253fec3e986c912768da3ec85b8515b8bcb002759b2f375"
+  },
+  "pipeline": "build_motivation_job",
+  "created_at": "2026-09-14T03:19:37+00:00",
+  "updated_at": "2026-09-14T03:19:37+00:00",
+  "exported_at": "2026-09-14T03:19:37+00:00"
+}
