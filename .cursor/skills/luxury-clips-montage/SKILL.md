@@ -57,7 +57,7 @@ python scripts/content_reuse.py reset-speeches
 
 Clips play at **source speed** by default (`--playback-speed 1`). Use `0.80` only when you want slower motion.
 
-Drop B-roll under 50fps. Delete it. Do not keep 24p/25p/30p. 4K is optional — 1080p/1440p is fine. Output is 60fps.
+Any readable fps is allowed (24p/25p/30p included). Drop only unreadable clips. 4K is optional — 1080p/1440p is fine. Output is 60fps.
 
 ## Subject in frame
 

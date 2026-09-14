@@ -46,7 +46,7 @@ class BrollFpsTests(unittest.TestCase):
         )
         self.assertEqual(fps, 60.0)
 
-    def test_pick_skips_known_low_fps_without_probe(self) -> None:
+    def test_pick_keeps_cinema_rate_and_ranks_high_fps_first(self) -> None:
         kept = pick_usable_fps_candidates(
             [
                 _candidate("low", "Aventador cinematic 4K", fps=24.0, views=9_000_000),
@@ -55,7 +55,7 @@ class BrollFpsTests(unittest.TestCase):
             limit=2,
             probe=False,
         )
-        self.assertEqual([item.video_id for item in kept], ["good"])
+        self.assertEqual([item.video_id for item in kept], ["good", "low"])
 
 
 if __name__ == "__main__":

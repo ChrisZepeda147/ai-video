@@ -1068,7 +1068,7 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument(
         "--no-fps-gate",
         action="store_true",
-        help="Download and split any fps (skip 50fps+ drop). Use when you will vet clips yourself.",
+        help="Download and split any fps (skip the readable-fps probe). Use when you will vet clips yourself.",
     )
 
     trending = sub.add_parser(

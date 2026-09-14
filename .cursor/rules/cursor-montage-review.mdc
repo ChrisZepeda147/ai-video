@@ -11,7 +11,7 @@ python scripts/build_motivation_job.py `
   --reuse-policy allow
 ```
 
-Writes `cursor-review/` (SPEECH.md + REVIEW.md). Sequential speech excerpt + ranked options in SPEECH.md. Still **50fps** + speech reuse fingerprint.
+Writes `cursor-review/` (SPEECH.md + REVIEW.md). Sequential speech excerpt + ranked options in SPEECH.md. Speech reuse fingerprint still applies.
 
 Legacy automation: add `--code-gates`.
 

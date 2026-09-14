@@ -2377,7 +2377,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-frame-gate",
         action="store_true",
-        help="Skip B-roll scan/trim gate (50fps still required). Agent reviews visuals.",
+        help="Skip B-roll scan/trim gate. Agent reviews visuals.",
     )
     parser.add_argument(
         "--no-segment-gate",

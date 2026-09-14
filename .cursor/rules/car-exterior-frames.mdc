@@ -11,7 +11,7 @@ Applies when B-roll / subject is a **car** (Porsche, Ferrari, GT3, coupe, etc.).
 
 ## When vetting frames
 
-Every kept frame is the **outside** of the car. Drop cabin, cockpit, steering wheel, dashboard, seats, interior POV, and windshield-from-inside.
+Every kept clip and frame is the **outside** of the car. Drop cabin, cockpit, steering wheel, dashboard, seats, interior POV, and windshield-from-inside. Do not keep a clip that is mostly interior. Frame rate + resolution: see `broll-clip-quality.mdc` (any readable fps, 4K optional).
 
 ```
 # ❌ BAD — inside

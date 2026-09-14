@@ -276,7 +276,7 @@ def stash_unused_clips(
 
 
 def purge_low_fps_clips(jobs_root: Path) -> list[Path]:
-    """Delete pooled B-roll under 50fps."""
+    """Delete pooled B-roll with no readable frame rate."""
     from build_clips_montage import is_usable_fps
 
     root = pool_root(jobs_root)
