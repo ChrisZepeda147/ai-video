@@ -319,6 +319,21 @@ def _window_in_span(
     return start + rng.uniform(0.0, slack), needed
 
 
+def _random_window(
+    clip: Path,
+    *,
+    source_needed: float,
+    rng: random.Random,
+) -> tuple[float, float] | None:
+    duration = probe_duration(clip)
+    hold = min(source_needed, duration)
+    if hold <= 0.05:
+        return None
+    max_start = max(0.0, duration - hold)
+    start = rng.uniform(0.0, max_start) if max_start > 0.05 else 0.0
+    return start, hold
+
+
 def _pick_segment(
     clip: Path,
     *,
@@ -329,9 +344,12 @@ def _pick_segment(
     strict: bool = False,
     use_vision: bool = False,
     opener: bool = False,
+    segment_gate: bool = True,
 ) -> tuple[float, float] | None:
     duration = probe_duration(clip)
     needed = source_needed if source_needed is not None else segment_length
+    if not segment_gate:
+        return _random_window(clip, source_needed=needed, rng=rng)
     samples = scan_clip_local(clip, duration=duration, subject=subject)
     min_length = min(needed, duration) if opener else min(needed, duration, 2.5)
     spans = clean_spans(samples, min_length=min_length)
@@ -651,9 +669,17 @@ def _pick_opener_window(
     source_needed: float,
     use_vision: bool,
     exclude: set[Path] | None = None,
+    segment_gate: bool = True,
 ) -> tuple[Path, float, float]:
     """First beat: scan unused clips until one has a full-exterior opener."""
     from broll_frame_gate import wants_vehicle
+
+    if not segment_gate:
+        clip = picker.pick(exclude=exclude)
+        picked = _random_window(clip, source_needed=source_needed, rng=rng)
+        if not picked:
+            raise RuntimeError(f"Clip too short for opener: {clip.name}")
+        return clip, picked[0], picked[1]
 
     if not wants_vehicle(subject):
         return _pick_passing_window(
@@ -666,6 +692,7 @@ def _pick_opener_window(
             use_vision=use_vision,
             exclude=exclude,
             opener=False,
+            segment_gate=segment_gate,
         )
     ranked = sorted(
         picker.unused_clips(exclude),
@@ -682,6 +709,7 @@ def _pick_opener_window(
             strict=True,
             use_vision=use_vision,
             opener=True,
+            segment_gate=segment_gate,
         )
         if picked:
             picker.consume(clip)
@@ -705,6 +733,7 @@ def _pick_passing_window(
     use_vision: bool,
     exclude: set[Path] | None = None,
     opener: bool = False,
+    segment_gate: bool = True,
 ) -> tuple[Path, float, float]:
     if opener:
         return _pick_opener_window(
@@ -715,7 +744,14 @@ def _pick_passing_window(
             source_needed=source_needed,
             use_vision=use_vision,
             exclude=exclude,
+            segment_gate=segment_gate,
         )
+    if not segment_gate:
+        clip = picker.pick(exclude=exclude)
+        picked = _random_window(clip, source_needed=source_needed, rng=rng)
+        if not picked:
+            raise RuntimeError(f"Clip too short: {clip.name}")
+        return clip, picked[0], picked[1]
     tried: set[Path] = set(exclude or ())
     attempts = 0
     limit = max(len(picker.all_clips) * 2, 6)
@@ -731,6 +767,7 @@ def _pick_passing_window(
             source_needed=source_needed,
             strict=strict,
             use_vision=use_vision,
+            segment_gate=segment_gate,
         )
         attempts += 1
         if picked:
@@ -751,6 +788,7 @@ def _pick_passing_window(
             source_needed=relaxed,
             strict=False,
             use_vision=use_vision,
+            segment_gate=segment_gate,
         )
         if picked:
             picker.consume(clip)
@@ -774,6 +812,7 @@ def build_silent_montage(
     playback_speed: float = 1.0,
     use_vision: bool = True,
     driven_pacing: bool = False,
+    segment_gate: bool = True,
 ) -> set[Path]:
     """Stitch shuffled B-roll into a fixed-length silent video."""
     clips = drop_low_fps_clips(sorted(clips_dir.glob("*.mp4")), delete=True)
@@ -843,6 +882,7 @@ def build_silent_montage(
                     strict=strict,
                     use_vision=vision,
                     opener=segment_index == 0,
+                    segment_gate=segment_gate,
                 )
                 out_len = min(this_duration, source_len / max(playback_speed, 0.05))
                 segment_path = tmp_dir / f"seg_{segment_index:04d}.mp4"
@@ -867,6 +907,7 @@ def build_silent_montage(
                     source_needed=needed,
                     strict=strict,
                     use_vision=vision,
+                    segment_gate=segment_gate,
                 )
                 right, right_start, right_len = _pick_passing_window(
                     picker,
@@ -877,6 +918,7 @@ def build_silent_montage(
                     strict=strict,
                     use_vision=vision,
                     exclude={left},
+                    segment_gate=segment_gate,
                 )
                 segment_path = tmp_dir / f"seg_{segment_index:04d}.mp4"
                 _export_split_segment(
@@ -921,6 +963,7 @@ def build_montage(
     use_vision: bool = True,
     include_audio: bool = True,
     driven_pacing: bool = False,
+    segment_gate: bool = True,
 ) -> set[Path]:
     clips = drop_low_fps_clips(sorted(clips_dir.glob("*.mp4")), delete=True)
     if not clips:
@@ -997,6 +1040,7 @@ def build_montage(
                     strict=strict,
                     use_vision=vision,
                     opener=segment_index == 0,
+                    segment_gate=segment_gate,
                 )
                 out_len = min(this_duration, source_len / max(playback_speed, 0.05))
                 segment_path = tmp_dir / f"seg_{segment_index:04d}.mp4"
@@ -1021,6 +1065,7 @@ def build_montage(
                     source_needed=needed,
                     strict=strict,
                     use_vision=vision,
+                    segment_gate=segment_gate,
                 )
                 right, right_start, right_len = _pick_passing_window(
                     picker,
@@ -1031,6 +1076,7 @@ def build_montage(
                     strict=strict,
                     use_vision=vision,
                     exclude={left},
+                    segment_gate=segment_gate,
                 )
                 segment_path = tmp_dir / f"seg_{segment_index:04d}.mp4"
                 _export_split_segment(

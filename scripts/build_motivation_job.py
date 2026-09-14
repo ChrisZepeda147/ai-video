@@ -14,6 +14,7 @@ import math
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -71,6 +72,57 @@ from youtube_popular_downloader import (
 
 KEEP_AUDIO = frozenset({"speech.mp3", "subs.en.json3"})
 KEEP_TOP = frozenset({"url.txt", "job.json", "config.json"})
+
+
+@dataclass(frozen=True)
+class MontageGateFlags:
+    use_vision: bool
+    quality_gate: bool
+    frame_gate: bool
+    segment_gate: bool
+    cursor_review: bool
+    speech_vet: bool
+
+
+def resolve_montage_gate_flags(args: argparse.Namespace) -> MontageGateFlags:
+    """--cursor-review: agent reads cursor-review/ instead of code gates."""
+    cursor = bool(getattr(args, "cursor_review", False))
+    speech_vet = cursor or bool(getattr(args, "no_speech_score", False))
+    return MontageGateFlags(
+        use_vision=not args.no_vision and not cursor,
+        quality_gate=not args.skip_quality_gate and not cursor,
+        frame_gate=not getattr(args, "no_frame_gate", False) and not cursor,
+        segment_gate=not getattr(args, "no_segment_gate", False) and not cursor,
+        cursor_review=cursor,
+        speech_vet=speech_vet,
+    )
+
+
+class SpeechReviewReady(Exception):
+    """Speech downloaded; cursor-review/SPEECH.md written — stop before render."""
+
+    def __init__(self, review_path: Path) -> None:
+        self.review_path = review_path
+        super().__init__(f"Speech review ready: {review_path}")
+
+
+def emit_cursor_review_pack(
+    *,
+    job_dir: Path,
+    output: Path,
+    subject: str,
+) -> None:
+    from prepare_cursor_montage_review import write_review_pack
+
+    pack = write_review_pack(
+        out_dir=job_dir / "cursor-review",
+        job_dir=job_dir,
+        video=output,
+        clips_dir=job_dir / "clips",
+        subject=subject,
+    )
+    print(f"Cursor review pack: {pack / 'REVIEW.md'}")
+    print("Open REVIEW.md + final/*.png in chat before marking ship.")
 
 
 def _preview(text: str, limit: int = 120) -> str:
@@ -629,6 +681,120 @@ def _pick_window_from_words(
         return chosen[1], chosen[2]
     scored.sort(key=lambda item: (-item[0], item[1]))
     return scored[0][1], scored[0][2]
+
+
+@dataclass(frozen=True)
+class SpeechExcerptOption:
+    score: float
+    start: float
+    duration: float
+    text: str
+
+
+def ranked_speech_excerpts(
+    captions: Path,
+    *,
+    min_seconds: float,
+    max_seconds: float,
+    avoid_ranges: list[tuple[float, float]] | None = None,
+    limit: int = 10,
+) -> list[SpeechExcerptOption]:
+    if captions.suffix.lower() != ".json3":
+        return []
+    words = json3_word_times(captions)
+    if not words:
+        return []
+    scored = _scored_speech_windows(
+        words,
+        min_seconds=min_seconds,
+        max_seconds=max_seconds,
+        captions=captions,
+        avoid_ranges=avoid_ranges,
+    )
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    options: list[SpeechExcerptOption] = []
+    seen: set[str] = set()
+    for score, start, duration in scored:
+        text = captions_text(captions, start=start, duration=duration).strip()
+        if len(text) < 12:
+            continue
+        key = text[:120]
+        if key in seen:
+            continue
+        seen.add(key)
+        options.append(
+            SpeechExcerptOption(
+                score=round(score, 1),
+                start=start,
+                duration=duration,
+                text=text,
+            )
+        )
+        if len(options) >= limit:
+            break
+    return options
+
+
+def resolve_speech_window(
+    captions: Path,
+    *,
+    min_seconds: float,
+    max_seconds: float,
+    avoid_ranges: list[tuple[float, float]] | None = None,
+    speech_start: float | None = None,
+    speech_duration: float | None = None,
+    speech_option: int | None = None,
+    agent_vet: bool = False,
+) -> tuple[float, float, int | None, str]:
+    """Return start, duration, 1-based option index if used, pick method label."""
+    if speech_start is not None:
+        duration = speech_duration if speech_duration is not None else max_seconds
+        return speech_start, duration, None, "cli-speech-start"
+
+    if speech_option is not None:
+        options = ranked_speech_excerpts(
+            captions,
+            min_seconds=min_seconds,
+            max_seconds=max_seconds,
+            avoid_ranges=avoid_ranges,
+        )
+        if not options:
+            raise ValueError("No speech excerpt options in captions.")
+        index = speech_option - 1
+        if index < 0 or index >= len(options):
+            raise ValueError(
+                f"--speech-option {speech_option} out of range (1–{len(options)})."
+            )
+        chosen = options[index]
+        return chosen.start, chosen.duration, speech_option, "cli-speech-option"
+
+    if agent_vet:
+        words = json3_word_times(captions)
+        picked = _pick_window_from_words(
+            words,
+            min_seconds=min_seconds,
+            max_seconds=max_seconds,
+            captions=captions,
+            avoid_ranges=avoid_ranges,
+            sequential=True,
+        )
+        if picked:
+            return picked[0], picked[1], None, "agent-sequential"
+        start, duration = pick_speech_excerpt(
+            captions,
+            min_seconds=min_seconds,
+            max_seconds=max_seconds,
+            avoid_ranges=avoid_ranges,
+        )
+        return start, duration, None, "agent-fallback"
+
+    start, duration = pick_speech_excerpt(
+        captions,
+        min_seconds=min_seconds,
+        max_seconds=max_seconds,
+        avoid_ranges=avoid_ranges,
+    )
+    return start, duration, None, "code-best-score"
 
 
 def pick_speech_excerpt(
@@ -1404,6 +1570,7 @@ def prepare_broll(
     start_offset: float = 0.0,
     subject: str = "",
     use_vision: bool = True,
+    frame_gate: bool = True,
     reuse_policy: str = "allow",
     jobs_root: Path | None = None,
     split_full_source: bool = True,
@@ -1460,6 +1627,7 @@ def prepare_broll(
         start_offset=start_offset,
         subject=subject or query,
         use_vision=use_vision,
+        frame_gate=frame_gate,
         jobs_root=jobs_root,
         split_full_source=split_full_source,
     )
@@ -1474,6 +1642,7 @@ def download_broll_candidates(
     start_offset: float = 0.0,
     subject: str = "",
     use_vision: bool = True,
+    frame_gate: bool = True,
     jobs_root: Path | None = None,
     split_full_source: bool = True,
 ) -> list[str]:
@@ -1488,6 +1657,7 @@ def download_broll_candidates(
                 existing,
                 subject=subject,
                 use_vision=use_vision,
+                frame_gate=frame_gate,
             )
             if kept:
                 print(f"  skip download {video_id}: {len(kept)} cached part(s) in job")
@@ -1522,6 +1692,7 @@ def download_broll_candidates(
             source_clips,
             subject=subject,
             use_vision=use_vision,
+            frame_gate=frame_gate,
         )
         if jobs_root and kept:
             broll_pool.add_gated_clips_to_pool(jobs_root, subject=subject, clips=kept)
@@ -1530,8 +1701,14 @@ def download_broll_candidates(
         print(f"  download: {len(ok_ids)} ok, {failed} failed")
     kept_all = sorted(clips_dir.glob("*_part*.mp4"))
     if not kept_all:
-        raise RuntimeError("B-roll download produced no clips that passed the subject/frame gate.")
-    print(f"  ready: {len(kept_all)} clip(s) after subject/frame gate")
+        msg = (
+            "B-roll download produced no clips that passed the subject/frame gate."
+            if frame_gate
+            else "B-roll download produced no clips."
+        )
+        raise RuntimeError(msg)
+    label = "subject/frame gate" if frame_gate else "download (fps only)"
+    print(f"  ready: {len(kept_all)} clip(s) after {label}")
     return ok_ids
 
 
@@ -1567,9 +1744,14 @@ def filter_broll_clip_list(
     *,
     subject: str,
     use_vision: bool = True,
+    frame_gate: bool = True,
 ) -> list[Path]:
     kept: list[Path] = []
     all_clips = drop_low_fps_clips(sorted(clips), delete=True)
+    if not frame_gate:
+        if all_clips:
+            print(f"  frame gate: skipped — kept {len(all_clips)} clip(s) (fps only)")
+        return all_clips
     for clip in all_clips:
         try:
             duration = probe_duration(clip)
@@ -1609,11 +1791,13 @@ def filter_broll_clips(
     *,
     subject: str,
     use_vision: bool = True,
+    frame_gate: bool = True,
 ) -> list[Path]:
     return filter_broll_clip_list(
         sorted(clips_dir.glob("*_part*.mp4")),
         subject=subject,
         use_vision=use_vision,
+        frame_gate=frame_gate,
     )
 
 
@@ -1626,6 +1810,7 @@ def prepare_broll_from_ids(
     start_offset: float = 0.0,
     subject: str = "",
     use_vision: bool = True,
+    frame_gate: bool = True,
     jobs_root: Path | None = None,
     split_full_source: bool = True,
 ) -> list[str]:
@@ -1641,6 +1826,7 @@ def prepare_broll_from_ids(
         start_offset=start_offset,
         subject=subject,
         use_vision=use_vision,
+        frame_gate=frame_gate,
         jobs_root=jobs_root,
         split_full_source=split_full_source,
     )
@@ -1660,6 +1846,7 @@ def ensure_broll_clips(
     min_duration: int,
     start_offset: float,
     use_vision: bool,
+    frame_gate: bool = True,
     broll_ids: list[str] | None = None,
     reuse_policy: str = "allow",
     split_full_source: bool = True,
@@ -1668,7 +1855,12 @@ def ensure_broll_clips(
     clips_dir.mkdir(parents=True, exist_ok=True)
 
     def ready() -> list[Path]:
-        return filter_broll_clips(clips_dir, subject=subject, use_vision=use_vision)
+        return filter_broll_clips(
+            clips_dir,
+            subject=subject,
+            use_vision=use_vision,
+            frame_gate=frame_gate,
+        )
 
     kept = ready()
     if len(kept) >= needed_clips:
@@ -1714,6 +1906,7 @@ def ensure_broll_clips(
                 start_offset=start_offset,
                 subject=subject,
                 use_vision=use_vision,
+                frame_gate=frame_gate,
                 jobs_root=jobs_root,
                 split_full_source=split_full_source,
             )
@@ -1731,6 +1924,7 @@ def ensure_broll_clips(
         start_offset=start_offset,
         subject=subject,
         use_vision=use_vision,
+        frame_gate=frame_gate,
         reuse_policy=reuse_policy,
         jobs_root=jobs_root,
         split_full_source=split_full_source,
@@ -1764,6 +1958,7 @@ def render_job(
     caption_mode: str = "phrase",
     hook_text: str | None = None,
     quality_gate: bool = True,
+    segment_gate: bool = True,
 ) -> set[Path]:
     output.parent.mkdir(parents=True, exist_ok=True)
     actual_duration = probe_duration(audio)
@@ -1795,6 +1990,7 @@ def render_job(
         playback_speed=playback_speed,
         use_vision=use_vision,
         driven_pacing=driven_pacing,
+        segment_gate=segment_gate,
     )
     if len(used_clips) != len(set(used_clips)):
         raise RuntimeError("Montage reused a B-roll clip file in one render")
@@ -1854,6 +2050,9 @@ def rerender_existing_job(
     playback_speed: float,
     use_vision: bool,
     quality_gate: bool = True,
+    frame_gate: bool = True,
+    segment_gate: bool = True,
+    cursor_review: bool = False,
 ) -> int:
     job_dir = resolve_job_dir(slug, jobs_root)
     if not job_dir:
@@ -1936,6 +2135,7 @@ def rerender_existing_job(
             min_duration=30,
             start_offset=start_offset,
             use_vision=use_vision,
+            frame_gate=frame_gate,
             broll_ids=broll_ids,
         )
         render_job(
@@ -1955,10 +2155,13 @@ def rerender_existing_job(
             caption_mode=str(payload.get("caption_mode") or "phrase"),
             hook_text=str(payload.get("hook") or "") or None,
             quality_gate=quality_gate,
+            segment_gate=segment_gate,
         )
     except (FileNotFoundError, RuntimeError, ValueError, subprocess.CalledProcessError) as exc:
         print(exc, file=sys.stderr)
         return 1
+    if cursor_review and output.is_file():
+        emit_cursor_review_pack(job_dir=job_dir, output=output, subject=subject)
     if cleanup:
         removed = cleanup_job_dir(job_dir, keep_work=keep_work)
         print(f"Cleaned {len(removed)} leftover file(s).")
@@ -2054,6 +2257,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip pre-ship render quality checks.",
     )
     parser.add_argument("--no-vision", action="store_true", help="Skip optional vision subject check")
+    parser.add_argument(
+        "--no-frame-gate",
+        action="store_true",
+        help="Skip B-roll scan/trim gate (50fps still required). Agent reviews visuals.",
+    )
+    parser.add_argument(
+        "--no-segment-gate",
+        action="store_true",
+        help="Skip per-beat frame gate when cutting montage beats.",
+    )
+    parser.add_argument(
+        "--cursor-review",
+        action="store_true",
+        help="Agent review mode: no vision, no frame/segment/render gates; writes cursor-review/ pack.",
+    )
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--no-grade", action="store_true")
     parser.add_argument("--clips-limit", type=int, default=5)
@@ -2082,6 +2300,10 @@ def main() -> int:
 
     args = build_parser().parse_args()
     subprocess_env()
+    gate_flags = resolve_montage_gate_flags(args)
+    if gate_flags.cursor_review and not args.keep_work:
+        args.keep_work = True
+        print("Cursor review: keeping clips/ for agent inspection.")
     reuse_policy = normalize_reuse_policy(args.reuse_policy)
     jobs_root = args.jobs_root or (project_root() / "downloads" / "motivational")
     speaker, speech_query, config_path = resolve_speech_settings(
@@ -2116,12 +2338,15 @@ def main() -> int:
             clip_length=args.clip_length,
             max_parts=args.max_parts,
             clips_limit=args.clips_limit,
-            keep_work=args.keep_work,
+            keep_work=args.keep_work or gate_flags.cursor_review,
             cleanup=not args.no_cleanup,
             start_offset=args.intro_skip,
             playback_speed=args.playback_speed,
-            use_vision=not args.no_vision,
-            quality_gate=not args.skip_quality_gate,
+            use_vision=gate_flags.use_vision,
+            quality_gate=gate_flags.quality_gate,
+            frame_gate=gate_flags.frame_gate,
+            segment_gate=gate_flags.segment_gate,
+            cursor_review=gate_flags.cursor_review,
         )
 
     if not args.slug or not args.broll_query:
@@ -2222,7 +2447,8 @@ def main() -> int:
             min_views=args.min_views,
             min_duration=args.min_duration,
             start_offset=args.intro_skip,
-            use_vision=not args.no_vision,
+            use_vision=gate_flags.use_vision,
+            frame_gate=gate_flags.frame_gate,
             reuse_policy=reuse_policy,
         )
         caption_mode = "word" if args.classic_captions else "phrase"
@@ -2238,11 +2464,12 @@ def main() -> int:
             grade=not args.no_grade,
             subject=args.broll_query,
             playback_speed=args.playback_speed,
-            use_vision=not args.no_vision,
+            use_vision=gate_flags.use_vision,
             driven_pacing=driven_pacing,
             caption_mode=caption_mode,
             hook_text=args.hook,
-            quality_gate=not args.skip_quality_gate,
+            quality_gate=gate_flags.quality_gate,
+            segment_gate=gate_flags.segment_gate,
         )
     except MotivationJobError as exc:
         print(exc, file=sys.stderr)
@@ -2251,6 +2478,13 @@ def main() -> int:
         code = classify_download_error(exc)
         print(f"{code}: {exc}", file=sys.stderr)
         return 1
+
+    if gate_flags.cursor_review:
+        emit_cursor_review_pack(
+            job_dir=job_dir,
+            output=output,
+            subject=args.broll_query,
+        )
 
     write_job_json(
         job_dir / "job.json",

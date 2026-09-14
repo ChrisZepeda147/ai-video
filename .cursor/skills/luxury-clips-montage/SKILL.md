@@ -74,11 +74,28 @@ First seconds of the output must show the subject with **movement** when possibl
 
 **Cars (required):** keep **exterior** frames only — drop cabin, dashboard, steering wheel, seats, interior POV. Opener is a **full view of the car** (front / three-quarter / side, most of the body) held **≥5 seconds** before a cut to detail. Check 0s, ~2.5s, and 5s on the output. See `.cursor/rules/car-exterior-frames.mdc`.
 
-## Agent rules
+## Agent rules (Cursor checks — preferred)
+
+Use **`--cursor-review`** so code gates defer to you:
+
+```powershell
+python scripts/build_motivation_job.py `
+  --slug ... `
+  --broll-query "..." `
+  --cursor-review
+```
+
+Script writes `{job}/cursor-review/REVIEW.md` + `final/*.png`. **You** read those images + excerpt before ship. No OpenAI vision in pipeline.
+
+Manual pack anytime:
+
+```powershell
+python scripts/prepare_cursor_montage_review.py --job-dir downloads/motivational/{slug}
+```
 
 1. Run the script. New `--slug` + new `--broll-query` every job.
-2. After it finishes, read `speech_excerpt` from `job.json`. Dump 3 stills from the output (`0s`, `2.5s`, `5s`) and look at them. No API key.
-3. Ship only if the line is punchy **and** all 3 frames are a full car exterior (cars). Otherwise remake. Do not vet every source clip.
+2. Open `cursor-review/REVIEW.md` (or run prepare script). Read final stills + speech excerpt.
+3. Ship only if line is punchy **and** opener frames pass car-exterior rules (cars). Otherwise remake. Do not vet every source clip unless user asked.
 
 ## Flags
 
@@ -96,7 +113,10 @@ First seconds of the output must show the subject with **movement** when possibl
 | `--playback-speed` | `1` | Source speed. Lower (e.g. `0.80`) = slower motion |
 | `--intro-skip` | `8` | Skip more intro if hosts keep talking |
 | `--min-seconds` / `--max-seconds` | `20` / `28` | Excerpt window. Longer cuts need explicit flags |
-| `--no-vision` | off | Local frame gate only |
+| `--cursor-review` | off | **Agent** ship gate; skips code vision/frame/segment/render gates |
+| `--no-vision` | off | Skip GPT-4o-mini only (local frame gate still on) |
+| `--no-frame-gate` | off | Skip B-roll scan/trim; fps still required |
+| `--no-segment-gate` | off | Skip per-beat frame gate in montage |
 | `--no-grade` | off | User wants raw color |
 | `--skip-quality-gate` | off | Skip pre-ship checks |
 | `--keep-work` | off | Keep `clips/` |
@@ -107,4 +127,5 @@ Output: `downloads/motivational/{slug}/output/{slug}-motivation.mp4`
 
 Charcoal / slate, light plum, 1080×1920. Do not brighten unless asked. Legal: only footage user owns or has rights to repost.
 
-Pre-ship: `python scripts/check_render_quality.py --video downloads/motivational/{slug}/output/{slug}-motivation.mp4`
+Pre-ship (code mode only): `python scripts/check_render_quality.py --video ...`  
+Pre-ship (agent mode): read `{job}/cursor-review/REVIEW.md` + PNGs — see `.cursor/rules/cursor-montage-review.mdc`

@@ -1,0 +1,47 @@
+# Cursor montage review (agent ship gate)
+
+When the user wants **you** to vet clips/speech instead of Python heuristics + OpenAI vision:
+
+## Build
+
+```powershell
+python scripts/build_motivation_job.py `
+  --slug ... `
+  --broll-query "..." `
+  --cursor-review `
+  --reuse-policy allow
+```
+
+`--cursor-review` = no API vision, no frame/segment/render code gates, auto `cursor-review/` pack. Still enforces **50fps** and speech reuse fingerprint.
+
+## After render — required before ship
+
+1. Open `{job}/cursor-review/REVIEW.md`.
+2. Read PNGs under `cursor-review/final/` (0s, 2.5s, 5s; car opener extras if car job).
+3. Read `speech_excerpt` in REVIEW.md — punchy standalone hook?
+4. Mark **SHIP** or **REMAKE** in REVIEW.md mentally; tell user verdict.
+
+Cars: `.cursor/rules/car-exterior-frames.mdc` — full exterior 0–5s, no cabin.
+
+Do **not** register/post until you pass visual + speech checks.
+
+## Manual clip folder (e.g. broll-review)
+
+```powershell
+python scripts/prepare_cursor_montage_review.py `
+  --clips-dir downloads/motivational/broll-review/luxury-cars `
+  --subject "luxury car exterior" `
+  --clip-sample 12 `
+  --out-dir downloads/motivational/broll-review/luxury-cars/cursor-review
+```
+
+Sample stills only — user or agent rejects bad files before montage.
+
+## Partial flags
+
+| Flag | Effect |
+|------|--------|
+| `--no-vision` | Skip GPT-4o-mini only |
+| `--no-frame-gate` | Skip download trim/drop; fps still on |
+| `--no-segment-gate` | Random beat windows; no per-beat gate |
+| `--skip-quality-gate` | Skip post-render `check_render_quality` |
