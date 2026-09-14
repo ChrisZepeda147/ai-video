@@ -105,7 +105,8 @@ REALESTATE_TOUR_RE = re.compile(
 SIM_GAME_FOOTAGE_TITLE_RE = re.compile(
     r"\b(forza\s+horizon|assetto\s+corsa|beam\.?ng|need\s+for\s+speed|\bnfs\b|"
     r"gta\s+v\b|\bgta\b.*mods|unreal\s+engine|wuthering\s+waves|"
-    r"rtx\s+\d{3,4}|gran\s+turismo|project\s+cars|"
+    r"rtx\s+\d{3,4}|gran\s+turismo|project\s+cars|\bgrid\s+2019\b|"
+    r"asphalt\s+[89]|driveclub|"
     r"speed\s+art\s*\+\s*gameplay|anime\s+lamborghini)\b",
     re.IGNORECASE,
 )
