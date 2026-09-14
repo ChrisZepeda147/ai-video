@@ -5,7 +5,7 @@ description: Builds 9:16 motivational montages from shuffled YouTube B-roll clip
 
 # Luxury clips montage
 
-One script. Do not search, download, pick durations, clean, read `content/used.json`, read scripts, extract frames, or dump job logs.
+One script. Do not search, download, pick durations, clean, read `content/used.json`, or dump job logs.
 
 ```powershell
 python scripts/build_motivation_job.py `
@@ -76,9 +76,9 @@ First seconds of the output must show the subject with **movement** when possibl
 
 ## Agent rules
 
-1. Run the script. Do not copy audio from another job unless the user asked to reuse it.
-2. New `--slug` + new `--broll-query` every job (or intentional version of an existing video).
-3. After it finishes, open the output mp4. Confirm opener + captions + pacing. Read `job.json` only if you need IDs. Do not re-run by hand.
+1. Run the script. New `--slug` + new `--broll-query` every job.
+2. After it finishes, read `speech_excerpt` from `job.json`. Dump 3 stills from the output (`0s`, `2.5s`, `5s`) and look at them. No API key.
+3. Ship only if the line is punchy **and** all 3 frames are a full car exterior (cars). Otherwise remake. Do not vet every source clip.
 
 ## Flags
 
