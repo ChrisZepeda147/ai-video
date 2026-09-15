@@ -202,80 +202,53 @@ def _configure_stdio_utf8() -> None:
 
 
 @app.on_event("startup")
-def _start_shared_library_auto_sync() -> None:
+def _start_brother_auto_sync() -> None:
     import logging
     import threading
     import time
 
+    from discovery.brother_code_sync import auto_pull_enabled, brother_sync_interval_minutes, run_brother_sync_tick
     from discovery.config import default_db_path
-    from discovery.shared_library import auto_sync_enabled, auto_sync_interval_minutes, maybe_auto_pull_import
+    from discovery.shared_library import auto_sync_enabled
 
-    if not auto_sync_enabled():
+    if not auto_sync_enabled() and not auto_pull_enabled():
         return
 
     def _loop() -> None:
-        interval_sec = auto_sync_interval_minutes() * 60
+        interval_sec = brother_sync_interval_minutes() * 60
         time.sleep(min(15, interval_sec))
+        log = logging.getLogger("uvicorn.error")
         while True:
             try:
                 db = default_db_path()
                 if Path(db).is_file():
                     store = DiscoveryStore(db)
                     try:
-                        result = maybe_auto_pull_import(store)
-                        if result and int(result.get("import", {}).get("imported", 0) or 0) > 0:
-                            logging.getLogger("uvicorn.error").info(
-                                "Stephen auto-sync: imported %s package(s)",
-                                result["import"]["imported"],
+                        result = run_brother_sync_tick(store)
+                        if not result:
+                            pass
+                        elif int((result.get("library") or {}).get("import", {}).get("imported", 0) or 0) > 0:
+                            log.info(
+                                "Brother sync: imported %s package(s)",
+                                result["library"]["import"]["imported"],
+                            )
+                        elif int((result.get("library") or {}).get("deletions", {}).get("removed_videos", 0) or 0) > 0:
+                            log.info(
+                                "Brother sync: applied %s remote deletion(s)",
+                                result["library"]["deletions"]["removed_videos"],
+                            )
+                        elif result.get("code", {}).get("pull", {}).get("pulled"):
+                            log.info(
+                                "Brother sync: code %s",
+                                result["code"]["pull"].get("message") or "updated",
                             )
                     finally:
                         store.close()
             except Exception as exc:
-                logging.getLogger("uvicorn.error").warning("Stephen auto-sync failed: %s", exc)
+                log.warning("Brother auto-sync failed: %s", exc)
             time.sleep(interval_sec)
 
-    threading.Thread(target=_loop, name="shared-library-auto-sync", daemon=True).start()
-
-
-@app.on_event("startup")
-def _start_brother_code_auto_pull() -> None:
-    import logging
-    import threading
-    import time
-
-    from discovery.brother_code_sync import auto_pull_enabled, auto_pull_interval_minutes, maybe_auto_brother_code_pull
-    from discovery.config import default_db_path
-
-    if not auto_pull_enabled():
-        return
-
-    def _loop() -> None:
-        interval_sec = auto_pull_interval_minutes() * 60
-        time.sleep(min(30, interval_sec))
-        while True:
-            try:
-                db = default_db_path()
-                if Path(db).is_file():
-                    store = DiscoveryStore(db)
-                    try:
-                        result = maybe_auto_brother_code_pull(store)
-                        if result and result.get("pull", {}).get("pulled"):
-                            logging.getLogger("uvicorn.error").info(
-                                "Brother code auto-pull: %s",
-                                result["pull"].get("message") or "updated",
-                            )
-                        elif result and result.get("pull", {}).get("skipped"):
-                            logging.getLogger("uvicorn.error").info(
-                                "Brother code auto-pull skipped: %s",
-                                result["pull"].get("reason") or "dirty tree",
-                            )
-                    finally:
-                        store.close()
-            except Exception as exc:
-                logging.getLogger("uvicorn.error").warning("Brother code auto-pull failed: %s", exc)
-            time.sleep(interval_sec)
-
-    threading.Thread(target=_loop, name="brother-code-auto-pull", daemon=True).start()
+    threading.Thread(target=_loop, name="brother-auto-sync", daemon=True).start()
 
 
 @app.on_event("startup")

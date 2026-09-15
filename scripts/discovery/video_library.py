@@ -520,15 +520,23 @@ def delete_video_library_item(
     elif source == "library":
         if not library_id:
             raise ValueError("library_id is required for library source")
-        from discovery.production_library import delete_video
+        from discovery.brother_deletions import propagate_library_video_deletion
 
-        result = delete_video(store, int(library_id), delete_files=delete_files, root=root)
-        if not result:
-            raise ValueError(f"Video {library_id} not found")
+        try:
+            sync_result = propagate_library_video_deletion(
+                store,
+                int(library_id),
+                root=root,
+                push_git=True,
+                delete_files=delete_files,
+            )
+        except ValueError:
+            raise ValueError(f"Video {library_id} not found") from None
         deleted["library_id"] = int(library_id)
-        deleted["slug"] = result.get("slug")
-        deleted["video_key"] = result.get("video_key")
-        deleted["removed_paths"] = result.get("removed_paths") or []
+        deleted["slug"] = sync_result.get("slug")
+        deleted["video_key"] = sync_result.get("video_key")
+        deleted["removed_paths"] = sync_result.get("removed_paths") or []
+        deleted["shared_sync"] = sync_result
 
     elif source == "production":
         if not project_id:
@@ -536,14 +544,32 @@ def delete_video_library_item(
         project = store.get_production_project(int(project_id))
         if not project:
             raise ValueError(f"Project {project_id} not found")
-        if delete_files:
-            rels = [str(project.output_path)] if project.output_path else []
-            deleted["removed_paths"] = _delete_listed_local_media(root, rels, slug=project.slug)
+        project_slug = project.slug
+        row = store._conn.execute(
+            "SELECT id FROM production_library_videos WHERE slug = ? ORDER BY id DESC LIMIT 1",
+            (project_slug,),
+        ).fetchone()
+        if row:
+            from discovery.brother_deletions import propagate_library_video_deletion
+
+            sync_result = propagate_library_video_deletion(
+                store,
+                int(row["id"]),
+                root=root,
+                push_git=True,
+                delete_files=delete_files,
+            )
+            deleted["shared_sync"] = sync_result
+            deleted["removed_paths"] = sync_result.get("removed_paths") or []
+        else:
+            content_reuse.delete_catalog_video_entry("", root=root, slug=project_slug)
+            if delete_files:
+                rels = [str(project.output_path)] if project.output_path else []
+                deleted["removed_paths"] = _delete_listed_local_media(root, rels, slug=project_slug)
         if not store.delete_production_project(int(project_id)):
             raise ValueError(f"Project {project_id} not found")
         deleted["project_id"] = int(project_id)
-        deleted["slug"] = project.slug
-        content_reuse.delete_catalog_video_entry("", root=root, slug=project.slug)
+        deleted["slug"] = project_slug
     else:
         raise ValueError(f"Unsupported source: {source}")
 

@@ -30,28 +30,32 @@ class BrotherCodeSyncTests(unittest.TestCase):
         from datetime import datetime, timedelta, timezone
 
         recent = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
-        self.assertFalse(_pull_is_due({"last_code_pull_at": recent}, interval_minutes=60))
+        self.assertFalse(_pull_is_due({"last_brother_sync_at": recent}, interval_minutes=60))
 
     @patch("discovery.brother_code_sync.save_sync_state")
     @patch("discovery.brother_code_sync.load_sync_state")
-    @patch("discovery.brother_code_sync.safe_ff_pull")
+    @patch("discovery.brother_code_sync.sync_source_code")
+    @patch("discovery.brother_code_sync.pull_and_import")
     @patch("discovery.brother_code_sync.export_enabled", return_value=False)
-    @patch("discovery.brother_code_sync.import_all_stephen_packages")
+    @patch("discovery.brother_code_sync.import_all_shared_packages")
     def test_maybe_auto_pull_imports_on_chris(
         self,
         mock_import,
         _export,
-        mock_pull,
+        mock_pull_import,
+        mock_code,
         mock_load,
         mock_save,
     ) -> None:
         mock_load.return_value = {}
-        mock_pull.return_value = {"ok": True, "pulled": True, "message": "Pulled 2 commit(s)"}
+        mock_pull_import.return_value = {"import": {"imported": 0}}
+        mock_code.return_value = {"ok": True, "pull": {"pulled": True, "message": "Pulled 2 commit(s)"}}
         mock_import.return_value = {"imported": 1}
         store = MagicMock()
         result = maybe_auto_brother_code_pull(store, force=True)
         self.assertIsNotNone(result)
         assert result is not None
+        mock_pull_import.assert_called_once()
         mock_import.assert_called_once_with(store)
         mock_save.assert_called_once()
 

@@ -989,6 +989,15 @@ def pull_and_import(
         except RuntimeError as exc:
             pull_warning = str(exc)
 
+    deletion_result = None
+    reconcile_result = None
+    if not dry_run:
+        from discovery.brother_deletions import apply_shared_deletions, reconcile_packages_removed_from_git
+
+        deletion_result = apply_shared_deletions(store, root=root)
+        if pull_result and pull_result.get("ok"):
+            reconcile_result = reconcile_packages_removed_from_git(store, root=root)
+
     import_result = import_all_shared_packages(store, dry_run=dry_run)
     git_status = git_repo_status(fetch=fetch_git and not dry_run)
 
@@ -996,6 +1005,8 @@ def pull_and_import(
         "pull": pull_result,
         "pull_warning": pull_warning,
         "import": import_result,
+        "deletions": deletion_result,
+        "reconcile": reconcile_result,
         "git": git_status,
         "status": sync_status(git=git_status),
     }

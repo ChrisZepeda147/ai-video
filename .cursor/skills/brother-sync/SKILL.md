@@ -58,12 +58,13 @@ With `.\scripts\start-api.ps1` (defaults on):
 
 | What | Env | Interval |
 |------|-----|----------|
-| Stephen video packages | `SHARED_LIBRARY_AUTO_SYNC=1` | ~10 min |
-| Brother **code** | `BROTHER_AUTO_PULL=1` | ~60 min |
+| Videos + code + **deletions** | `SHARED_LIBRARY_AUTO_SYNC=1`, `BROTHER_AUTO_PULL=1` | **~10 min** (`BROTHER_SYNC_MINUTES=10`) |
 
-Code pull uses `git pull --ff-only` and **skips** when tracked files are dirty. Chris auto-imports Stephen packages after a successful code pull.
+Each tick: pull `shared_library/` (including `deletions.json`), apply brother deletions locally, import packages, then `git pull --ff-only` when tree clean.
 
-Disable: `BROTHER_AUTO_PULL=0` in `scripts/.env`. Change interval: `BROTHER_AUTO_PULL_MINUTES=60`.
+**Deletes:** Removing a production library video records `shared_library/deletions.json`, removes the Git package folder, pushes both remotes. The other machine drops DB row + local package on next sync (~10 min).
+
+Disable auto sync: `BROTHER_AUTO_PULL=0` or `SHARED_LIBRARY_AUTO_SYNC=0` in `scripts/.env`.
 
 Check status:
 
