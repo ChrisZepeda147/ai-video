@@ -1,0 +1,44 @@
+---
+description: Delete motivation job folders that never finished or were rejected
+globs: downloads/motivational/**
+alwaysApply: false
+---
+
+# Delete unfinished motivation jobs
+
+If a job never wrote `output/{slug}-motivation.mp4`, delete the **whole job folder**. Same if user/agent rejects it (horrible clips, remake, do not ship).
+
+## Delete
+
+- No `output/*.mp4` after a failed, aborted, or abandoned run
+- Rendered mp4 but visuals/speech failed ship (REMAKE / horrible clips)
+
+```
+# ❌ BAD — leftover half-jobs sit next to shipped work
+downloads/motivational/2026-09-14/audi-r8-tate
+downloads/motivational/2026-09-14/bentley-continental-tate
+downloads/motivational/2026-09-14/lamborghini-huracan-tate-v2
+downloads/motivational/2026-09-14/audi-r8-tate-v2   # rendered, horrible clips
+
+# ✅ GOOD — only finished keepers remain
+downloads/motivational/2026-09-14/audi-r8-tate-v3
+downloads/motivational/2026-09-14/lamborghini-huracan-tate
+```
+
+```powershell
+Remove-Item -Recurse -Force downloads\motivational\<date>\<slug>
+. .\scripts\load_agent_path.ps1; python scripts/content_reuse.py rebuild
+```
+
+If that slug auto-registered:
+
+```powershell
+python scripts/production_library_cli.py delete --video-id <id>
+```
+
+## Do not delete
+
+- Shipped keepers with a good `output/*.mp4`
+- `downloads/production_library/` unless user rejects that video
+- `broll-pool/`, `speech-pool/`, date folders themselves
+- A job still rendering

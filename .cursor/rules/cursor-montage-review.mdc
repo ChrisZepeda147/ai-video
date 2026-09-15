@@ -35,6 +35,8 @@ Or `--speech-start 142 --speech-duration 24`.
 2. Open `REVIEW.md` + PNGs under `final/` (0s, 2.5s, 5s; car opener if car job).
 3. Tell user **SHIP** or **REMAKE** for speech + visuals together.
 
+After **REMAKE** or a job with no finished `output/*.mp4`, delete that job folder. See `.cursor/rules/delete-unfinished-jobs.mdc`.
+
 Cars: `.cursor/rules/car-exterior-frames.mdc` — full exterior 0–5s, no cabin.
 
 Do **not** register/post until you pass visual + speech checks.

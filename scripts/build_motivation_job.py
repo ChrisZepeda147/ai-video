@@ -84,15 +84,25 @@ class MontageGateFlags:
     speech_vet: bool
 
 
-def resolve_montage_gate_flags(args: argparse.Namespace) -> MontageGateFlags:
-    """Default: Cursor agent review pack. Opt out with --code-gates."""
+def resolve_montage_gate_flags(
+    args: argparse.Namespace,
+    *,
+    subject: str = "",
+) -> MontageGateFlags:
+    """Default: Cursor agent review pack. Opt out with --code-gates.
+
+    Vehicle B-roll queries keep frame/segment gates + vision on (unless disabled)
+    so car montages are checked frequently even in Cursor review mode.
+    """
     cursor = not bool(getattr(args, "code_gates", False))
     speech_vet = cursor or bool(getattr(args, "no_speech_score", False))
+    vehicle_job = bool(subject.strip()) and wants_vehicle(subject)
+    vehicle_gates = vehicle_job and cursor
     return MontageGateFlags(
-        use_vision=not args.no_vision and not cursor,
-        quality_gate=not args.skip_quality_gate and not cursor,
-        frame_gate=not getattr(args, "no_frame_gate", False) and not cursor,
-        segment_gate=not getattr(args, "no_segment_gate", False) and not cursor,
+        use_vision=not args.no_vision and (not cursor or vehicle_gates),
+        quality_gate=not args.skip_quality_gate and (not cursor or vehicle_gates),
+        frame_gate=not getattr(args, "no_frame_gate", False) and (not cursor or vehicle_gates),
+        segment_gate=not getattr(args, "no_segment_gate", False) and (not cursor or vehicle_gates),
         cursor_review=cursor,
         speech_vet=speech_vet,
     )
@@ -2456,6 +2466,14 @@ def main() -> int:
     args = build_parser().parse_args()
     subprocess_env()
     gate_flags = resolve_montage_gate_flags(args)
+    if args.rerender and args.slug:
+        job_dir = resolve_job_dir(args.slug, args.jobs_root or (project_root() / "downloads" / "motivational"))
+        if job_dir and (job_dir / "job.json").is_file():
+            payload = json.loads((job_dir / "job.json").read_text(encoding="utf-8"))
+            rerender_subject = str(
+                payload.get("broll_query") or payload.get("visual_style") or payload.get("subject") or ""
+            ).strip()
+            gate_flags = resolve_montage_gate_flags(args, subject=rerender_subject)
     if gate_flags.cursor_review:
         if not args.keep_work:
             args.keep_work = True
@@ -2519,6 +2537,17 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
+
+    gate_flags = resolve_montage_gate_flags(args, subject=(args.broll_query or "").strip())
+    if gate_flags.cursor_review and wants_vehicle(args.broll_query or ""):
+        if gate_flags.use_vision:
+            print(
+                "Vehicle B-roll: frame + segment gates with vision (Cursor review pack still written)."
+            )
+        else:
+            print(
+                "Vehicle B-roll: frame + segment gates local-only (--no-vision skips AI frame checks)."
+            )
 
     if args.job_date and not is_date_folder(args.job_date):
         print("--job-date must be YYYY-MM-DD", file=sys.stderr)
