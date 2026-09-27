@@ -932,6 +932,9 @@ export async function postWeeklyRunDue(body: {
     day: string;
     count: number;
     deferred?: boolean;
+    reason?: string;
+    error?: string;
+    preflight?: { ok: boolean; issues: string[] };
     submitted: Array<{ slot_id: string; job_key: string }>;
   }>(buildUrl("/api/weekly/run-due"), {
     method: "POST",

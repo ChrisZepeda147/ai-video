@@ -500,12 +500,13 @@ def weekly_preflight() -> dict[str, Any]:
 
     key_ok = bool(cursor_api_key())
     agent_ok = agent_available()
-    ok = agent_ok and (key_ok or __import__("os").environ.get("CURSOR_BRIDGE_DRY_RUN", "").strip().lower() in {"1", "true", "yes"})
+    dry = __import__("os").environ.get("CURSOR_BRIDGE_DRY_RUN", "").strip().lower() in {"1", "true", "yes"}
+    ok = agent_ok or dry
     issues: list[str] = []
-    if not agent_ok:
-        issues.append("Cursor Agent CLI not found")
-    if not key_ok:
-        issues.append("CURSOR_API_KEY missing in scripts/.env")
+    if not agent_ok and not dry:
+        issues.append("Cursor Agent CLI not found — install Cursor Agent or set CURSOR_BRIDGE_DRY_RUN=1")
+    if not key_ok and not dry:
+        issues.append("CURSOR_API_KEY not set in scripts/.env (optional for local Agent CLI)")
     return {"ok": ok, "agent_available": agent_ok, "api_key_set": key_ok, "issues": issues}
 
 

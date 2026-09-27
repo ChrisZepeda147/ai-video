@@ -65,6 +65,7 @@ export function WeeklyWorkspace() {
   const [pasteText, setPasteText] = useState("");
   const [parseHint, setParseHint] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [planSummary, setPlanSummary] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [health, setHealth] = useState<WeeklyHealthResponse | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -101,9 +102,11 @@ export function WeeklyWorkspace() {
     if (prog?.focus_day) setFocusDay(prog.focus_day);
     else setFocusDay("mon");
 
-    const h = await fetchWeeklyHealth({ owner });
+    const ws = effectiveWeekStartForPaste(weekStart);
+    const batchDay = runBatchTarget(ws).day;
+    const h = await fetchWeeklyHealth({ owner, day: batchDay });
     if (h.ok) setHealth(h.data);
-    setStatus(
+    setPlanSummary(
       res.data.plan
         ? `Week ${res.data.plan.status} · starts ${weekStart}`
         : "Copy ChatGPT prompt → paste reply → Save week (7am auto) or Run now.",
@@ -113,6 +116,19 @@ export function WeeklyWorkspace() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const anyRunning = useMemo(() => {
+    const slotRunning = Object.values(slotMeta).some((m) => m.status === "running");
+    return slotRunning || Boolean(health?.queue_busy) || (health?.running_command_jobs ?? 0) > 0;
+  }, [slotMeta, health]);
+
+  useEffect(() => {
+    if (!anyRunning) return;
+    const timer = setInterval(() => {
+      void load();
+    }, 15_000);
+    return () => clearInterval(timer);
+  }, [anyRunning, load]);
 
   useEffect(() => {
     const t = pasteText.trim();
@@ -227,11 +243,24 @@ export function WeeklyWorkspace() {
         return;
       }
       setFocusDay(target.dayId);
-      setStatus(
-        res.data.deferred
-          ? "Deferred — agents still running"
-          : `Started ${res.data.count} video(s) for ${target.label} (${target.day})`,
-      );
+      const d = res.data;
+      if (d.error) {
+        setStatus(`Could not start: ${d.error}`);
+      } else if (d.deferred) {
+        setStatus(`Deferred (${d.reason ?? "busy"}) — finish or wait on running Cursor jobs, then Run again.`);
+      } else if ((d.count ?? 0) === 0) {
+        const issues = d.preflight?.issues?.filter(Boolean).join(" · ");
+        setStatus(
+          issues
+            ? `Nothing started — ${issues}`
+            : `Nothing due for ${target.label} (${target.day}). Check week start matches saved plan.`,
+        );
+      } else {
+        const keys = (d.submitted ?? []).map((s) => s.job_key).filter(Boolean);
+        setStatus(
+          `Started ${d.count} agent(s) for ${target.label} — status turns running below; open ${keys[0] ? "job link" : "Command"} to watch.`,
+        );
+      }
       await load();
     } finally {
       setBusy(false);
@@ -377,9 +406,20 @@ export function WeeklyWorkspace() {
       <section className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
         <h2 className="text-sm font-semibold text-zinc-200">This week · one day at a time</h2>
         {health ? (
-          <p className="mt-2 text-xs text-zinc-500">
-            Today {health.today_stats.done}/3 done · Agent {health.preflight.ok ? "OK" : "blocked"}
-          </p>
+          <div className="mt-2 space-y-1 text-xs">
+            <p className="text-zinc-500">
+              {runTarget.label} batch {health.today_stats.done}/3 done ·{" "}
+              {health.running_command_jobs > 0
+                ? `${health.running_command_jobs} Cursor job(s) active`
+                : health.preflight.ok
+                  ? "Agent OK"
+                  : "Agent blocked"}
+              {anyRunning ? " · refreshing every 15s" : ""}
+            </p>
+            {!health.preflight.ok && health.preflight.issues.length ? (
+              <p className="text-amber-300">{health.preflight.issues.join(" · ")}</p>
+            ) : null}
+          </div>
         ) : null}
 
         <div className="mt-4 flex flex-wrap gap-1">
@@ -418,7 +458,8 @@ export function WeeklyWorkspace() {
         <div className="mt-4 space-y-3">{SLOTS.map((n) => renderSlot(n))}</div>
       </section>
 
-      {status ? <p className="text-sm text-zinc-500">{status}</p> : null}
+      {status ? <p className="text-sm text-violet-200">{status}</p> : null}
+      {!status && planSummary ? <p className="text-sm text-zinc-500">{planSummary}</p> : null}
 
       <button type="button" className="text-xs text-zinc-500 underline" onClick={() => setShowAdvanced((v) => !v)}>
         {showAdvanced ? "Hide" : "Show"} 7am log
