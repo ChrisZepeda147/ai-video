@@ -104,11 +104,35 @@ def parse_montage_command(text: str) -> dict[str, Any] | None:
     audio_hint = (speech_query or "").lower()
     if "hormozi" in audio_hint or "alex hormozi" in (text or "").lower():
         speaker = "Alex Hormozi"
+    if not speaker and speech_query:
+        try:
+            from discovery.speaker_identity import infer_speaker
 
-    reuse_policy = parse_reuse_policy(text)
-    if re.search(r"require_new|do not reuse|never used|unused-only", text, flags=re.IGNORECASE):
-        reuse_policy = "require_new"
+            speaker = infer_speaker(speech_query)
+        except ImportError:
+            pass
+
+    extra = _first_match(r"Extra instructions:\s*(.+)$", text, flags=re.IGNORECASE | re.DOTALL) or ""
+    extra = re.split(r"Before downloading audio", extra, maxsplit=1)[0]
+    reuse_policy = parse_reuse_policy(extra if extra.strip() else text)
     reuse_policy = normalize_reuse_policy(reuse_policy, default="allow")
+
+    extra_duration = re.search(r"(\d+)\s*-\s*(\d+)\s*seconds", extra, flags=re.IGNORECASE)
+    if extra_duration:
+        min_sec = float(extra_duration.group(1))
+        max_sec = float(extra_duration.group(2))
+
+    video_count = 1
+    if re.search(r"\btwo videos\b", extra, flags=re.IGNORECASE):
+        video_count = 2
+    else:
+        count_match = re.search(r"\b(\d+)\s+videos?\b", extra, flags=re.IGNORECASE)
+        if count_match:
+            video_count = min(int(count_match.group(1)), 10)
+
+    opener_note = ""
+    if re.search(r"stunning view|strong opener|first clip", extra, flags=re.IGNORECASE):
+        opener_note = "stunning view opener"
 
     slug_base = re.sub(r"[^a-z0-9]+", "-", (speech_query or broll_query or "short").lower()).strip("-")[:36]
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
@@ -126,6 +150,8 @@ def parse_montage_command(text: str) -> dict[str, Any] | None:
         "max_seconds": max_sec,
         "reuse_policy": reuse_policy,
         "command": text,
+        "video_count": video_count,
+        "opener_note": opener_note,
     }
 
 
@@ -204,20 +230,6 @@ def run_direct_montage_command(
             if not speech_url and plan.get("speech_query"):
                 speech_url = _resolve_speech_url(str(plan["speech_query"]), root)
 
-            body = {
-                "slug": plan["slug"],
-                "speech_query": plan.get("speech_query"),
-                "broll_query": plan["broll_query"],
-                "speech_url": speech_url,
-                "speaker": plan.get("speaker"),
-                "min_seconds": plan.get("min_seconds"),
-                "max_seconds": plan.get("max_seconds"),
-                "reuse_policy": plan.get("reuse_policy"),
-                "command": command_text,
-                "hook": plan.get("hook"),
-            }
-            cmd, slug, rel_output = _build_command(body, root)
-
             toolchain = check_toolchain()
             if not toolchain.get("ok"):
                 raise RuntimeError(
@@ -228,44 +240,88 @@ def run_direct_montage_command(
             env = dict(subprocess_env() if subprocess_env else os.environ)
             env["PUBLISHING_OWNER"] = str(plan.get("owner") or "chris")
 
-            result = subprocess.run(
-                cmd,
-                cwd=root,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-            )
-            log = "\n".join(part for part in (result.stdout, result.stderr) if part).strip()
-            truncated = log[-120_000:] if log else ""
+            broll_query = str(plan["broll_query"])
+            if plan.get("opener_note") and "drone" not in broll_query.lower():
+                broll_query = f"{broll_query} drone cinematic"
 
-            if result.returncode != 0:
-                thread_store._conn.execute(
-                    """
-                    UPDATE cursor_command_jobs
-                    SET status = 'failed', stdout_log = ?, stderr_log = ?, error_message = ?,
-                        completed_at = ?
-                    WHERE job_key = ?
-                    """,
-                    (truncated, "", truncated or f"exit {result.returncode}", _now_iso(), job_key),
-                )
-                thread_store._conn.commit()
-                return
-
-            output = root / rel_output
+            video_count = max(1, int(plan.get("video_count") or 1))
+            logs: list[str] = []
+            last_slug = plan["slug"]
+            last_output: Path | None = None
             production_video_id = None
-            if output.is_file():
-                from discovery.auto_register import sync_register_best_effort
 
-                reg = sync_register_best_effort(
-                    slug=slug,
-                    visual_style=plan.get("broll_query"),
-                    root=root,
+            for index in range(video_count):
+                slug = plan["slug"] if index == 0 else f"{plan['slug']}-v{index + 1}"
+                body = {
+                    "slug": slug,
+                    "speech_query": plan.get("speech_query"),
+                    "broll_query": broll_query,
+                    "speech_url": speech_url,
+                    "speaker": plan.get("speaker"),
+                    "min_seconds": plan.get("min_seconds"),
+                    "max_seconds": plan.get("max_seconds"),
+                    "reuse_policy": plan.get("reuse_policy"),
+                    "command": command_text,
+                    "hook": plan.get("hook"),
+                }
+                cmd, slug, rel_output = _build_command(body, root)
+                result = subprocess.run(
+                    cmd,
+                    cwd=root,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    env=env,
                 )
-                if reg:
-                    production_video_id = reg.get("id")
+                part_log = "\n".join(p for p in (result.stdout, result.stderr) if p).strip()
+                if part_log:
+                    logs.append(f"=== build {index + 1}/{video_count} ({slug}) ===\n{part_log}")
+                if result.returncode != 0:
+                    truncated = "\n\n".join(logs)[-120_000:]
+                    thread_store._conn.execute(
+                        """
+                        UPDATE cursor_command_jobs
+                        SET status = 'failed', stdout_log = ?, stderr_log = ?, error_message = ?,
+                            completed_at = ?
+                        WHERE job_key = ?
+                        """,
+                        (
+                            truncated,
+                            "",
+                            truncated or f"exit {result.returncode} on video {index + 1}",
+                            _now_iso(),
+                            job_key,
+                        ),
+                    )
+                    thread_store._conn.commit()
+                    return
+                output = root / rel_output
+                last_slug = slug
+                last_output = output
+                if output.is_file():
+                    from discovery.auto_register import sync_register_best_effort
 
+                    reg = sync_register_best_effort(
+                        slug=slug,
+                        visual_style=plan.get("broll_query"),
+                        root=root,
+                    )
+                    if reg:
+                        production_video_id = reg.get("id")
+                    try:
+                        from discovery.site_videos import sync_legacy_renders_to_site
+
+                        sync_legacy_renders_to_site(slugs=[slug], root=root, rebuild_catalog=False)
+                    except Exception:
+                        pass
+
+            truncated = "\n\n".join(logs)[-120_000:]
+            rel_output = (
+                last_output.relative_to(root).as_posix()
+                if last_output and last_output.is_file()
+                else None
+            )
             thread_store._conn.execute(
                 """
                 UPDATE cursor_command_jobs
@@ -275,20 +331,13 @@ def run_direct_montage_command(
                 """,
                 (
                     truncated,
-                    f"Direct montage build completed ({slug}).",
-                    rel_output if output.is_file() else None,
+                    f"Direct montage: {video_count} video(s) ({last_slug}).",
+                    rel_output,
                     production_video_id,
                     _now_iso(),
                     job_key,
                 ),
             )
-            if output.is_file():
-                try:
-                    from discovery.site_videos import sync_legacy_renders_to_site
-
-                    sync_legacy_renders_to_site(slugs=[slug], root=root, rebuild_catalog=False)
-                except Exception:
-                    pass
             thread_store._conn.commit()
         except Exception as exc:
             thread_store._conn.execute(

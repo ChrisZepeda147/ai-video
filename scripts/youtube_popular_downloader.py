@@ -97,9 +97,11 @@ COMMENTARY_HEAVY_RE = re.compile(
 REALESTATE_TOUR_RE = re.compile(
     r"\b(house tour|home tour|property tour|mansion tour|estate tour|"
     r"luxury house tour|mega mansion tour|full tour|room tour|walkthrough|"
-    r"inside a \$|inside the \$|inside this \$|touring a \$|"
+    r"apartment tour|condo tour|penthouse tour|studio tour|flat tour|"
+    r"inside a \$|inside the \$|inside this \$|inside a £|touring a \$|"
     r"must see.{0,12}inside|realtor|open house|real estate|dream home|"
-    r"mega mansion|hour tour|travel video|night cities|capital of)\b",
+    r"mega mansion|hour tour|travel video|night cities|capital of|"
+    r"apartment tour\s*\|\||\|\|\s*.*apartment)\b",
     re.IGNORECASE,
 )
 SIM_GAME_FOOTAGE_TITLE_RE = re.compile(
@@ -112,6 +114,20 @@ SIM_GAME_FOOTAGE_TITLE_RE = re.compile(
 )
 CABIN_TITLE_RE = re.compile(
     r"\b(interior|cabin|cockpit|dashboard|walkaround|start[\s-]?up)\b",
+    re.IGNORECASE,
+)
+SLEEP_AMBIENCE_RE = re.compile(
+    r"(for\s+sleep|sleep\s*&\s*relax|bedroom\s+ambience|rainy\s+night|"
+    r"soft\s+piano|no\s+ads|white\s+noise|ambience\s+for|"
+    r"\b\d+\s*hours?\b|10\s*hour|8\s*hour)",
+    re.IGNORECASE,
+)
+BROLL_MAX_SOURCE_SECONDS = 20 * 60
+VLOG_OR_INTRO_RE = re.compile(
+    r"\b(vlog|day in (a |the )?life|grwm|get ready with me|facecam|"
+    r"intro remastered|channel intro|logo animation|hbo:|"
+    r"come with me|follow me|what i rent|what i pay|my rent|"
+    r"living alone|roommate tour|hostel tour)\b",
     re.IGNORECASE,
 )
 
@@ -401,6 +417,14 @@ def is_cabin_titled(video: VideoCandidate) -> bool:
     return bool(CABIN_TITLE_RE.search(video.title))
 
 
+def is_sleep_ambiance(video: VideoCandidate) -> bool:
+    return bool(SLEEP_AMBIENCE_RE.search(video.title))
+
+
+def is_vlog_or_intro(video: VideoCandidate) -> bool:
+    return bool(VLOG_OR_INTRO_RE.search(video.title))
+
+
 def background_gameplay_score(video: VideoCandidate) -> int:
     title = video.title.lower()
     score = 0
@@ -594,13 +618,12 @@ def split_into_parts(
     aspect_ratio: str,
     max_height: int,
     start_offset: float = 0.0,
-    require_usable_fps: bool = True,
 ) -> list[dict[str, Any]]:
     try:
         source_fps = probe_fps(source)
     except (OSError, ValueError, subprocess.CalledProcessError):
         source_fps = None
-    if require_usable_fps and source_fps is not None and not is_usable_fps(source_fps):
+    if source_fps is not None and not is_usable_fps(source_fps):
         print(f"    drop {source.name}: {source_fps:.1f} fps")
         if not keep_source and source.exists():
             source.unlink()
@@ -661,6 +684,7 @@ def filter_unwanted(
     min_views: int,
     min_duration: float,
     max_duration: float | None = None,
+    exclude_sleep: bool = True,
     quiet: bool = False,
 ) -> list[VideoCandidate]:
     kept: list[VideoCandidate] = []
@@ -672,7 +696,9 @@ def filter_unwanted(
     skipped_sim = 0
     skipped_views = 0
     skipped_duration = 0
-    skipped_too_long = 0
+    skipped_sleep = 0
+    skipped_long = 0
+    skipped_vlog = 0
     skipped_other = 0
     for video in candidates:
         if exclude_music and is_music_video(video):
@@ -693,6 +719,12 @@ def filter_unwanted(
         if is_commentary_heavy(video):
             skipped_commentary += 1
             continue
+        if exclude_sleep and is_sleep_ambiance(video):
+            skipped_sleep += 1
+            continue
+        if is_vlog_or_intro(video):
+            skipped_vlog += 1
+            continue
         if video.view_count is not None and video.view_count < min_views:
             skipped_views += 1
             continue
@@ -704,7 +736,7 @@ def filter_unwanted(
             and video.duration_seconds is not None
             and video.duration_seconds > max_duration
         ):
-            skipped_too_long += 1
+            skipped_long += 1
             continue
         if background_gameplay_only and background_gameplay_score(video) < 4:
             skipped_other += 1
@@ -731,8 +763,12 @@ def filter_unwanted(
         parts.append(f"{skipped_views} low-view")
     if skipped_duration:
         parts.append(f"{skipped_duration} too-short")
-    if skipped_too_long:
-        parts.append(f"{skipped_too_long} too-long")
+    if skipped_sleep:
+        parts.append(f"{skipped_sleep} sleep/ambiance")
+    if skipped_vlog:
+        parts.append(f"{skipped_vlog} vlog/intro")
+    if skipped_long:
+        parts.append(f"{skipped_long} too-long")
     if skipped_other:
         parts.append(f"{skipped_other} non-background gameplay")
     if parts:
@@ -769,7 +805,6 @@ def download_videos(
     quiet: bool = False,
     id_only_filenames: bool = False,
     start_offset: float = 0.0,
-    require_usable_fps: bool = True,
 ) -> list[dict[str, Any]]:
     _configure_stdout()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -780,22 +815,13 @@ def download_videos(
         name_tpl = "%(id)s.%(ext)s" if id_only_filenames else "%(id)s_%(title)s.%(ext)s"
         outtmpl = str(output_dir / name_tpl)
         postprocessors = [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}]
-    elif require_usable_fps:
+    else:
         min_fps = int(MIN_USABLE_FPS)
         format_selector = (
             f"bestvideo[fps>={min_fps}][height<={max_height}]+bestaudio/"
             f"bestvideo[fps>={min_fps}]+bestaudio/"
             f"best[fps>={min_fps}][height<={max_height}]/"
             f"best[fps>={min_fps}]"
-        )
-        outtmpl = str(output_dir / "%(id)s_source.%(ext)s")
-        postprocessors = []
-    else:
-        format_selector = (
-            f"bestvideo[height<={max_height}]+bestaudio/"
-            f"bestvideo+bestaudio/"
-            f"best[height<={max_height}]/"
-            f"best"
         )
         outtmpl = str(output_dir / "%(id)s_source.%(ext)s")
         postprocessors = []
@@ -905,7 +931,6 @@ def download_videos(
                         aspect_ratio=aspect_ratio,
                         max_height=max_height,
                         start_offset=start_offset,
-                        require_usable_fps=require_usable_fps,
                     )
                     record["parts"] = parts
                     record["status"] = "ok" if parts else "error"
@@ -998,12 +1023,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum source video length in seconds (default: 60)",
     )
     common.add_argument(
-        "--max-duration",
-        type=int,
-        default=None,
-        help="Skip sources longer than this many seconds (e.g. 900 = 15 min)",
-    )
-    common.add_argument(
         "--clip-length",
         type=int,
         default=120,
@@ -1064,11 +1083,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--any-topic",
         action="store_true",
         help="Skip background-gameplay title filter (car B-roll, nature, etc.)",
-    )
-    common.add_argument(
-        "--no-fps-gate",
-        action="store_true",
-        help="Download and split any fps (skip the readable-fps probe). Use when you will vet clips yourself.",
     )
 
     trending = sub.add_parser(
@@ -1196,7 +1210,6 @@ def main() -> int:
             background_gameplay_only=background_only,
             min_views=args.min_views,
             min_duration=float(args.min_duration),
-            max_duration=float(args.max_duration) if args.max_duration is not None else None,
         )
     else:
         candidates = candidates[: args.limit]
@@ -1293,7 +1306,6 @@ def main() -> int:
         split_parts=split_parts,
         keep_source=args.keep_source,
         aspect_ratio=args.aspect_ratio,
-        require_usable_fps=not args.no_fps_gate,
     )
     manifest_path = write_manifest(output_dir, args.mode, args, results)
     for record in results:

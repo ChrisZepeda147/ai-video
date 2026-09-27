@@ -94,7 +94,16 @@ def _build_command(body: dict[str, Any], root: Path) -> tuple[list[str], str, st
 
     speech_query = str(body.get("speech_query") or config.get("speech_query") or "").strip()
     speech_url = str(body.get("speech_url") or "").strip()
-    speaker = str(body.get("speaker") or config.get("speaker") or "").strip()
+    speaker = str(body.get("speaker") or "").strip()
+    if not speaker and speech_query:
+        try:
+            from discovery.speaker_identity import infer_speaker
+
+            speaker = infer_speaker(speech_query) or ""
+        except ImportError:
+            pass
+    if not speaker:
+        speaker = str(config.get("speaker") or "").strip()
 
     script = root / "scripts" / "build_motivation_job.py"
     cmd = [sys.executable, str(script), "--slug", slug, "--broll-query", broll_query]

@@ -10,6 +10,7 @@ from discovery.media_paths import (
     is_complete_motivation_job,
     is_playable_file,
     is_previewable_output,
+    is_registerable_motivation_job,
     motivation_job_slug_from_rel,
 )
 
@@ -60,6 +61,19 @@ class MediaPathsTests(unittest.TestCase):
         self.assertTrue(is_complete_motivation_job(self.root, slug, output_path=output))
         self.assertTrue(is_previewable_output(self.root, rel))
         self.assertTrue(is_playable_file(output))
+
+    def test_registerable_after_clip_cleanup(self) -> None:
+        slug = "post-cleanup-job"
+        job_dir = self.root / "downloads" / "motivational" / slug
+        out_dir = job_dir / "output"
+        audio_dir = job_dir / "audio"
+        out_dir.mkdir(parents=True)
+        audio_dir.mkdir(parents=True)
+        (audio_dir / "speech.mp3").write_bytes(b"\x00" * 10_000)
+        output = out_dir / f"{slug}-motivation.mp4"
+        output.write_bytes(b"\x00" * 200_000)
+        self.assertFalse(is_complete_motivation_job(self.root, slug, output_path=output))
+        self.assertTrue(is_registerable_motivation_job(self.root, slug, output_path=output))
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  CalendarDays,
   Clapperboard,
   LayoutDashboard,
   MessageSquare,
@@ -49,6 +50,12 @@ export const navItems: NavItem[] = [
     label: "Make Short",
     icon: Sparkles,
     description: "Structured brief → Cursor Agent Short",
+  },
+  {
+    href: "/weekly",
+    label: "Weekly",
+    icon: CalendarDays,
+    description: "Sunday feed → 7am daily 3-video runs",
   },
   {
     href: "/videos",

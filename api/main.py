@@ -1574,6 +1574,255 @@ def command_center_endpoint(
     return build_command_center(store, owner_filter=owner)
 
 
+@app.get("/api/weekly")
+def weekly_get_endpoint(
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    week_start: str = Query(...),
+    owner: str = Query("chris"),
+):
+    from discovery.weekly import get_week
+
+    try:
+        return get_week(store, week_start=week_start, owner=owner)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/weekly/slots")
+def weekly_save_slots_endpoint(
+    body: dict,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    _: Annotated[None, Depends(require_internal_key)],
+):
+    from discovery.weekly import save_slots
+
+    try:
+        return save_slots(
+            store,
+            week_start=str(body.get("week_start") or ""),
+            owner=str(body.get("owner") or "chris"),
+            slots=list(body.get("slots") or []),
+            replace_week=bool(body.get("replace_week")),
+            expect_full_week=bool(body.get("expect_full_week")),
+        )
+    except ValueError as exc:
+        msg = str(exc)
+        code = 409 if "running" in msg.lower() else 422
+        raise HTTPException(status_code=code, detail=msg) from exc
+
+
+@app.post("/api/weekly/upload")
+async def weekly_upload_endpoint(
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    _: Annotated[None, Depends(require_internal_key)],
+    file: UploadFile = File(...),
+    owner: str = Form(default="chris"),
+    week_start: str = Form(default=""),
+    day: str = Form(default="mon"),
+    slot: int = Form(default=1),
+):
+    from discovery.weekly import normalize_owner, weekly_images_dir
+
+    try:
+        owner = normalize_owner(owner)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not week_start:
+        raise HTTPException(status_code=422, detail="week_start is required (YYYY-MM-DD Monday)")
+    suffix = Path(file.filename or "style.jpg").suffix.lower() or ".jpg"
+    if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
+        raise HTTPException(status_code=422, detail="image must be jpg/png/webp")
+    target_dir = weekly_images_dir(owner=owner, week_start=week_start)
+    safe_day = "".join(c for c in day.lower() if c.isalpha())[:3] or "mon"
+    target = target_dir / f"{safe_day}_{int(slot)}_{Path(file.filename or 'style').stem[:32]}{suffix}"
+    target.write_bytes(await file.read())
+    rel = target.relative_to(project_root()).as_posix()
+    return {"path": rel, "url": f"/media/{rel}"}
+
+
+@app.get("/api/weekly/due")
+def weekly_due_endpoint(
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    day: str = Query(...),
+    owner: str | None = None,
+):
+    from discovery.weekly import due_slots
+
+    try:
+        return {"day": day, "items": due_slots(store, day=day, owner=owner)}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/weekly/health")
+def weekly_health_endpoint(
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    day: str | None = None,
+    owner: str | None = None,
+):
+    from datetime import date as date_cls
+
+    from discovery.weekly import weekly_health
+
+    try:
+        return weekly_health(store, day=day or date_cls.today().isoformat(), owner=owner)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/weekly/export")
+def weekly_export_endpoint(
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    week_start: str = Query(...),
+    owner: str = Query("chris"),
+):
+    from discovery.weekly import export_week
+
+    try:
+        return export_week(store, week_start=week_start, owner=owner)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/weekly/import")
+def weekly_import_endpoint(
+    body: dict,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    _: Annotated[None, Depends(require_internal_key)],
+):
+    from discovery.weekly import import_week
+
+    try:
+        return import_week(store, payload=body, replace=bool(body.get("replace", True)))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/weekly/chatgpt-prompt")
+def weekly_chatgpt_prompt_endpoint(
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    week_start: str = Query(...),
+    owner: str = Query("chris"),
+):
+    from discovery.weekly import get_week
+    from discovery.weekly_paste import CHATGPT_FORMAT_TEMPLATE, summarize_week_for_prompt
+
+    from datetime import date as date_cls, timedelta
+
+    prev_start = date_cls.fromisoformat(week_start) - timedelta(days=7)
+    prev = get_week(store, week_start=prev_start.isoformat(), owner=owner)
+    summary = summarize_week_for_prompt(list(prev.get("slots") or []))
+    return {"prompt": CHATGPT_FORMAT_TEMPLATE.format(previous_week=summary)}
+
+
+@app.post("/api/weekly/parse-paste")
+def weekly_parse_paste_endpoint(body: dict):
+    from discovery.weekly_paste import parse_weekly_paste
+
+    slots, warnings = parse_weekly_paste(str(body.get("text") or ""))
+    return {"slots": slots, "warnings": warnings, "count": len(slots)}
+
+
+@app.post("/api/weekly/apply-paste")
+def weekly_apply_paste_endpoint(
+    body: dict,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    _: Annotated[None, Depends(require_internal_key)],
+):
+    from discovery.weekly import save_slots
+    from discovery.weekly_paste import parse_weekly_paste
+
+    text = str(body.get("text") or "")
+    slots, warnings = parse_weekly_paste(text)
+    if not slots:
+        raise HTTPException(status_code=422, detail="; ".join(warnings) or "Nothing parsed")
+    try:
+        saved = save_slots(
+            store,
+            week_start=str(body.get("week_start") or ""),
+            owner=str(body.get("owner") or "chris"),
+            slots=slots,
+            replace_week=bool(body.get("replace_week", True)),
+            expect_full_week=True,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409 if "running" in str(exc).lower() else 422, detail=str(exc)) from exc
+    return {**saved, "parse_warnings": warnings}
+
+
+@app.post("/api/weekly/preview-brief")
+def weekly_preview_brief_endpoint(body: dict):
+    from discovery.motivation_command_brief import compose_from_slot
+
+    slot = dict(body.get("slot") or body)
+    slot["owner"] = body.get("owner") or slot.get("owner") or "chris"
+    slot["week_start"] = body.get("week_start") or slot.get("week_start") or ""
+    return {"brief": compose_from_slot(slot)}
+
+
+@app.get("/api/weekly/presets")
+def weekly_presets_endpoint(
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    owner: str | None = None,
+):
+    from discovery.weekly import weekly_presets
+
+    try:
+        return weekly_presets(store, owner=owner)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/weekly/log")
+def weekly_log_endpoint(lines: int = Query(80, ge=1, le=500)):
+    from discovery.weekly import tail_weekly_log
+
+    return {"log": tail_weekly_log(lines=lines)}
+
+
+@app.post("/api/weekly/slots/{slot_id}/retry")
+def weekly_retry_slot_endpoint(
+    slot_id: int,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    _: Annotated[None, Depends(require_internal_key)],
+):
+    from discovery.weekly import requeue_slot
+
+    if not requeue_slot(store, slot_id):
+        raise HTTPException(status_code=404, detail="Slot not found or not failed")
+    return {"slot_id": slot_id, "status": "queued"}
+
+
+@app.post("/api/weekly/run-due")
+def weekly_run_due_endpoint(
+    body: dict,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    _: Annotated[None, Depends(require_internal_key)],
+):
+    from discovery.weekly import run_weekly_due_batch
+
+    day = str(body.get("day") or "")
+    owner = body.get("owner") or None
+    limit = max(1, min(int(body.get("limit") or 3), 12))
+    serial = body.get("serial", True)
+    if isinstance(serial, str):
+        serial = serial.strip().lower() not in {"0", "false", "no"}
+    try:
+        return run_weekly_due_batch(
+            store,
+            day=day,
+            owner=owner,
+            limit=limit,
+            dry_run=False,
+            serial=bool(serial),
+            wait_complete=bool(body.get("wait_complete")),
+            wait_timeout_sec=max(60, int(body.get("wait_timeout_minutes") or 240) * 60),
+            retry_failed=bool(body.get("retry_failed")),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @app.get("/api/accounts", response_model=PublishingAccountsResponse)
 def list_accounts_endpoint(
     store: Annotated[DiscoveryStore, Depends(get_store)],

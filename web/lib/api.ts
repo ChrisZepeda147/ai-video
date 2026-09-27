@@ -817,6 +817,120 @@ export async function postSharedSyncPullImport(body?: {
   );
 }
 
+export async function fetchWeekly(weekStart: string, owner: string) {
+  return fetchJson<import("@/lib/types").WeeklyResponse>(
+    buildUrl("/api/weekly", { week_start: weekStart, owner }),
+  );
+}
+
+export async function postWeeklySlots(body: {
+  week_start: string;
+  owner: string;
+  replace_week?: boolean;
+  expect_full_week?: boolean;
+  slots: Array<{
+    day: string;
+    slot: number;
+    speaker: string;
+    visual_direction: string;
+    image_paths?: string[];
+    image_prompt?: string;
+    require_stills_first?: boolean;
+    brief_text?: string;
+  }>;
+}) {
+  return fetchJson<{ plan_id: number; slots_saved: number; warnings?: string[] }>(buildUrl("/api/weekly/slots"), {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: internalHeaders(),
+  });
+}
+
+export async function fetchWeeklyChatgptPrompt(weekStart: string, owner: string) {
+  return fetchJson<{ prompt: string }>(buildUrl("/api/weekly/chatgpt-prompt", { week_start: weekStart, owner }));
+}
+
+export async function postWeeklyApplyPaste(body: {
+  week_start: string;
+  owner: string;
+  text: string;
+  replace_week?: boolean;
+}) {
+  return fetchJson<{ plan_id: number; slots_saved: number; warnings?: string[]; parse_warnings?: string[] }>(
+    buildUrl("/api/weekly/apply-paste"),
+    { method: "POST", body: JSON.stringify(body), headers: internalHeaders() },
+  );
+}
+
+export async function postWeeklyParsePaste(text: string) {
+  return fetchJson<{ slots: unknown[]; warnings: string[]; count: number }>(
+    buildUrl("/api/weekly/parse-paste"),
+    { method: "POST", body: JSON.stringify({ text }), headers: internalHeaders() },
+  );
+}
+
+export async function fetchWeeklyPresets(owner?: string) {
+  return fetchJson<{ speakers: string[]; visuals: string[] }>(
+    buildUrl("/api/weekly/presets", owner ? { owner } : {}),
+  );
+}
+
+export async function fetchWeeklyExport(weekStart: string, owner: string) {
+  return fetchJson<Record<string, unknown>>(buildUrl("/api/weekly/export", { week_start: weekStart, owner }));
+}
+
+export async function postWeeklyImport(payload: Record<string, unknown>) {
+  return fetchJson<{ plan_id: number; slots_saved: number; warnings?: string[] }>(
+    buildUrl("/api/weekly/import"),
+    { method: "POST", body: JSON.stringify(payload), headers: internalHeaders() },
+  );
+}
+
+export async function postWeeklyPreviewBrief(body: Record<string, unknown>) {
+  return fetchJson<{ brief: string }>(buildUrl("/api/weekly/preview-brief"), {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: internalHeaders(),
+  });
+}
+
+export async function fetchWeeklyLog(lines = 80) {
+  return fetchJson<{ log: string }>(buildUrl("/api/weekly/log", { lines }));
+}
+
+export async function fetchWeeklyHealth(params?: { day?: string; owner?: string }) {
+  return fetchJson<import("@/lib/types").WeeklyHealthResponse>(
+    buildUrl("/api/weekly/health", params),
+  );
+}
+
+export async function postWeeklyRetrySlot(slotId: number) {
+  return fetchJson<{ slot_id: number; status: string }>(
+    buildUrl(`/api/weekly/slots/${slotId}/retry`),
+    { method: "POST", headers: internalHeaders() },
+  );
+}
+
+export async function postWeeklyRunDue(body: {
+  day: string;
+  owner?: string;
+  limit?: number;
+  serial?: boolean;
+  retry_failed?: boolean;
+  wait_complete?: boolean;
+}) {
+  return fetchJson<{
+    day: string;
+    count: number;
+    deferred?: boolean;
+    submitted: Array<{ slot_id: string; job_key: string }>;
+  }>(buildUrl("/api/weekly/run-due"), {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: internalHeaders(),
+  });
+}
+
 export async function fetchProductionLibrary(params?: {
   limit?: number;
   speaker?: string;

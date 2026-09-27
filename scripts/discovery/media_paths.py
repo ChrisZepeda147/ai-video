@@ -102,6 +102,33 @@ def is_complete_motivation_job(
     return True
 
 
+def is_registerable_motivation_job(
+    root: Path,
+    job_slug: str,
+    *,
+    output_path: Path | None = None,
+) -> bool:
+    """Register to production library after cleanup may have removed B-roll clips."""
+    from discovery.motivation_paths import motivation_jobs_root, resolve_job_dir
+
+    job_dir = resolve_job_dir(job_slug, motivation_jobs_root(root))
+    if not job_dir:
+        return False
+    speech = job_dir / "audio" / "speech.mp3"
+    if not is_playable_file(speech, min_bytes=MIN_AUDIO_BYTES):
+        return False
+    if output_path is None:
+        out_dir = job_dir / "output"
+        candidates: list[Path] = []
+        if out_dir.is_dir():
+            candidates.extend(sorted(out_dir.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True))
+        default = out_dir / f"{job_slug}-motivation.mp4"
+        if default.is_file():
+            candidates.insert(0, default)
+        output_path = candidates[0] if candidates else None
+    return bool(output_path and is_playable_file(output_path))
+
+
 def is_previewable_output(root: Path, rel_path: str | None, *, role: str | None = None) -> bool:
     """Videos tab preview gate — rejects stubs and incomplete motivation/combo jobs."""
     normalized = normalize_rel_path(rel_path)

@@ -37,7 +37,7 @@
     "words_per_phrase_max": 5,
     "font_size_phrase": 46,
     "font_size_hook": 64,
-    "alignment": "lower_middle"
+    "alignment": "center_middle"
   },
   "pacing": {
     "driven_montage_pacing": true,

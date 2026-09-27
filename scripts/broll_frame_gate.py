@@ -47,6 +47,27 @@ BROLL_STOP = {
     "uhd",
     "video",
     "videos",
+    "with",
+    "from",
+    "this",
+    "that",
+    "your",
+    "our",
+    "beautiful",
+    "stunning",
+    "gorgeous",
+    "amazing",
+    "view",
+    "views",
+    "vista",
+    "60fps",
+    "50fps",
+    "fps",
+    "morning",
+    "early",
+    "late",
+    "empty",
+    "work",
 }
 
 SUBJECT_ALIASES = {
@@ -56,19 +77,25 @@ SUBJECT_ALIASES = {
     "lambo": ("lambo", "lamborghini", "aventador", "huracan", "urus", "revuelto"),
     "lamborghini": ("lambo", "lamborghini", "aventador", "huracan", "urus", "revuelto"),
     "ferrari": ("ferrari", "sf90", "pista", "roma", "812", "488"),
-    "mclaren": ("mclaren", "765lt", "720s", "p1"),
-    "rolls": ("rolls", "royce", "phantom"),
-    "royce": ("rolls", "royce", "phantom"),
-    "phantom": ("rolls", "royce", "phantom"),
-    "bentley": ("bentley", "g63", "amg"),
     "yacht": ("yacht", "superyacht", "megayacht"),
     "mansion": ("mansion", "estate", "villa"),
     "villa": ("villa", "estate"),
+    "apartment": ("apartment", "penthouse", "condo", "highrise"),
+    "highrise": ("highrise", "penthouse", "skyline", "apartment"),
+    "penthouse": ("penthouse", "apartment", "highrise"),
+    "skyline": ("skyline", "cityscape", "highrise"),
 }
 
+SUBJECT_PHRASES = (
+    (re.compile(r"\bhigh[\s-]+rise\b"), "highrise"),
+)
+
 TALKING_HEAD_LIMIT = 0.10
+TALKING_HEAD_LIMIT_SCENE = 0.07
+PERSON_SKIN_LIMIT_SCENE = 0.045
 TITLE_CARD_LIMIT = 0.58
 EMPTY_LIMIT = 0.86
+EMPTY_LIMIT_SCENE = 0.97
 PASS_RATIO = 0.8
 SCAN_STEP = 1.0
 MIN_CLEAN_SPAN = 3.0
@@ -97,14 +124,8 @@ VEHICLE_WORDS = frozenset(
         "koenigsegg",
         "lambo",
         "lamborghini",
-        "mclaren",
-        "maybach",
-        "phantom",
         "pista",
         "porsche",
-        "rolls",
-        "royce",
-        "bentley",
         "regera",
         "revuelto",
         "roma",
@@ -113,6 +134,40 @@ VEHICLE_WORDS = frozenset(
         "urus",
         "vehicle",
     }
+)
+SCENE_WORDS = frozenset(
+    {
+        "apartment",
+        "city",
+        "cityscape",
+        "condo",
+        "estate",
+        "highrise",
+        "mansion",
+        "penthouse",
+        "skyline",
+        "villa",
+        "yacht",
+    }
+)
+VIEW_ONLY_WORDS = frozenset(
+    {
+        "aerial",
+        "drone",
+        "empty",
+        "scenery",
+        "skyline",
+        "timelapse",
+        "view",
+        "views",
+        "vista",
+        "window",
+    }
+)
+PEOPLE_OK_RE = re.compile(
+    r"\b(person|people|crowd|model|athlete|workers?|host|realtor|interview|"
+    r"portrait|talking|facecam|couple|family|vlog|walking|runner|gym)\b",
+    re.IGNORECASE,
 )
 OPENER_VIEWS = frozenset({"front", "three_quarter", "side"})
 NON_CAR_OBJECTS = frozenset(
@@ -139,9 +194,12 @@ NON_CAR_OBJECTS = frozenset(
 
 def subject_tokens(*parts: str) -> list[str]:
     raw = " ".join(part.replace("-", " ").replace("_", " ") for part in parts if part)
+    raw = raw.lower()
+    for pattern, replacement in SUBJECT_PHRASES:
+        raw = pattern.sub(replacement, raw)
     found: list[str] = []
     seen: set[str] = set()
-    for word in WORD_RE.findall(raw.lower()):
+    for word in WORD_RE.findall(raw):
         if word in BROLL_STOP or len(word) < 3:
             continue
         if word not in seen:
@@ -149,7 +207,7 @@ def subject_tokens(*parts: str) -> list[str]:
             found.append(word)
     if found:
         return found
-    fallback = [word for word in WORD_RE.findall(raw.lower()) if len(word) > 2]
+    fallback = [word for word in WORD_RE.findall(raw) if len(word) > 2]
     return list(dict.fromkeys(fallback))
 
 
@@ -200,6 +258,23 @@ def talking_head_score(png_bytes: bytes) -> float:
     return skin_hits / max(total, 1)
 
 
+def person_skin_score(png_bytes: bytes) -> float:
+    """Skin-toned pixels in center frame — walking hosts, torsos, not just face-cam."""
+    img = Image.open(BytesIO(png_bytes)).convert("RGB")
+    width, height = img.size
+    x0, x1 = int(width * 0.12), int(width * 0.88)
+    y0, y1 = int(height * 0.18), int(height * 0.92)
+    skin_hits = 0
+    total = 0
+    for x in range(x0, x1, 3):
+        for y in range(y0, y1, 3):
+            r, g, b = img.getpixel((x, y))
+            if _is_skin_pixel(r, g, b):
+                skin_hits += 1
+            total += 1
+    return skin_hits / max(total, 1)
+
+
 def title_card_score(png_bytes: bytes) -> float:
     img = Image.open(BytesIO(png_bytes)).convert("RGB")
     width, height = img.size
@@ -239,10 +314,40 @@ def empty_score(png_bytes: bytes) -> float:
 
 
 def wants_vehicle(subject: str) -> bool:
+    if not (subject or "").strip():
+        return False
+    try:
+        from broll_search_query import is_storyboard_query
+    except ImportError:
+        is_storyboard_query = None  # type: ignore[assignment]
+    if is_storyboard_query and is_storyboard_query(subject):
+        return False
     tokens = set(subject_tokens(subject))
     for token in list(tokens):
         tokens.update(SUBJECT_ALIASES.get(token, ()))
     return bool(tokens & VEHICLE_WORDS)
+
+
+def wants_scene(subject: str) -> bool:
+    tokens = set(subject_tokens(subject))
+    for token in list(tokens):
+        tokens.update(SUBJECT_ALIASES.get(token, ()))
+    return bool(tokens & SCENE_WORDS) and not wants_vehicle(subject)
+
+
+def prefers_no_people(subject: str) -> bool:
+    """Views / scenery B-roll — drop hosts unless the brief asks for people."""
+    text = (subject or "").strip()
+    if not text:
+        return False
+    if PEOPLE_OK_RE.search(text):
+        return False
+    tokens = set(subject_tokens(text))
+    for token in list(tokens):
+        tokens.update(SUBJECT_ALIASES.get(token, ()))
+    if tokens & VIEW_ONLY_WORDS:
+        return True
+    return wants_scene(text)
 
 
 def _luma_var(png_bytes: bytes, *, x0: float, x1: float, y0: float, y1: float) -> float:
@@ -395,11 +500,18 @@ def opener_has_jump_cut(frames: list[bytes], *, threshold: float = OPENER_JUMP_M
 
 def frame_fail_reasons(png_bytes: bytes, subject: str = "") -> list[str]:
     reasons: list[str] = []
-    if talking_head_score(png_bytes) >= TALKING_HEAD_LIMIT:
+    scene = wants_scene(subject)
+    view_only = prefers_no_people(subject)
+    empty_limit = EMPTY_LIMIT_SCENE if scene else EMPTY_LIMIT
+    head_limit = TALKING_HEAD_LIMIT_SCENE if view_only else TALKING_HEAD_LIMIT
+    if talking_head_score(png_bytes) >= head_limit:
         reasons.append("talking-head")
-    if title_card_score(png_bytes) >= TITLE_CARD_LIMIT:
+    if view_only and person_skin_score(png_bytes) >= PERSON_SKIN_LIMIT_SCENE:
+        reasons.append("person")
+    # Night city / apartment lights look like title cards (dark + sparks). Skip that check.
+    if not scene and title_card_score(png_bytes) >= TITLE_CARD_LIMIT:
         reasons.append("title-card")
-    if empty_score(png_bytes) >= EMPTY_LIMIT:
+    if empty_score(png_bytes) >= empty_limit:
         reasons.append("empty")
     if wants_vehicle(subject) and vehicle_missing(png_bytes):
         reasons.append("missing-subject")
@@ -461,14 +573,19 @@ def window_report(
         return {"ok": False, "pass_ratio": 0.0, "reasons": ["no-frames"]}
     failed = 0
     reasons: list[str] = []
+    view_only = prefers_no_people(subject)
+    head_limit = TALKING_HEAD_LIMIT_SCENE if view_only else TALKING_HEAD_LIMIT
     for frame in frames:
         frame_reasons = frame_fail_reasons(frame, subject)
         if frame_reasons:
             failed += 1
             reasons.extend(frame_reasons)
-        elif strict and talking_head_score(frame) >= TALKING_HEAD_LIMIT * 0.7:
+        elif strict and talking_head_score(frame) >= head_limit * 0.7:
             failed += 1
             reasons.append("talking-head")
+        elif strict and view_only and person_skin_score(frame) >= PERSON_SKIN_LIMIT_SCENE * 0.85:
+            failed += 1
+            reasons.append("person")
     ratio = (len(frames) - failed) / len(frames)
     first_bad = bool(frames) and bool(frame_fail_reasons(frames[0], subject))
     needed = 1.0 if strict else PASS_RATIO
@@ -502,6 +619,14 @@ def _load_env_files() -> None:
 def vision_prompt(subject: str, *, opener: bool = False) -> str:
     """Ask vision whether the subject is in frame. Opener is stricter for cars."""
     subject = subject.strip()
+    if prefers_no_people(subject):
+        return (
+            f'Intended B-roll: "{subject}" — scenery / views only, no people. '
+            "Answer YES only if the frame matches that subject as empty scenery "
+            "(window view, skyline, architecture, room with no one in frame). "
+            "Answer NO if a person is visible, someone is talking to camera, "
+            "or a host/realtor is walking through."
+        )
     if opener and wants_vehicle(subject):
         return (
             f'Intended subject: "{subject}". Reply with JSON only, no extra text: '
@@ -700,7 +825,10 @@ def confirm_span_subject(
     if not subject.strip():
         return True
     mid = start + max((end - start) * 0.5, 0.0)
-    for stamp in (start + 0.2, mid):
+    stamps = (start + 0.2, mid)
+    if prefers_no_people(subject):
+        stamps = (start + 0.15, mid, max(end - 0.35, start))
+    for stamp in stamps:
         stamp = min(max(stamp, start), max(end - 0.05, start))
         frame = extract_preview_frame(source, stamp)
         if not frame:

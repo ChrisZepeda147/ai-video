@@ -284,6 +284,7 @@ def start_command_job(
     job_key: str,
     session_id: str | None = None,
     auto_run: bool = True,
+    agent_model: str | None = None,
 ) -> dict[str, Any]:
     job = get_command_job(store, job_key)
     if not job:
@@ -293,7 +294,7 @@ def start_command_job(
 
     def _run() -> None:
         user_command = str(job.get("user_command") or "")
-        if should_use_direct_montage(user_command):
+        if not agent_model and should_use_direct_montage(user_command):
             run_direct_montage_command(job_key=job_key, user_command=user_command)
             return
 
@@ -319,6 +320,7 @@ def start_command_job(
                 job_id=job_key,
                 video_id=job.get("production_video_id"),
                 session_id=active_session,
+                model=agent_model,
             )
 
             status = "completed" if result.ok else "failed"
@@ -393,6 +395,7 @@ def submit_command(
     parent_video_id: int | None = None,
     session_id: str | None = None,
     batch_count: int | None = None,
+    agent_model: str | None = None,
 ) -> dict[str, Any]:
     refs = parse_video_refs(user_command)
     if video_id is None and refs:
@@ -410,7 +413,9 @@ def submit_command(
             parent_video_id=parent_video_id,
             session_id=session_id,
         )
-        started = start_command_job(store, job_key=record["job_key"], session_id=session_id)
+        started = start_command_job(
+            store, job_key=record["job_key"], session_id=session_id, agent_model=agent_model
+        )
         record.update(
             {
                 "status": started.get("status", "running"),
@@ -435,7 +440,9 @@ def submit_command(
             parent_video_id=parent_video_id,
             session_id=shared_session,
         )
-        started = start_command_job(store, job_key=record["job_key"], session_id=shared_session)
+        started = start_command_job(
+            store, job_key=record["job_key"], session_id=shared_session, agent_model=agent_model
+        )
         if started.get("cursor_session_id"):
             shared_session = started["cursor_session_id"]
         record.update({"status": started.get("status", "running"), "started_at": started.get("started_at")})

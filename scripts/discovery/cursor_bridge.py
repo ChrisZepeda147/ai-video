@@ -134,6 +134,10 @@ def _parse_stream_json_lines(lines: str) -> tuple[list[dict[str, Any]], str, str
     return messages, result_text, session_id, request_id
 
 
+def default_agent_model() -> str | None:
+    return os.environ.get("CURSOR_AGENT_MODEL", "").strip() or None
+
+
 def run_agent(
     prompt: str,
     *,
@@ -144,6 +148,7 @@ def run_agent(
     force: bool = True,
     trust: bool = True,
     timeout_sec: int = 3600,
+    model: str | None = None,
 ) -> AgentRunResult:
     """Run Cursor Agent headlessly with a natural-language prompt."""
     root = workspace or project_root()
@@ -178,6 +183,9 @@ def run_agent(
         "--workspace",
         str(root),
     ]
+    resolved_model = (model or "").strip() or default_agent_model()
+    if resolved_model:
+        cmd.extend(["--model", resolved_model])
     if force:
         cmd.append("--force")
     if trust:

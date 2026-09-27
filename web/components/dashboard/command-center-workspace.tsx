@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
+import { fetchWeeklyHealth } from "@/lib/api";
+import type { WeeklyHealthResponse } from "@/lib/types";
 import { PlatformBadge } from "@/components/platform-badge";
 import type { CommandCenterOwnerBundle, CommandCenterResponse, PublishingOwner } from "@/lib/types";
 
@@ -65,8 +67,16 @@ export function CommandCenterWorkspace({
   const router = useRouter();
   const searchParams = useSearchParams();
   const [pending, startTransition] = useTransition();
+  const [weeklyHealth, setWeeklyHealth] = useState<WeeklyHealthResponse | null>(null);
   const owner = (searchParams.get("owner") || initialOwner || "all").toLowerCase();
   const data = initial;
+
+  useEffect(() => {
+    const healthOwner = owner === "all" ? undefined : owner;
+    fetchWeeklyHealth(healthOwner ? { owner: healthOwner } : {}).then((res) => {
+      if (res.ok) setWeeklyHealth(res.data);
+    });
+  }, [owner]);
 
   const setOwner = useCallback(
     (next: string) => {
@@ -167,6 +177,25 @@ export function CommandCenterWorkspace({
         <div className="min-w-[120px]">
           <p className="text-xs text-zinc-500">Daily completion</p>
           <p className="text-xl font-semibold tabular-nums text-zinc-100">{combined.completion_pct}%</p>
+        </div>
+        <div className="flex w-full flex-wrap gap-2">
+          <Link href="/weekly" className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500">
+            Weekly 7am plan
+          </Link>
+          {(owner === "all" ? ["chris", "stephen"] : [owner]).map((o) => (
+            <Link key={o} href={`/weekly?owner=${o}`} className="rounded-lg border border-zinc-700 px-4 py-2 text-sm capitalize text-zinc-200 hover:bg-zinc-900">
+              {o} week
+            </Link>
+          ))}
+          {weeklyHealth ? (
+            <p className="w-full text-xs text-zinc-500">
+              7am queue: {weeklyHealth.due_count} due today · {weeklyHealth.today_stats.done}/3 done · Agent{" "}
+              {weeklyHealth.preflight.ok ? "ready" : "blocked"} · {weeklyHealth.queue_busy ? "busy" : "idle"}
+              {weeklyHealth.failed_digest?.length
+                ? ` · ${weeklyHealth.failed_digest.length} failed slot(s) — see /weekly`
+                : ""}
+            </p>
+          ) : null}
         </div>
       </section>
 

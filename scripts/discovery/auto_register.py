@@ -12,7 +12,11 @@ from pathlib import Path
 from typing import Any
 
 from discovery.config import default_db_path, project_root
-from discovery.media_paths import is_complete_motivation_job, is_playable_file
+from discovery.media_paths import (
+    is_complete_motivation_job,
+    is_playable_file,
+    is_registerable_motivation_job,
+)
 from discovery.production_library import get_video, register_video
 
 logger = logging.getLogger(__name__)
@@ -207,8 +211,8 @@ def auto_register_motivation_job(
     if not output.is_file() or not is_playable_file(output):
         logger.warning("Motivation output missing or stub: %s", output_dir)
         return None
-    if not is_complete_motivation_job(root, slug, output_path=output):
-        logger.warning("Motivation job incomplete (speech, clips, or output): %s", slug)
+    if not is_registerable_motivation_job(root, slug, output_path=output):
+        logger.warning("Motivation job not registerable (speech or output missing): %s", slug)
         return None
 
     rel_output = _rel(output, root)

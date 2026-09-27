@@ -1,5 +1,5 @@
-# Start full dev stack: FastAPI (8000) + Next.js dashboard (3000).
-# Dashboard starts immediately - do not block on API health (site works with offline banner).
+# Start full dev stack: FastAPI (8000) first, then Next.js dashboard (3000).
+# Dashboard does not start until API /health is ok.
 $Root = Split-Path -Parent $PSScriptRoot
 $Scripts = $PSScriptRoot
 
@@ -25,9 +25,11 @@ if (Test-ApiHealthy) {
     }
     Write-Host "Using Python: $Python"
     Start-ApiServer -Root $Root -Python $Python -Background
-    if (-not (Wait-ApiHealthySoft -Seconds 20)) {
-        Write-Host "API did not become healthy. Check data/logs/api-dev.err"
+    if (-not (Wait-ApiHealthy -Seconds 45)) {
+        Write-Error "Discovery API failed to start. Dashboard will not start. Check data/logs/api-dev.err"
+        exit 1
     }
 }
 
+Write-Host "Backend healthy. Starting dashboard..."
 & (Join-Path $Scripts "start-dashboard.ps1")

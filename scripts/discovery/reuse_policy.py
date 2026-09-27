@@ -36,11 +36,26 @@ def normalize_reuse_policy(value: str | None, *, default: str = "allow") -> str:
     return default
 
 
+_BOILERPLATE = (
+    r"do not reuse the same excerpt unless[^\n.]*",
+    r"avoid reusing the same excerpt unless[^\n.]*",
+    r"use `--reuse-policy require_new` when[^\n.]*",
+    r"use --reuse-policy require_new when[^\n.]*",
+)
+
+
+def _strip_boilerplate(command: str) -> str:
+    text = command.lower()
+    for pattern in _BOILERPLATE:
+        text = re.sub(pattern, " ", text, flags=re.IGNORECASE)
+    return text
+
+
 def parse_reuse_policy(command: str, explicit: str | None = None) -> str:
     policy = normalize_reuse_policy(explicit, default="")
     if policy:
         return policy
-    lower = command.lower()
+    lower = _strip_boilerplate(command)
     for pattern in _REQUIRE_NEW_PATTERNS:
         if re.search(pattern, lower):
             return "require_new"

@@ -19,6 +19,7 @@ KNOWN_SPEAKERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Les Brown", ("les brown",)),
     ("Jim Rohn", ("jim rohn",)),
     ("Gary Vee", ("gary vee", "gary vaynerchuk", "garyv")),
+    ("Chris Williamson", ("chris williamson", "williamson", "modern wisdom", "chris williams")),
 )
 
 

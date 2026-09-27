@@ -37,7 +37,30 @@ class TestCommandMontage(unittest.TestCase):
         self.assertIn("Why AI", plan["speech_query"] or "")
         self.assertEqual(plan["min_seconds"], 60.0)
         self.assertEqual(plan["max_seconds"], 90.0)
+        self.assertEqual(plan["reuse_policy"], "allow")
+
+    def test_extra_instructions_can_require_new(self) -> None:
+        plan = parse_montage_command(
+            SAMPLE + "\n\nExtra instructions:\nDo not reuse. Unused-only B-roll.\n"
+        )
+        assert plan is not None
         self.assertEqual(plan["reuse_policy"], "require_new")
+
+    def test_extra_parses_two_short_videos(self) -> None:
+        text = """
+Make a new 9:16 motivational Short using the luxury-clips-montage workflow.
+Search for audio: chris williamson motivational speech
+Visual / B-roll search: beautiful ocean views
+Default target length: 60–90 seconds unless extra instructions override.
+Extra instructions:
+two videos 30-45 seconds long. first clip should be a stunning view
+"""
+        plan = parse_montage_command(text)
+        assert plan is not None
+        self.assertEqual(plan["min_seconds"], 30.0)
+        self.assertEqual(plan["max_seconds"], 45.0)
+        self.assertEqual(plan["video_count"], 2)
+        self.assertEqual(plan.get("speaker"), "Chris Williamson")
 
 
 if __name__ == "__main__":

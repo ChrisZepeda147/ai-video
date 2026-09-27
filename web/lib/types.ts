@@ -993,3 +993,71 @@ export type CommandCenterResponse = {
   };
   generated_at: string;
 };
+
+export type WeeklySlot = {
+  id?: number;
+  plan_id?: number;
+  day: string;
+  slot: number;
+  speaker: string;
+  visual_direction: string;
+  image_paths: string[];
+  image_prompt?: string;
+  brief_text?: string;
+  status?: string;
+  job_key?: string | null;
+  video_id?: number | null;
+  error_message?: string | null;
+  require_stills_first?: boolean;
+};
+
+export type WeeklyPlan = {
+  id?: number;
+  week_start: string;
+  owner: string;
+  status: string;
+};
+
+export type WeeklyDayProgress = {
+  day: string;
+  filled: number;
+  done: number;
+  complete: boolean;
+  running: number;
+  failed: number;
+};
+
+export type WeeklyProgress = {
+  days: WeeklyDayProgress[];
+  focus_day: string | null;
+  week_complete: boolean;
+};
+
+export type WeeklyResponse = {
+  plan: WeeklyPlan | null;
+  slots: WeeklySlot[];
+  progress?: WeeklyProgress;
+};
+
+export type WeeklyHealthResponse = {
+  day: string;
+  owner: string | null;
+  preflight: { ok: boolean; agent_available: boolean; api_key_set: boolean; issues: string[] };
+  due_count: number;
+  today_stats: { queued: number; running: number; done: number; failed: number };
+  queue_busy: boolean;
+  running_weekly_slots: number;
+  running_command_jobs: number;
+  agent_model: string;
+  last_run: Record<string, unknown> | null;
+  failed_digest?: Array<{
+    id: number;
+    day: string;
+    slot: number;
+    speaker: string;
+    error_message?: string | null;
+    week_start: string;
+    owner: string;
+  }>;
+  log_tail?: string;
+};

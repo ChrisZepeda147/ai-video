@@ -671,3 +671,36 @@ CREATE TABLE IF NOT EXISTS cursor_command_jobs (
 
 CREATE INDEX IF NOT EXISTS idx_cursor_command_jobs_status
     ON cursor_command_jobs (status, created_at DESC);
+
+-- Weekly 7am automation (Sunday feed, 3 videos/day per owner).
+CREATE TABLE IF NOT EXISTS weekly_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    week_start TEXT NOT NULL,
+    owner TEXT NOT NULL DEFAULT 'chris',
+    status TEXT NOT NULL DEFAULT 'draft',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (week_start, owner)
+);
+
+CREATE TABLE IF NOT EXISTS weekly_slots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER NOT NULL REFERENCES weekly_plans (id) ON DELETE CASCADE,
+    day TEXT NOT NULL,
+    slot INTEGER NOT NULL,
+    speaker TEXT NOT NULL DEFAULT '',
+    visual_direction TEXT NOT NULL DEFAULT '',
+    image_paths TEXT NOT NULL DEFAULT '[]',
+    image_prompt TEXT NOT NULL DEFAULT '',
+    require_stills_first INTEGER NOT NULL DEFAULT 0,
+    brief_text TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'queued',
+    job_key TEXT,
+    video_id INTEGER,
+    error_message TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (plan_id, day, slot)
+);
+
+CREATE INDEX IF NOT EXISTS idx_weekly_slots_status ON weekly_slots (status);

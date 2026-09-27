@@ -41,6 +41,33 @@ class BrollFrameGateTests(unittest.TestCase):
         self.assertNotIn("cinematic", tokens)
         self.assertNotIn("luxury", tokens)
 
+    def test_scene_query_drops_filler_and_keeps_apartment(self) -> None:
+        tokens = broll_frame_gate.subject_tokens(
+            "high rise apartment view with beautiful cinematic views"
+        )
+        self.assertIn("highrise", tokens)
+        self.assertIn("apartment", tokens)
+        self.assertNotIn("with", tokens)
+        self.assertNotIn("beautiful", tokens)
+        self.assertNotIn("view", tokens)
+        self.assertNotIn("views", tokens)
+        fps_tokens = broll_frame_gate.subject_tokens("dark bedroom morning cinematic 60fps")
+        self.assertIn("bedroom", fps_tokens)
+        self.assertNotIn("60fps", fps_tokens)
+        self.assertNotIn("morning", fps_tokens)
+        self.assertFalse(
+            broll_frame_gate.title_matches_subject(
+                "SINGAPORE 8K Video Ultra HD With Soft Piano Music",
+                tokens,
+            )
+        )
+        self.assertTrue(
+            broll_frame_gate.title_matches_subject(
+                "Dubai penthouse night city skyline 60fps",
+                tokens,
+            )
+        )
+
     def test_title_matches_alias(self) -> None:
         self.assertTrue(broll_frame_gate.title_matches_subject("911 GT3 RS Night Drive", ["porsche"]))
         self.assertFalse(broll_frame_gate.title_matches_subject("Miami villa tour 4k", ["porsche"]))
@@ -52,6 +79,22 @@ class BrollFrameGateTests(unittest.TestCase):
         self.assertIn("title-card", broll_frame_gate.frame_fail_reasons(title))
         self.assertIn("talking-head", broll_frame_gate.frame_fail_reasons(face))
         self.assertEqual(broll_frame_gate.frame_fail_reasons(car), [])
+
+    def test_night_scene_keeps_city_lights_drops_host(self) -> None:
+        night = Image.new("RGB", (160, 280), (8, 10, 18))
+        for x in range(12, 148, 7):
+            for y in range(30, 250, 11):
+                night.putpixel((x, y), (210, 180, 90))
+                night.putpixel((min(x + 1, 159), y), (160, 140, 70))
+        buf = BytesIO()
+        night.save(buf, format="PNG")
+        city = buf.getvalue()
+        subject = "high rise apartment view"
+        self.assertTrue(broll_frame_gate.wants_scene(subject))
+        self.assertNotIn("empty", broll_frame_gate.frame_fail_reasons(city, subject))
+        self.assertNotIn("title-card", broll_frame_gate.frame_fail_reasons(city, subject))
+        face = _png((30, 30, 30), blob=(190, 120, 90))
+        self.assertIn("talking-head", broll_frame_gate.frame_fail_reasons(face, subject))
 
     def test_window_requires_clean_first_frame(self) -> None:
         title = _png((6, 6, 6))
@@ -178,6 +221,17 @@ class BrollFrameGateTests(unittest.TestCase):
         self.assertGreaterEqual(len(stamps), 6)
         self.assertLess(stamps[0], 1.0)
         self.assertLess(stamps[-1], 8.0)
+
+    def test_prefers_no_people_for_apartment_views(self) -> None:
+        subject = "expensive apartment views"
+        self.assertTrue(broll_frame_gate.prefers_no_people(subject))
+        self.assertFalse(broll_frame_gate.prefers_no_people("gym workout people training"))
+
+    def test_view_only_drops_skin_blob(self) -> None:
+        subject = "luxury penthouse window view"
+        face = _png((30, 30, 30), blob=(190, 120, 90))
+        self.assertIn("talking-head", broll_frame_gate.frame_fail_reasons(face, subject))
+        self.assertIn("person", broll_frame_gate.frame_fail_reasons(face, subject))
 
 
 if __name__ == "__main__":

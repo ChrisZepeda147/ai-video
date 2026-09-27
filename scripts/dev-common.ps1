@@ -207,18 +207,23 @@ function Start-ApiServer {
     & $Python @uvicornArgs
 }
 
-function Wait-ApiHealthySoft {
-    param([int]$Seconds = 30)
+function Wait-ApiHealthy {
+    param([int]$Seconds = 45)
     for ($i = 1; $i -le $Seconds; $i++) {
         if (Test-ApiHealthy) {
             Write-Host "Discovery API ready on http://127.0.0.1:8000"
             return $true
         }
         if ($i -eq 1) {
-            Write-Host "Waiting for API (up to ${Seconds}s)..."
+            Write-Host "Waiting for API (up to ${Seconds}s) before starting dashboard..."
         }
         Start-Sleep -Seconds 1
     }
-    Write-Host "API still starting - dashboard will load; refresh if you see an offline banner."
+    Write-Host "API did not become healthy. Check data/logs/api-dev.err"
     return $false
+}
+
+function Wait-ApiHealthySoft {
+    param([int]$Seconds = 30)
+    return Wait-ApiHealthy -Seconds $Seconds
 }

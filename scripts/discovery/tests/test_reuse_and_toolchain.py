@@ -23,6 +23,14 @@ class ReusePolicyTests(unittest.TestCase):
     def test_prefer_new_phrases(self) -> None:
         self.assertEqual(parse_reuse_policy("Prefer new B-roll but same speaker."), "prefer_new")
 
+    def test_make_short_boilerplate_stays_allow(self) -> None:
+        text = (
+            "Check combinations catalog — do not reuse the same excerpt unless instructions allow.\n"
+            "Use `--reuse-policy require_new` when instructions say do not reuse.\n"
+            "Visual / B-roll search: sunrise city skyline 60fps"
+        )
+        self.assertEqual(parse_reuse_policy(text), "allow")
+
 
 class ToolchainTests(unittest.TestCase):
     def test_classify_ffmpeg_missing(self) -> None:

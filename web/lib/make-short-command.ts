@@ -1,4 +1,4 @@
-/** Compose a Make Short form into a Cursor Agent command. */
+/** Compose a Make Short form into a Cursor Agent command. Keep in sync with scripts/discovery/motivation_command_brief.py */
 
 export type MakeShortOwner = "chris" | "stephen";
 
@@ -10,6 +10,21 @@ export type MakeShortCommandInput = {
   minSeconds?: number;
   maxSeconds?: number;
 };
+
+function visualProductionHints(visual: string): string[] {
+  const text = visual.trim();
+  if (!text) return [];
+  const hints: string[] = [];
+  if (/\b(view|ocean|skyline|apartment|penthouse|drone)\b/i.test(text)) {
+    hints.push(
+      "View / scenery B-roll: no people in frame; use exclude-people / view-only search; 50fps+ clips only.",
+    );
+  }
+  if (/\b(porsche|ferrari|911|gt3|supercar|coupe|lamborghini)\b/i.test(text)) {
+    hints.push("Car B-roll: exterior only for opener (full body 5s+); no cabin/dashboard; 50fps+ source clips.");
+  }
+  return hints;
+}
 
 export function composeMakeShortCommand(input: MakeShortCommandInput): string {
   const audio = input.audioQuery?.trim();
@@ -27,9 +42,9 @@ export function composeMakeShortCommand(input: MakeShortCommandInput): string {
     "",
     "Before picking audio or visuals:",
     "- Query production library: `python scripts/production_library_cli.py list`",
-    "- Check combinations catalog / existing transcripts — do not reuse the same excerpt unless instructions allow.",
+    "- Check combinations catalog / existing transcripts — skip the same excerpt unless Extra instructions allow a remake.",
     "- Set speaker from actual clip title/channel (not search query). If search was Goggins but clip is Jocko, register as Jocko Willink.",
-    "- Use `--reuse-policy require_new` when instructions say do not reuse.",
+    "- Reuse of prior sources is allowed by default. Unused-only only if Extra instructions say unused / never used.",
     "",
   ];
 
@@ -42,13 +57,17 @@ export function composeMakeShortCommand(input: MakeShortCommandInput): string {
   lines.push(`Visual / B-roll search: ${broll}`);
   lines.push(`Default target length: ${minSec}–${maxSec} seconds unless extra instructions override.`);
 
+  for (const hint of visualProductionHints(broll)) {
+    lines.push(`- ${hint}`);
+  }
+
   if (extra) {
     lines.push("", "Extra instructions:", extra);
   }
 
   lines.push(
     "",
-    "Before downloading audio, query the production library and check existing transcripts — avoid reusing the same excerpt unless instructions say otherwise.",
+    "Before downloading audio, query the production library and check existing transcripts — skip the same excerpt unless Extra instructions allow a remake.",
     "Register the finished video in the production library when done.",
   );
 

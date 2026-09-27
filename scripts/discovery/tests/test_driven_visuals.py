@@ -12,7 +12,7 @@ from discovery.driven_visuals import (
     vehicle_opener_hold_sec,
 )
 from build_clips_montage import _beat_duration
-from build_stills_slideshow import _ass_escape, group_words_into_phrases
+from build_stills_slideshow import _ass_escape, _ass_header, group_words_into_phrases
 
 
 class DrivenVisualsTests(unittest.TestCase):
@@ -68,6 +68,11 @@ Hook: NOBODY TELLS YOU THIS
 
     def test_ass_keeps_word_gaps(self) -> None:
         self.assertEqual(_ass_escape("YOU CANNOT BE"), "YOU  CANNOT  BE")
+
+    def test_caption_styles_are_vertically_centered(self) -> None:
+        header = _ass_header(width=1080, height=1920)
+        self.assertIn(",5,80,80,0,1", header)
+        self.assertNotIn(",2,80,80,120,1", header)
 
     def test_phrase_grouping(self) -> None:
         words = [
