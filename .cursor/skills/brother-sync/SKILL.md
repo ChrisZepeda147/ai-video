@@ -105,16 +105,18 @@ git pull --ff-only origin main
 python scripts/shared_library_sync.py pull-import --skip-pull
 ```
 
-Or **Sync Stephen library** on `/library` (packages only). Code still needs `git pull` unless API hourly auto-pull already ran.
+Or **Sync Stephen library** on `/library` (packages only).
 
 ## After any shared code commit (both)
+
+Post-commit hook (installed by `start-dev` / `install_brother_git_hooks.ps1`) runs:
 
 ```powershell
 git push origin
 git push chris
 ```
 
-Do not leave one GitHub copy stale.
+Manual push still OK. Stephen’s machine: **API startup brother sync** + **AiVideoGitHubSync** every 5 min — no manual `git pull` if dev stack or scheduled task is running.
 
 ## Check
 

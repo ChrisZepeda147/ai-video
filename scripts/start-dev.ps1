@@ -9,6 +9,20 @@ Set-Location $Root
 Import-ApiEnvFile -Root $Root
 Import-DevPath
 
+# Dual-push after commit + background GitHub merge task (Stephen/Chris stay on same code).
+$HookPath = Join-Path $Root ".git\hooks\post-commit"
+if (-not (Test-Path $HookPath)) {
+    & (Join-Path $Scripts "install_brother_git_hooks.ps1") | Out-Null
+}
+$GhSync = Join-Path $Scripts "github_brother_sync.ps1"
+if (Test-Path $GhSync) {
+    $task = schtasks /Query /TN "AiVideoGitHubSync" /FO LIST 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Installing GitHub brother sync (every 5 min, pull+merge both remotes)..."
+        & $GhSync install -Minutes 5 | Out-Null
+    }
+}
+
 if (Test-ApiHealthy) {
     Write-Host "Discovery API already running on http://127.0.0.1:8000"
 } else {

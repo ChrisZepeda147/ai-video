@@ -1,0 +1,9 @@
+#!/bin/sh
+# Installed by scripts/install_brother_git_hooks.ps1 — dual-push after every commit on main.
+ROOT="$(git rev-parse --show-toplevel)" || exit 0
+cd "$ROOT" || exit 0
+if [ "$(git rev-parse --abbrev-ref HEAD)" != "main" ]; then
+  exit 0
+fi
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$ROOT/scripts/push_both_remotes.ps1" -Quiet || true
+exit 0

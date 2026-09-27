@@ -994,6 +994,7 @@ def pull_and_import(
     if not dry_run:
         from discovery.brother_deletions import apply_shared_deletions, reconcile_packages_removed_from_git
 
+        root = project_root()
         deletion_result = apply_shared_deletions(store, root=root)
         if pull_result and pull_result.get("ok"):
             reconcile_result = reconcile_packages_removed_from_git(store, root=root)

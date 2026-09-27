@@ -216,34 +216,44 @@ def _start_brother_auto_sync() -> None:
 
     def _loop() -> None:
         interval_sec = brother_sync_interval_minutes() * 60
-        time.sleep(min(15, interval_sec))
         log = logging.getLogger("uvicorn.error")
+
+        def _tick(*, force: bool = False) -> None:
+            db = default_db_path()
+            if not Path(db).is_file():
+                return
+            store = DiscoveryStore(db)
+            try:
+                result = run_brother_sync_tick(store, force=force)
+            finally:
+                store.close()
+            if not result:
+                return
+            if int((result.get("library") or {}).get("import", {}).get("imported", 0) or 0) > 0:
+                log.info(
+                    "Brother sync: imported %s package(s)",
+                    result["library"]["import"]["imported"],
+                )
+            elif int((result.get("library") or {}).get("deletions", {}).get("removed_videos", 0) or 0) > 0:
+                log.info(
+                    "Brother sync: applied %s remote deletion(s)",
+                    result["library"]["deletions"]["removed_videos"],
+                )
+            elif result.get("code", {}).get("pull", {}).get("pulled"):
+                log.info(
+                    "Brother sync: code %s",
+                    result["code"]["pull"].get("message") or "updated",
+                )
+
+        try:
+            _tick(force=True)
+        except Exception as exc:
+            log.warning("Brother startup sync failed: %s", exc)
+
+        time.sleep(interval_sec)
         while True:
             try:
-                db = default_db_path()
-                if Path(db).is_file():
-                    store = DiscoveryStore(db)
-                    try:
-                        result = run_brother_sync_tick(store)
-                        if not result:
-                            pass
-                        elif int((result.get("library") or {}).get("import", {}).get("imported", 0) or 0) > 0:
-                            log.info(
-                                "Brother sync: imported %s package(s)",
-                                result["library"]["import"]["imported"],
-                            )
-                        elif int((result.get("library") or {}).get("deletions", {}).get("removed_videos", 0) or 0) > 0:
-                            log.info(
-                                "Brother sync: applied %s remote deletion(s)",
-                                result["library"]["deletions"]["removed_videos"],
-                            )
-                        elif result.get("code", {}).get("pull", {}).get("pulled"):
-                            log.info(
-                                "Brother sync: code %s",
-                                result["code"]["pull"].get("message") or "updated",
-                            )
-                    finally:
-                        store.close()
+                _tick(force=False)
             except Exception as exc:
                 log.warning("Brother auto-sync failed: %s", exc)
             time.sleep(interval_sec)
