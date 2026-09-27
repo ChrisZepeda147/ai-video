@@ -7,7 +7,7 @@ export default function WeeklyPage() {
     <>
       <PageHeader
         title="Weekly"
-        description="Paste your ChatGPT week plan once. Focus one day at a time — Mon done, then Tue. 7am builds 3 videos."
+        description="Sunday: copy prompt, paste ChatGPT reply, Save week (7am auto) or Run Monday now. One day at a time after that."
       />
       <Suspense fallback={<p className="text-sm text-zinc-500">Loading weekly plan…</p>}>
         <WeeklyWorkspace />

@@ -6,27 +6,27 @@ import {
   fetchWeekly,
   fetchWeeklyChatgptPrompt,
   fetchWeeklyHealth,
-  getApiBaseUrl,
   postWeeklyApplyPaste,
+  postWeeklyParsePaste,
   postWeeklyRetrySlot,
   postWeeklyRunDue,
   postWeeklySlots,
 } from "@/lib/api";
 import type { WeeklyHealthResponse, WeeklyProgress, WeeklySlot } from "@/lib/types";
+import {
+  DAY_LABEL,
+  WEEK_DAYS,
+  calendarDayId,
+  effectiveWeekStartForPaste,
+  mondayOf,
+  planningWeekStart,
+  runBatchTarget,
+  todayIso,
+} from "@/lib/weekly-planning";
 
-const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 const SLOTS = [1, 2, 3] as const;
-const DAY_LABEL: Record<string, string> = {
-  mon: "Mon",
-  tue: "Tue",
-  wed: "Wed",
-  thu: "Thu",
-  fri: "Fri",
-  sat: "Sat",
-  sun: "Sun",
-};
 
-type SlotKey = `${(typeof DAYS)[number]}-${(typeof SLOTS)[number]}`;
+type SlotKey = `${(typeof WEEK_DAYS)[number]}-${(typeof SLOTS)[number]}`;
 
 type SlotCell = {
   speaker: string;
@@ -36,24 +36,19 @@ type SlotCell = {
   requireStills: boolean;
 };
 
-function mondayOf(input: string): string {
-  const d = input ? new Date(`${input}T12:00:00`) : new Date();
-  const wd = (d.getDay() + 6) % 7;
-  d.setDate(d.getDate() - wd);
-  return d.toISOString().slice(0, 10);
-}
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function calendarDayId(): string {
-  return DAYS[(new Date().getDay() + 6) % 7];
-}
+const DAY_LABEL_SHORT: Record<string, string> = {
+  mon: "Mon",
+  tue: "Tue",
+  wed: "Wed",
+  thu: "Thu",
+  fri: "Fri",
+  sat: "Sat",
+  sun: "Sun",
+};
 
 function emptyGrid(): Record<SlotKey, SlotCell> {
   return Object.fromEntries(
-    DAYS.flatMap((d) =>
+    WEEK_DAYS.flatMap((d) =>
       SLOTS.map((s) => [`${d}-${s}`, { speaker: "", visual: "", images: [], make: "", requireStills: false }]),
     ),
   ) as Record<SlotKey, SlotCell>;
@@ -63,11 +58,12 @@ export function WeeklyWorkspace() {
   const searchParams = useSearchParams();
   const initialOwner = searchParams.get("owner") === "stephen" ? "stephen" : "chris";
   const [owner, setOwner] = useState<"chris" | "stephen">(initialOwner);
-  const [weekStart, setWeekStart] = useState(() => mondayOf(todayIso()));
+  const [weekStart, setWeekStart] = useState(() => planningWeekStart());
   const [slots, setSlots] = useState<Record<SlotKey, SlotCell>>(emptyGrid);
   const [progress, setProgress] = useState<WeeklyProgress | null>(null);
   const [focusDay, setFocusDay] = useState<string>("mon");
   const [pasteText, setPasteText] = useState("");
+  const [parseHint, setParseHint] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [health, setHealth] = useState<WeeklyHealthResponse | null>(null);
@@ -75,6 +71,9 @@ export function WeeklyWorkspace() {
   const [slotMeta, setSlotMeta] = useState<
     Record<SlotKey, { id?: number; status?: string; job_key?: string | null; video_id?: number | null; error_message?: string | null }>
   >({});
+
+  const runTarget = useMemo(() => runBatchTarget(weekStart), [weekStart]);
+  const isSundayPlan = calendarDayId() === "sun";
 
   const load = useCallback(async () => {
     const res = await fetchWeekly(weekStart, owner);
@@ -100,25 +99,46 @@ export function WeeklyWorkspace() {
     const prog = res.data.progress ?? null;
     setProgress(prog);
     if (prog?.focus_day) setFocusDay(prog.focus_day);
-    else if (!res.data.slots.length) setFocusDay(calendarDayId());
+    else setFocusDay("mon");
 
     const h = await fetchWeeklyHealth({ owner });
     if (h.ok) setHealth(h.data);
-    setStatus(res.data.plan ? `Week ${res.data.plan.status}` : "Paste ChatGPT plan below, then Apply week.");
+    setStatus(
+      res.data.plan
+        ? `Week ${res.data.plan.status} · starts ${weekStart}`
+        : "Copy ChatGPT prompt → paste reply → Save week (7am auto) or Run now.",
+    );
   }, [weekStart, owner]);
 
   useEffect(() => {
     load();
   }, [load]);
 
+  useEffect(() => {
+    const t = pasteText.trim();
+    if (t.length < 40) {
+      setParseHint(null);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      const res = await postWeeklyParsePaste(t);
+      if (res.ok) {
+        if (res.data.count === 0) {
+          const w = res.data.warnings.filter(Boolean).slice(0, 2).join(" · ");
+          setParseHint(w || "No videos parsed — need MONDAY headers and lines like: 1. Speaker | B-roll");
+        } else {
+          setParseHint(`Parsed ${res.data.count} videos${res.data.warnings.length ? " · check format" : ""}`);
+        }
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [pasteText]);
+
   const activeDay = focusDay;
   const dayProgress = useMemo(() => progress?.days.find((d) => d.day === activeDay), [progress, activeDay]);
 
-  function buildPayload(forDay?: string) {
-    const entries = (Object.entries(slots) as Array<[SlotKey, SlotCell]>).filter(([key]) =>
-      forDay ? key.startsWith(`${forDay}-`) : true,
-    );
-    return entries.map(([key, v]) => {
+  function buildPayload() {
+    return (Object.entries(slots) as Array<[SlotKey, SlotCell]>).map(([key, v]) => {
       const [day, slot] = key.split("-");
       return {
         day,
@@ -133,58 +153,84 @@ export function WeeklyWorkspace() {
   }
 
   async function copyChatgptPrompt() {
-    const res = await fetchWeeklyChatgptPrompt(weekStart, owner);
+    const ws = effectiveWeekStartForPaste(weekStart);
+    if (ws !== weekStart) setWeekStart(ws);
+    const res = await fetchWeeklyChatgptPrompt(ws, owner);
     if (!res.ok) {
       setStatus(res.message);
       return;
     }
     await navigator.clipboard.writeText(res.data.prompt);
-    setStatus("ChatGPT prompt copied — paste in ChatGPT, then paste reply below.");
+    setStatus(
+      isSundayPlan
+        ? `Prompt copied for week starting ${ws} (Monday). Paste ChatGPT reply, then Save or Run Monday.`
+        : "Prompt copied — paste ChatGPT reply below, then Save week or Run.",
+    );
   }
 
-  async function applyPaste() {
+  async function saveWeekFromPaste(): Promise<boolean> {
     if (!pasteText.trim()) {
       setStatus("Paste ChatGPT reply first");
-      return;
+      return false;
     }
-    setBusy(true);
-    try {
-      const res = await postWeeklyApplyPaste({ week_start: weekStart, owner, text: pasteText, replace_week: true });
-      if (!res.ok) {
-        setStatus(res.message);
-        return;
-      }
-      const warn = [...(res.data.parse_warnings ?? []), ...(res.data.warnings ?? [])].filter(Boolean);
-      setStatus(`Applied ${res.data.slots_saved} videos${warn.length ? ` · ${warn.join("; ")}` : ""}`);
-      setPasteText("");
-      await load();
-    } finally {
-      setBusy(false);
+    const ws = effectiveWeekStartForPaste(weekStart);
+    if (ws !== weekStart) setWeekStart(ws);
+    const res = await postWeeklyApplyPaste({ week_start: ws, owner, text: pasteText, replace_week: true });
+    if (!res.ok) {
+      setStatus(res.message);
+      return false;
     }
+    const warn = [...(res.data.parse_warnings ?? []), ...(res.data.warnings ?? [])].filter(Boolean);
+    setStatus(
+      `Saved ${res.data.slots_saved} videos for week ${ws} · Monday first${warn.length ? ` · ${warn.join("; ")}` : ""}`,
+    );
+    setPasteText("");
+    setFocusDay("mon");
+    await load();
+    return true;
   }
 
-  async function saveDay() {
+  async function onSaveWeek() {
     setBusy(true);
     try {
+      if (pasteText.trim()) {
+        await saveWeekFromPaste();
+        return;
+      }
       const payload = buildPayload().filter((s) => s.speaker || s.visual_direction || s.image_prompt);
       const res = await postWeeklySlots({ week_start: weekStart, owner, slots: payload });
-      setStatus(res.ok ? "Saved" : res.message);
+      setStatus(res.ok ? "Saved edits" : res.message);
       if (res.ok) await load();
     } finally {
       setBusy(false);
     }
   }
 
-  async function runDue() {
+  async function onRunWeek() {
     setBusy(true);
     try {
-      const res = await postWeeklyRunDue({ day: todayIso(), owner, retry_failed: true, limit: 3, serial: false });
+      if (pasteText.trim()) {
+        const ok = await saveWeekFromPaste();
+        if (!ok) return;
+      }
+      const ws = effectiveWeekStartForPaste(weekStart);
+      const target = runBatchTarget(ws);
+      const res = await postWeeklyRunDue({
+        day: target.day,
+        owner,
+        retry_failed: true,
+        limit: 3,
+        serial: false,
+      });
+      if (!res.ok) {
+        setStatus(res.message);
+        return;
+      }
+      setFocusDay(target.dayId);
       setStatus(
-        res.ok
-          ? res.data.deferred
-            ? "Deferred — jobs still running"
-            : `Started ${res.data.count} video(s) for today`
-          : res.message,
+        res.data.deferred
+          ? "Deferred — agents still running"
+          : `Started ${res.data.count} video(s) for ${target.label} (${target.day})`,
       );
       await load();
     } finally {
@@ -279,50 +325,57 @@ export function WeeklyWorkspace() {
           </button>
         ))}
         <label className="text-sm text-zinc-400">
-          Week of{" "}
+          Week starts{" "}
           <input
             type="date"
             value={weekStart}
             onChange={(e) => setWeekStart(mondayOf(e.target.value))}
             className="rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-1"
           />
+          <span className="ml-1 text-xs">(Monday)</span>
         </label>
       </div>
 
       <section className="rounded-xl border border-violet-900/40 bg-violet-950/20 p-4">
-        <h2 className="text-sm font-semibold text-violet-200">1. ChatGPT → paste week</h2>
+        <h2 className="text-sm font-semibold text-violet-200">Sunday feed → ChatGPT</h2>
         <p className="mt-1 text-xs text-zinc-400">
-          Copy prompt (includes last week). Paste ChatGPT reply below. Site splits Mon–Sun, 3 videos/day.
+          {isSundayPlan
+            ? `Planning for Monday ${weekStart}. Save splits Mon–Sun (3/day). 7am runs each day; Run now starts ${runTarget.label}.`
+            : "Copy prompt, paste reply. Save for 7am auto-run or Run now for today's batch."}
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
-          <button type="button" onClick={copyChatgptPrompt} className="rounded-lg bg-violet-600 px-3 py-2 text-sm text-white">
+          <button type="button" onClick={copyChatgptPrompt} className="rounded-lg border border-violet-500 px-3 py-2 text-sm text-violet-100">
             Copy ChatGPT prompt
           </button>
-          <button type="button" onClick={applyPaste} disabled={busy} className="rounded-lg border border-violet-600 px-3 py-2 text-sm text-violet-200 disabled:opacity-50">
-            Apply pasted week
+          <button
+            type="button"
+            onClick={onSaveWeek}
+            disabled={busy}
+            className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          >
+            Save week
+          </button>
+          <button
+            type="button"
+            onClick={onRunWeek}
+            disabled={busy}
+            className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 disabled:opacity-50"
+          >
+            Run {runTarget.label} now (3 videos)
           </button>
         </div>
         <textarea
           value={pasteText}
           onChange={(e) => setPasteText(e.target.value)}
           placeholder={`MONDAY\n1. David Goggins | ocean drone 60fps\n2. ...\n\nTUESDAY\n1. ...`}
-          rows={8}
+          rows={10}
           className="mt-3 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-xs text-zinc-200"
         />
+        {parseHint ? <p className="mt-1 text-xs text-zinc-500">{parseHint}</p> : null}
       </section>
 
       <section className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold text-zinc-200">2. This week</h2>
-          <div className="flex gap-2">
-            <button type="button" onClick={saveDay} disabled={busy} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300">
-              Save edits
-            </button>
-            <button type="button" onClick={runDue} disabled={busy} className="rounded-lg bg-zinc-100 px-3 py-1.5 text-xs font-medium text-zinc-900">
-              Run today (3 at 7am)
-            </button>
-          </div>
-        </div>
+        <h2 className="text-sm font-semibold text-zinc-200">This week · one day at a time</h2>
         {health ? (
           <p className="mt-2 text-xs text-zinc-500">
             Today {health.today_stats.done}/3 done · Agent {health.preflight.ok ? "OK" : "blocked"}
@@ -330,7 +383,7 @@ export function WeeklyWorkspace() {
         ) : null}
 
         <div className="mt-4 flex flex-wrap gap-1">
-          {DAYS.map((d) => {
+          {WEEK_DAYS.map((d) => {
             const row = progress?.days.find((x) => x.day === d);
             const isFocus = d === activeDay;
             const complete = row?.complete;
@@ -347,7 +400,7 @@ export function WeeklyWorkspace() {
                       : "bg-zinc-800 text-zinc-400"
                 }`}
               >
-                {DAY_LABEL[d]}
+                {DAY_LABEL_SHORT[d]}
                 {row ? ` ${row.done}/${row.filled || "·"}` : ""}
               </button>
             );
@@ -355,14 +408,11 @@ export function WeeklyWorkspace() {
         </div>
 
         <p className="mt-3 text-sm text-zinc-400">
-          {(() => {
-            if (progress?.week_complete) return "Week complete — paste a new week or pick next Monday.";
-            const idx = DAYS.indexOf(activeDay as (typeof DAYS)[number]);
-            const next = idx >= 0 && idx < DAYS.length - 1 ? DAY_LABEL[DAYS[idx + 1]] : null;
-            if (progress?.focus_day === activeDay && next)
-              return `Focus: ${DAY_LABEL[activeDay]} — when 3/3 done, move to ${next}.`;
-            return `Viewing ${DAY_LABEL[activeDay]}${dayProgress ? ` (${dayProgress.done}/${dayProgress.filled} done)` : ""}`;
-          })()}
+          {progress?.week_complete
+            ? "Week complete — paste a new ChatGPT plan."
+            : progress?.focus_day === activeDay
+              ? `Focus ${DAY_LABEL_SHORT[activeDay]} — finish 3/3 then next day.`
+              : `Viewing ${DAY_LABEL_SHORT[activeDay]}${dayProgress ? ` (${dayProgress.done}/${dayProgress.filled} done)` : ""}`}
         </p>
 
         <div className="mt-4 space-y-3">{SLOTS.map((n) => renderSlot(n))}</div>
@@ -371,7 +421,7 @@ export function WeeklyWorkspace() {
       {status ? <p className="text-sm text-zinc-500">{status}</p> : null}
 
       <button type="button" className="text-xs text-zinc-500 underline" onClick={() => setShowAdvanced((v) => !v)}>
-        {showAdvanced ? "Hide" : "Show"} advanced / 7am log
+        {showAdvanced ? "Hide" : "Show"} 7am log
       </button>
       {showAdvanced && health?.log_tail ? (
         <pre className="max-h-40 overflow-auto rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-500">{health.log_tail}</pre>

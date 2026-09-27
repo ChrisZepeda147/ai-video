@@ -21,7 +21,10 @@ $Root = Split-Path -Parent $PSScriptRoot
 $LogDir = Join-Path $Root "data\shared_library"
 $LogPath = Join-Path $LogDir "github_sync.log"
 $LockPath = Join-Path $LogDir "github_sync.lock"
-$SilentVbsPath = Join-Path $LogDir "github_brother_sync_silent.vbs"
+# Task Scheduler /TR breaks on spaces — keep launcher under LocalAppData (no spaces in path).
+$SilentVbsDir = Join-Path $env:LOCALAPPDATA "AiVideo"
+$SilentVbsPath = Join-Path $SilentVbsDir "github_brother_sync_silent.vbs"
+$LegacySilentVbsPath = Join-Path $LogDir "github_brother_sync_silent.vbs"
 $StashMessage = "github-brother-sync"
 $GitExe = $null
 
@@ -175,7 +178,10 @@ function Get-AheadBehind([string]$Ref) {
 function Write-SilentLauncher {
     $script = Join-Path $PSScriptRoot "github_brother_sync.ps1"
     $powershell = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
-    New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $SilentVbsDir | Out-Null
+    if (Test-Path $LegacySilentVbsPath) {
+        Remove-Item -Force $LegacySilentVbsPath -ErrorAction SilentlyContinue
+    }
     $cmd = "$powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$script`" tick"
     $escaped = $cmd.Replace('"', '""')
     $rootEsc = $Root.Replace('"', '""')
@@ -202,7 +208,11 @@ function Install-SyncTask {
     $vbs = Write-SilentLauncher
     $wscript = Join-Path $env:WINDIR "System32\wscript.exe"
     $tr = "`"$wscript`" //B //Nologo `"$vbs`""
-    $create = schtasks /Create /TN $TaskName /SC MINUTE /MO $Minutes /RL LIMITED /F /TR $tr
+    # /TR must be one argv — repo path has spaces (e.g. Youtube AI).
+    $create = & schtasks.exe @(
+        "/Create", "/TN", $TaskName, "/SC", "MINUTE", "/MO", "$Minutes",
+        "/RL", "LIMITED", "/F", "/TR", $tr
+    ) 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) {
         throw "schtasks create failed: $create"
     }
@@ -222,8 +232,10 @@ function Uninstall-SyncTask {
     } else {
         Write-Host "task not found"
     }
-    if (Test-Path $SilentVbsPath) {
-        Remove-Item -Force $SilentVbsPath
+    foreach ($p in @($SilentVbsPath, $LegacySilentVbsPath)) {
+        if (Test-Path $p) {
+            Remove-Item -Force $p -ErrorAction SilentlyContinue
+        }
     }
 }
 

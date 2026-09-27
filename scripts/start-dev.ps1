@@ -19,7 +19,11 @@ if (Test-Path $GhSync) {
     $task = schtasks /Query /TN "AiVideoGitHubSync" /FO LIST 2>$null
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Installing GitHub brother sync (every 5 min, pull+merge both remotes)..."
-        & $GhSync install -Minutes 5 | Out-Null
+        try {
+            & $GhSync install -Minutes 5 | Out-Null
+        } catch {
+            Write-Warning "GitHub brother sync task not installed: $_ (dev stack will still start)"
+        }
     }
 }
 

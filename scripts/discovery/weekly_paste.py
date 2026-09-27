@@ -7,8 +7,8 @@ from typing import Any
 
 from discovery.weekly import DAYS, VIDEOS_PER_DAY
 
-DAY_PATTERN = re.compile(
-    r"^\s*(monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun)\s*:?\s*$",
+DAY_NAME = re.compile(
+    r"^(monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun)\b",
     re.I,
 )
 DAY_MAP = {
@@ -28,7 +28,7 @@ DAY_MAP = {
     "sun": "sun",
 }
 VIDEO_LINE = re.compile(
-    r"^\s*(?:video\s*)?(\d)\s*[.)]\s*(.+)$",
+    r"^\s*(?:video\s*)?(\d)\s*[.)]?\s*:?\s*(.+)$",
     re.I,
 )
 IMAGES_LINE = re.compile(
@@ -37,6 +37,8 @@ IMAGES_LINE = re.compile(
 )
 
 CHATGPT_FORMAT_TEMPLATE = """Plan my next week of TikTok motivation Shorts (9:16, luxury B-roll + speech clips, 60-90s).
+
+I am planning on Sunday for the week that starts Monday {week_start}. Production runs each calendar day at 7am (3 videos that day). MONDAY in the format below is {week_start}.
 
 Previous week (do NOT repeat — new speakers/angles/visuals):
 {previous_week}
@@ -72,6 +74,47 @@ def summarize_week_for_prompt(slots: list[dict[str, Any]]) -> str:
     return "\n".join(lines) if lines else "(empty plan)"
 
 
+def _normalize_line(raw: str) -> str:
+    line = raw.strip()
+    if not line:
+        return ""
+    line = re.sub(r"^[-*•]\s+", "", line)
+    line = re.sub(r"\*\*(.+?)\*\*", r"\1", line)
+    line = line.replace("*", "").replace("_", "").replace("`", "")
+    line = re.sub(r"^#+\s*", "", line)
+    return line.strip()
+
+
+def _parse_day_header(line: str) -> str | None:
+    line = line.strip().rstrip(":").strip()
+    line = re.sub(r"^[^\w]+", "", line, flags=re.UNICODE)
+    if not line:
+        return None
+    m = DAY_NAME.match(line)
+    if not m:
+        return None
+    key = m.group(1).lower()
+    return DAY_MAP.get(key, key[:3] if len(key) >= 3 else None)
+
+
+def resolve_week_start(raw: str | None) -> str:
+    """Default week_start for apply-paste (Sunday → upcoming Monday)."""
+    from datetime import date, timedelta
+
+    from discovery.weekly import week_start_monday
+
+    text = (raw or "").strip()
+    if text:
+        try:
+            return week_start_monday(date.fromisoformat(text)).isoformat()
+        except ValueError:
+            pass
+    today = date.today()
+    if today.weekday() == 6:
+        return (today + timedelta(days=1)).isoformat()
+    return week_start_monday(today).isoformat()
+
+
 def _split_speaker_visual(body: str) -> tuple[str, str]:
     text = body.strip()
     if not text:
@@ -96,17 +139,15 @@ def parse_weekly_paste(text: str) -> tuple[list[dict[str, Any]], list[str]]:
     pending_images: dict[int, str] = {}
 
     for raw in text.splitlines():
-        line = raw.strip()
+        line = _normalize_line(raw)
         if not line or line.startswith("#"):
             continue
-        dm = DAY_PATTERN.match(line)
-        if dm:
-            key = dm.group(1).lower()
-            current_day = DAY_MAP.get(key, key[:3])
+        day_hdr = _parse_day_header(line)
+        if day_hdr:
+            current_day = day_hdr
             pending_images = {}
             continue
         if current_day is None:
-            warnings.append(f"Skipped line before any day header: {line[:60]}")
             continue
         im = IMAGES_LINE.match(line)
         if im:

@@ -61,6 +61,13 @@ function buildUrl(path: string, params?: Record<string, QueryValue>): string {
 
 function formatApiErrorDetail(detail: unknown): string {
   if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail.map((item) => {
+      if (item && typeof item === "object" && "msg" in item) return String((item as { msg: unknown }).msg);
+      return String(item);
+    });
+    return parts.filter(Boolean).join("; ");
+  }
   if (detail && typeof detail === "object") {
     const obj = detail as Record<string, unknown>;
     if (typeof obj.message === "string") {
@@ -92,7 +99,6 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<ApiResult<
       cache: "no-store",
     });
     if (!response.ok) {
-      console.error(`Discovery API ${response.status} ${url}`);
       let message = `Discovery backend returned ${response.status}`;
       try {
         const err = (await response.json()) as { detail?: unknown };
@@ -100,6 +106,9 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<ApiResult<
         if (formatted) message = formatted;
       } catch {
         /* ignore */
+      }
+      if (response.status >= 500) {
+        console.error(`Discovery API ${response.status} ${url}: ${message}`);
       }
       return { ok: false, error: "http", message, status: response.status };
     }
