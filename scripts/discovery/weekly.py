@@ -678,6 +678,8 @@ def maybe_run_morning_catchup(store) -> dict[str, Any] | None:
     any_due = False
     results: list[dict[str, Any]] = []
     for owner in OWNERS:
+        if count_running_weekly_slots(store, owner=owner) > 0:
+            continue
         due_n = len(due_slots(store, day=today, owner=owner))
         if due_n <= 0:
             continue
@@ -757,6 +759,85 @@ def _read_last_run() -> dict[str, Any] | None:
 def slot_command_text(slot: dict[str, Any]) -> str:
     """Always use fresh brief template (stored brief may be stale)."""
     return build_slot_brief(slot, image_paths=list(slot.get("image_paths") or []))
+
+
+def _montage_inline() -> bool:
+    import os as _os
+
+    return _os.environ.get("WEEKLY_MONTAGE_INLINE", "").strip().lower() in {"1", "true", "yes"}
+
+
+def _wait_for_command_job(store, job_key: str, *, deadline: float) -> None:
+    import time as _time
+
+    from discovery.command_jobs import get_command_job
+
+    while _time.monotonic() < deadline:
+        job = get_command_job(store, job_key)
+        if job and str(job.get("status") or "") in {"completed", "failed", "cancelled"}:
+            return
+        _time.sleep(8)
+        reconcile_slots(store)
+
+
+def weekly_submit_command(
+    store,
+    *,
+    user_command: str,
+    agent_model: str | None = None,
+    video_id: int | None = None,
+    wait_montage: bool = False,
+    wait_timeout_sec: int = 14_400,
+    **_: Any,
+) -> dict[str, Any]:
+    """Weekly always uses direct montage — never Cursor Agent (reliable 7am + Run now)."""
+    import time as _time
+
+    from discovery.command_jobs import create_command_job, get_command_job, start_command_job
+    from discovery.command_montage import should_use_direct_montage, spawn_direct_montage_job
+
+    if not should_use_direct_montage(user_command):
+        raise ValueError("Weekly slot is not a montage brief — re-save the week from ChatGPT paste.")
+
+    record = create_command_job(store, user_command=user_command, video_id=video_id)
+    job_key = str(record["job_key"])
+    if _montage_inline():
+        start_command_job(store, job_key=job_key, agent_model=None, block_montage=True)
+    else:
+        spawn_direct_montage_job(store, job_key)
+        if wait_montage:
+            _wait_for_command_job(store, job_key, deadline=_time.monotonic() + max(120, wait_timeout_sec))
+    job = get_command_job(store, job_key)
+    return dict(job or record)
+
+
+def _sync_slot_from_job(store, slot_id: int, job_key: str) -> None:
+    from discovery.command_jobs import get_command_job
+
+    job = get_command_job(store, job_key)
+    if not job:
+        mark_slot(store, slot_id, status="running", job_key=job_key)
+        return
+    st = str(job.get("status") or "")
+    if st == "completed":
+        mark_slot(
+            store,
+            slot_id,
+            status="done",
+            job_key=job_key,
+            video_id=job.get("production_video_id"),
+            error="",
+        )
+    elif st in {"failed", "cancelled"}:
+        mark_slot(
+            store,
+            slot_id,
+            status="failed",
+            job_key=job_key,
+            error=str(job.get("error_message") or "Job failed")[:500],
+        )
+    else:
+        mark_slot(store, slot_id, status="running", job_key=job_key)
 
 
 def export_week(store, *, week_start: str, owner: str) -> dict[str, Any]:
@@ -852,10 +933,8 @@ def run_weekly_due_batch(
     """Submit due weekly slots. Serial mode: one agent at a time (default 1 per invocation)."""
     import time as _time
 
-    from discovery.command_jobs import submit_command
-
     if submit_fn is None:
-        submit_fn = submit_command
+        submit_fn = weekly_submit_command
 
     owner_norm = normalize_owner(owner) if owner else None
     activate_plans_for_day(store, day=day)
@@ -911,8 +990,7 @@ def run_weekly_due_batch(
             "dry_run": True,
         }
 
-    morning_batch = not serial and not wait_complete
-    if production_queue_busy(store, owner=None) and not morning_batch:
+    if production_queue_busy(store, owner=None) and count_running_weekly_slots(store, owner=owner_norm) > 0:
         return {
             "day": day,
             "owner": owner_norm,
@@ -923,24 +1001,10 @@ def run_weekly_due_batch(
             "reconcile": reconcile,
             "preflight": preflight,
         }
-    if production_queue_busy(store, owner=None) and morning_batch:
-        running = count_running_weekly_slots(store, owner=owner_norm)
-        if running >= cap:
-            return {
-                "day": day,
-                "owner": owner_norm,
-                "submitted": [],
-                "count": 0,
-                "deferred": True,
-                "reason": "daily_batch_already_started",
-                "reconcile": reconcile,
-                "preflight": preflight,
-            }
 
-    from discovery.command_montage import should_use_direct_montage
-
-    default_model = weekly_agent_model()
-    max_submit = cap if (wait_complete or not serial) else 1
+    serial = True
+    wait_complete = True
+    max_submit = cap
     submitted: list[dict[str, str]] = []
     deadline = _time.monotonic() + max(60, wait_timeout_sec)
 
@@ -958,9 +1022,14 @@ def run_weekly_due_batch(
 
         slot = due.pop(0)
         command = slot_command_text(slot)
-        agent_model = None if should_use_direct_montage(command) else default_model
         try:
-            result = submit_fn(store, user_command=command, agent_model=agent_model)
+            result = submit_fn(
+                store,
+                user_command=command,
+                agent_model=None,
+                wait_montage=wait_complete,
+                wait_timeout_sec=wait_timeout_sec,
+            )
         except Exception as exc:  # noqa: BLE001
             mark_slot(store, int(slot["id"]), status="failed", error=str(exc)[:500])
             if not wait_complete:
@@ -968,7 +1037,8 @@ def run_weekly_due_batch(
             continue
 
         job_key = str(result.get("job_key") or "")
-        mark_slot(store, int(slot["id"]), status="running", job_key=job_key)
+        _sync_slot_from_job(store, int(slot["id"]), job_key)
+        refresh_plan_completion(store, plan_id=int(slot["plan_id"]))
         submitted.append({"slot_id": str(slot["id"]), "job_key": job_key})
 
         if serial and not wait_complete:
@@ -992,7 +1062,7 @@ def run_weekly_due_batch(
         "deferred": False,
         "reconcile": reconcile,
         "preflight": preflight,
-        "agent_model": default_model,
+        "agent_model": "direct_montage",
     }
     write_last_run(out)
     return out

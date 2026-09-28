@@ -272,7 +272,8 @@ export function WeeklyWorkspace() {
         owner,
         retry_failed: true,
         limit: 3,
-        serial: false,
+        serial: true,
+        wait_complete: true,
       });
       if (!res.ok) {
         setStatus(res.message);
@@ -352,7 +353,11 @@ export function WeeklyWorkspace() {
             </button>
           ) : null}
         </div>
-        {meta?.error_message ? <p className="mt-1 text-xs text-red-400">{meta.error_message}</p> : null}
+        {meta?.error_message ? (
+          <p className="mt-1 text-xs text-red-400" title={meta.error_message}>
+            {meta.error_message.length > 120 ? `${meta.error_message.slice(0, 120)}…` : meta.error_message}
+          </p>
+        ) : null}
         <input
           value={v.speaker}
           onChange={(e) => setSlots((p) => ({ ...p, [key]: { ...v, speaker: e.target.value } }))}

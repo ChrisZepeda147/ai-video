@@ -20,6 +20,7 @@ if (-not $Python) {
 }
 
 $Runner = Join-Path $Scripts "run_weekly_due.py"
+$env:WEEKLY_MONTAGE_INLINE = "1"
 $stamp = Get-Date -Format "o"
 Add-Content -Path $LogPath -Value "`n$stamp  weekly_7am start python=$Python" -Encoding UTF8
 

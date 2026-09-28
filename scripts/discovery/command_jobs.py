@@ -286,7 +286,7 @@ def reconcile_stale_command_jobs(store) -> dict[str, int]:
     failed = restarted = 0
     rows = store._conn.execute(
         """
-        SELECT job_key, status, started_at, created_at, user_command
+        SELECT job_key, status, started_at, created_at, user_command, stdout_log
         FROM cursor_command_jobs
         WHERE status IN ('running', 'queued')
         """
@@ -300,7 +300,32 @@ def reconcile_stale_command_jobs(store) -> dict[str, int]:
         if anchor.tzinfo is None:
             anchor = anchor.replace(tzinfo=timezone.utc)
         age_min = (now - anchor.astimezone(timezone.utc)).total_seconds() / 60.0
-        if status == "running" and age_min >= max_age:
+        cmd = str(row["user_command"] or "")
+        is_montage = should_use_direct_montage(cmd)
+        stale_min = max_age
+        if is_montage:
+            stale_min = max(stale_min, 240)
+        if (
+            is_montage
+            and status == "running"
+            and age_min >= 1
+            and not str(row["stdout_log"] or "").strip()
+        ):
+            msg = (
+                "Montage never started (background thread died, often after API reload). "
+                "Retry from Weekly (runs synchronously now)."
+            )
+            store._conn.execute(
+                """
+                UPDATE cursor_command_jobs
+                SET status = 'failed', error_message = ?, completed_at = ?
+                WHERE job_key = ?
+                """,
+                (msg, now_iso(), job_key),
+            )
+            failed += 1
+            continue
+        if status == "running" and age_min >= stale_min:
             msg = (
                 f"Stale after {int(age_min)}m (likely API restart or agent hung). "
                 "Retry from Weekly or Command."
@@ -316,9 +341,10 @@ def reconcile_stale_command_jobs(store) -> dict[str, int]:
             failed += 1
         elif status == "queued" and age_min >= min(15, max_age):
             cmd = str(row["user_command"] or "")
-            model = None
             if should_use_direct_montage(cmd):
-                start_command_job(store, job_key=job_key, agent_model=None)
+                from discovery.command_montage import spawn_direct_montage_job
+
+                spawn_direct_montage_job(store, job_key)
             else:
                 from discovery.weekly import weekly_agent_model
 
@@ -347,7 +373,12 @@ def resume_weekly_queued_jobs(store) -> int:
             from discovery.weekly import weekly_agent_model
 
             model = weekly_agent_model()
-        start_command_job(store, job_key=str(row["job_key"]), agent_model=model)
+        if should_use_direct_montage(cmd):
+            from discovery.command_montage import spawn_direct_montage_job
+
+            spawn_direct_montage_job(store, str(row["job_key"]))
+        else:
+            start_command_job(store, job_key=str(row["job_key"]), agent_model=model)
         n += 1
     return n
 
@@ -379,6 +410,7 @@ def start_command_job(
     session_id: str | None = None,
     auto_run: bool = True,
     agent_model: str | None = None,
+    block_montage: bool = False,
 ) -> dict[str, Any]:
     job = get_command_job(store, job_key)
     if not job:
@@ -386,11 +418,17 @@ def start_command_job(
     if not auto_run:
         return job
 
+    user_command = str(job.get("user_command") or "")
+    if not agent_model and should_use_direct_montage(user_command):
+        run_direct_montage_command(
+            job_key=job_key,
+            user_command=user_command,
+            block=block_montage,
+        )
+        return get_command_job(store, job_key) or {}
+
     def _run() -> None:
         user_command = str(job.get("user_command") or "")
-        if not agent_model and should_use_direct_montage(user_command):
-            run_direct_montage_command(job_key=job_key, user_command=user_command)
-            return
 
         thread_store = DiscoveryStore(default_db_path())
         try:
