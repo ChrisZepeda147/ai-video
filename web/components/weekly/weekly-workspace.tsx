@@ -100,23 +100,27 @@ export function WeeklyWorkspace() {
     setSlotMeta(meta);
     const prog = res.data.progress ?? null;
     setProgress(prog);
-    if (prog?.focus_day) setFocusDay(prog.focus_day);
-    else setFocusDay("mon");
+    const nextFocus = (prog?.focus_day as WeekDayId | undefined) ?? "mon";
+    setFocusDay(nextFocus);
 
-    const ws = effectiveWeekStartForPaste(weekStart);
-    const batchDay = calendarDateForWeekDay(ws, activeDay as WeekDayId);
-    const h = await fetchWeeklyHealth({ owner, day: batchDay });
-    if (h.ok) setHealth(h.data);
     setPlanSummary(
       res.data.plan
         ? `Week ${res.data.plan.status} · starts ${weekStart}`
         : "Copy ChatGPT prompt → paste reply → Save week (7am auto) or Run now.",
     );
-  }, [weekStart, owner, activeDay]);
+  }, [weekStart, owner]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const ws = effectiveWeekStartForPaste(weekStart);
+    const batchDay = calendarDateForWeekDay(ws, focusDay as WeekDayId);
+    void fetchWeeklyHealth({ owner, day: batchDay }).then((h) => {
+      if (h.ok) setHealth(h.data);
+    });
+  }, [weekStart, owner, focusDay]);
 
   const anyRunning = useMemo(() => {
     const slotRunning = Object.values(slotMeta).some((m) => m.status === "running");
