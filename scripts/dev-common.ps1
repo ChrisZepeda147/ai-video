@@ -61,26 +61,40 @@ function Test-UsablePythonPath {
     return $Path -and (Test-Path -LiteralPath $Path) -and ($Path -notmatch "WindowsApps")
 }
 
+function Test-PythonApiReady {
+    param([string]$PythonExe)
+    if (-not $PythonExe -or -not (Test-Path -LiteralPath $PythonExe)) { return $false }
+    & $PythonExe -c "import uvicorn, fastapi" 2>$null
+    return $LASTEXITCODE -eq 0
+}
+
 function Resolve-PythonExe {
-    if (Test-UsablePythonPath $env:AI_VIDEO_PYTHON) {
-        return $env:AI_VIDEO_PYTHON
-    }
-    $fallback = @(
+    $try = @()
+    if ($env:AI_VIDEO_PYTHON) { $try += $env:AI_VIDEO_PYTHON.Trim() }
+    $try += @(
         "$env:LOCALAPPDATA\Python\bin\python.exe",
         "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe",
         "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
         "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
+        "$env:ProgramFiles\Python313\python.exe",
         "$env:ProgramFiles\Python312\python.exe",
         "$env:ProgramFiles\Python311\python.exe"
     )
-    foreach ($path in $fallback) {
-        if (Test-UsablePythonPath $path) { return $path }
-    }
     foreach ($candidate in @("python", "python3", "py")) {
         $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
-        if ($cmd -and (Test-UsablePythonPath $cmd.Source)) {
-            return $cmd.Source
-        }
+        if ($cmd -and $cmd.Source) { $try += $cmd.Source }
+    }
+    $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
+    if ($pyLauncher) {
+        try {
+            $resolved = (& py -3 -c "import sys; print(sys.executable)" 2>$null | Select-Object -Last 1).Trim()
+            if ($resolved) { $try += $resolved }
+        } catch { }
+    }
+    foreach ($path in ($try | Select-Object -Unique)) {
+        if (-not $path) { continue }
+        if (Test-UsablePythonPath $path) { return $path }
+        if ($path -match "WindowsApps" -and (Test-PythonApiReady $path)) { return $path }
     }
     return $null
 }

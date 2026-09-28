@@ -51,6 +51,7 @@ if (-not $Python) {
     exit 1
 }
 Write-Host "Using Python: $Python"
+$env:AI_VIDEO_PYTHON = $Python
 Start-ApiServer -Root $Root -Python $Python -Background
 if (-not (Wait-ApiHealthy -Seconds 45)) {
     Write-Error "Discovery API failed to start. Dashboard will not start. Check data/logs/api-dev.err"

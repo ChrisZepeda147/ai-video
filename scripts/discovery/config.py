@@ -44,25 +44,57 @@ def default_db_path() -> Path:
     return discovery_data_dir() / "catalog.sqlite"
 
 
+def _python_can_import_api_deps(exe: str) -> bool:
+    import subprocess
+
+    try:
+        r = subprocess.run(
+            [exe, "-c", "import uvicorn, fastapi"],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+        return r.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def resolve_python_exe() -> str:
-    """Real Python for subprocess workers (not Windows Store stub)."""
+    """Python for subprocess workers; prefers non-Store installs, probes PATH when needed."""
+    import shutil
     import sys
 
     load_env()
+    tried: list[str] = []
     env_py = os.environ.get("AI_VIDEO_PYTHON", "").strip()
-    if env_py and "WindowsApps" not in env_py and Path(env_py).is_file():
-        return env_py
-    candidates = [
-        Path(os.environ.get("LOCALAPPDATA", "")) / "Python" / "bin" / "python.exe",
-        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Python" / "Python313" / "python.exe",
-        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Python" / "Python312" / "python.exe",
-        Path(os.environ.get("ProgramFiles", "")) / "Python313" / "python.exe",
-    ]
-    for path in candidates:
-        if path.is_file():
+    if env_py:
+        tried.append(env_py)
+    for rel in (
+        "Python/bin/python.exe",
+        "Programs/Python/Python313/python.exe",
+        "Programs/Python/Python312/python.exe",
+        "Programs/Python/Python311/python.exe",
+    ):
+        tried.append(str(Path(os.environ.get("LOCALAPPDATA", "")) / rel.replace("/", os.sep)))
+    for name in ("python", "python3"):
+        w = shutil.which(name)
+        if w:
+            tried.append(w)
+    seen: set[str] = set()
+    for raw in tried:
+        path = Path(raw)
+        if not path.is_file():
+            continue
+        key = str(path.resolve()).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        if "WindowsApps" not in path.parts:
+            return str(path)
+        if _python_can_import_api_deps(str(path)):
             return str(path)
     exe = Path(sys.executable)
-    if "WindowsApps" not in exe.parts:
+    if exe.is_file() and "WindowsApps" not in exe.parts:
         return str(exe)
     return str(exe)
 
