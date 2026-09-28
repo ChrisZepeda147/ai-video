@@ -21,7 +21,8 @@ import {
   mondayOf,
   planningWeekStart,
   runBatchTarget,
-  todayIso,
+  calendarDateForWeekDay,
+  type WeekDayId,
 } from "@/lib/weekly-planning";
 
 const SLOTS = [1, 2, 3] as const;
@@ -103,7 +104,7 @@ export function WeeklyWorkspace() {
     else setFocusDay("mon");
 
     const ws = effectiveWeekStartForPaste(weekStart);
-    const batchDay = runBatchTarget(ws).day;
+    const batchDay = calendarDateForWeekDay(ws, activeDay as WeekDayId);
     const h = await fetchWeeklyHealth({ owner, day: batchDay });
     if (h.ok) setHealth(h.data);
     setPlanSummary(
@@ -111,7 +112,7 @@ export function WeeklyWorkspace() {
         ? `Week ${res.data.plan.status} · starts ${weekStart}`
         : "Copy ChatGPT prompt → paste reply → Save week (7am auto) or Run now.",
     );
-  }, [weekStart, owner]);
+  }, [weekStart, owner, activeDay]);
 
   useEffect(() => {
     load();
@@ -152,6 +153,37 @@ export function WeeklyWorkspace() {
 
   const activeDay = focusDay;
   const dayProgress = useMemo(() => progress?.days.find((d) => d.day === activeDay), [progress, activeDay]);
+
+  const batchDayIso = useMemo(
+    () => calendarDateForWeekDay(effectiveWeekStartForPaste(weekStart), activeDay as WeekDayId),
+    [weekStart, activeDay],
+  );
+
+  const dayMorning = useMemo(() => {
+    if (!health || health.day !== batchDayIso) return health?.day_morning ?? null;
+    return health.day_morning ?? null;
+  }, [health, batchDayIso]);
+
+  const dayOutcomeLabel = useMemo(() => {
+    if (!dayMorning) return null;
+    switch (dayMorning.outcome) {
+      case "finished":
+        return { text: "Yes — finished", className: "border-emerald-800/60 bg-emerald-950/40 text-emerald-200" };
+      case "in_progress":
+        return { text: "In progress", className: "border-amber-800/60 bg-amber-950/40 text-amber-200" };
+      case "failed":
+        return { text: "Failed — retry slots", className: "border-red-800/60 bg-red-950/40 text-red-200" };
+      case "not_finished":
+        return {
+          text: "No — 7am batch did not finish (still queued)",
+          className: "border-red-800/60 bg-red-950/40 text-red-200",
+        };
+      case "pending":
+        return { text: "Waiting for 7am", className: "border-zinc-700 bg-zinc-900/60 text-zinc-300" };
+      default:
+        return { text: "No plan for this day", className: "border-zinc-800 bg-zinc-900/40 text-zinc-500" };
+    }
+  }, [dayMorning]);
 
   function buildPayload() {
     return (Object.entries(slots) as Array<[SlotKey, SlotCell]>).map(([key, v]) => {
@@ -454,6 +486,47 @@ export function WeeklyWorkspace() {
               ? `Focus ${DAY_LABEL_SHORT[activeDay]} — finish 3/3 then next day.`
               : `Viewing ${DAY_LABEL_SHORT[activeDay]}${dayProgress ? ` (${dayProgress.done}/${dayProgress.filled} done)` : ""}`}
         </p>
+
+        {dayOutcomeLabel ? (
+          <div className={`mt-4 rounded-xl border p-4 ${dayOutcomeLabel.className}`}>
+            <p className="text-sm font-semibold">
+              {DAY_LABEL[activeDay as WeekDayId]} {batchDayIso} — {dayOutcomeLabel.text}
+            </p>
+            {dayMorning ? (
+              <p className="mt-1 text-xs opacity-90">
+                7am submitted: {dayMorning.morning_submitted ? "yes" : "no"}
+                {dayMorning.catchup_ran ? " · catch-up ran on API start" : ""}
+                {" · "}
+                {dayMorning.stats.done}/3 done
+                {dayMorning.stats.running ? ` · ${dayMorning.stats.running} running` : ""}
+                {dayMorning.stats.queued ? ` · ${dayMorning.stats.queued} queued` : ""}
+              </p>
+            ) : null}
+            <ul className="mt-3 space-y-2">
+              {SLOTS.map((n) => {
+                const key = `${activeDay}-${n}` as SlotKey;
+                const st = slotMeta[key]?.status ?? "queued";
+                const sp = slots[key]?.speaker?.trim() || `Video ${n}`;
+                const done = st === "done";
+                return (
+                  <li key={n} className="flex items-start gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      readOnly
+                      checked={done}
+                      aria-label={`${DAY_LABEL_SHORT[activeDay]} video ${n} ${done ? "done" : st}`}
+                      className="mt-0.5 h-4 w-4 rounded border-zinc-600"
+                    />
+                    <span>
+                      {sp}{" "}
+                      <span className="text-xs uppercase opacity-80">({st})</span>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ) : null}
 
         <div className="mt-4 space-y-3">{SLOTS.map((n) => renderSlot(n))}</div>
       </section>

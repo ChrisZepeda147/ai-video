@@ -56,8 +56,13 @@ function Test-ApiHealthy {
     }
 }
 
+function Test-UsablePythonPath {
+    param([string]$Path)
+    return $Path -and (Test-Path -LiteralPath $Path) -and ($Path -notmatch "WindowsApps")
+}
+
 function Resolve-PythonExe {
-    if ($env:AI_VIDEO_PYTHON -and (Test-Path -LiteralPath $env:AI_VIDEO_PYTHON)) {
+    if (Test-UsablePythonPath $env:AI_VIDEO_PYTHON) {
         return $env:AI_VIDEO_PYTHON
     }
     $fallback = @(
@@ -69,19 +74,13 @@ function Resolve-PythonExe {
         "$env:ProgramFiles\Python311\python.exe"
     )
     foreach ($path in $fallback) {
-        if ($path -and (Test-Path -LiteralPath $path)) { return $path }
+        if (Test-UsablePythonPath $path) { return $path }
     }
     foreach ($candidate in @("python", "python3", "py")) {
         $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
-        if ($cmd -and $cmd.Source -and (Test-Path -LiteralPath $cmd.Source) -and ($cmd.Source -notmatch "WindowsApps")) {
+        if ($cmd -and (Test-UsablePythonPath $cmd.Source)) {
             return $cmd.Source
         }
-    }
-    $storeMatches = Get-ChildItem -Path "$env:LOCALAPPDATA\Microsoft\WindowsApps" -Filter "python.exe" -Recurse -Depth 2 -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName -match 'PythonSoftwareFoundation' } |
-        Sort-Object FullName -Descending
-    if ($storeMatches) {
-        return $storeMatches[0].FullName
     }
     return $null
 }

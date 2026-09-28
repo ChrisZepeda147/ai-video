@@ -1039,12 +1039,24 @@ export type WeeklyResponse = {
   progress?: WeeklyProgress;
 };
 
+export type WeeklyDayMorningStatus = {
+  day: string;
+  expected: number;
+  filled: number;
+  outcome: "finished" | "in_progress" | "failed" | "not_finished" | "pending" | "empty";
+  morning_submitted: boolean;
+  catchup_ran: boolean;
+  past_morning_cutoff: boolean;
+  stats: { queued: number; running: number; done: number; failed: number };
+};
+
 export type WeeklyHealthResponse = {
   day: string;
   owner: string | null;
   preflight: { ok: boolean; agent_available: boolean; api_key_set: boolean; issues: string[] };
   due_count: number;
   today_stats: { queued: number; running: number; done: number; failed: number };
+  day_morning?: WeeklyDayMorningStatus;
   queue_busy: boolean;
   running_weekly_slots: number;
   running_command_jobs: number;

@@ -1,5 +1,5 @@
 # Install / manage the daily 7am weekly runner (Windows Task Scheduler).
-# 7am submits all 3 due slots in one batch (parallel Cursor agents).
+# 7am submits all 3 due slots per owner in one batch (parallel Cursor agents).
 param(
   [string]$Time = "07:00",
   [string]$TaskName = "AiVideoWeekly7am",
@@ -12,11 +12,50 @@ $Root = Split-Path -Parent $PSScriptRoot
 $LogDir = Join-Path $Root "data\logs"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $LogPath = Join-Path $LogDir "weekly-7am.log"
+$SilentVbsDir = Join-Path $env:LOCALAPPDATA "AiVideo"
+$SilentVbsPath = Join-Path $SilentVbsDir "weekly_7am_silent.vbs"
+$WeeklyPs1 = Join-Path $Root "scripts\weekly_7am.ps1"
 
 function Remove-LegacyExtraTasks {
   foreach ($suffix in @("1000", "1400")) {
     schtasks /Delete /TN "${TaskName}_$suffix" /F 2>$null | Out-Null
   }
+}
+
+function Write-WeeklySilentLauncher {
+  $powershell = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
+  New-Item -ItemType Directory -Force -Path $SilentVbsDir | Out-Null
+  $cmd = "$powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$WeeklyPs1`""
+  $escaped = $cmd.Replace('"', '""')
+  $rootEsc = $Root.Replace('"', '""')
+  @(
+    "On Error Resume Next"
+    "Set sh = CreateObject(""Wscript.Shell"")"
+    "sh.CurrentDirectory = ""$rootEsc"""
+    "sh.Run ""$escaped"", 0, False"
+  ) -join "`r`n" | Set-Content -Path $SilentVbsPath -Encoding ASCII
+  return $SilentVbsPath
+}
+
+function Install-WeeklyTask {
+  if (-not (Test-Path $WeeklyPs1)) { throw "Missing $WeeklyPs1" }
+  . (Join-Path $Root "scripts\dev-common.ps1")
+  Import-ApiEnvFile -Root $Root
+  $Python = Resolve-PythonExe
+  if (-not $Python) { throw "Python not found. Set AI_VIDEO_PYTHON in scripts/.env" }
+  Write-Host "Using Python: $Python"
+
+  Remove-LegacyExtraTasks
+  $vbs = Write-WeeklySilentLauncher
+  $wscript = Join-Path $env:WINDIR "System32\wscript.exe"
+  $tr = "`"$wscript`" //B //Nologo `"$vbs`""
+  $create = & schtasks.exe @(
+    "/Create", "/TN", $TaskName, "/SC", "DAILY", "/ST", $Time,
+    "/RL", "LIMITED", "/F", "/TR", $tr
+  ) 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) { throw "schtasks create failed: $create" }
+  Write-Host "installed $TaskName daily $Time (silent launcher: $vbs)"
+  Write-Host "Morning batch: run_weekly_due --all-owners --limit 3 (log: $LogPath)"
 }
 
 if ($Status) {
@@ -27,31 +66,9 @@ if ($Status) {
 if ($Uninstall) {
   schtasks /Delete /TN $TaskName /F 2>$null
   Remove-LegacyExtraTasks
+  if (Test-Path $SilentVbsPath) { Remove-Item -Force $SilentVbsPath -ErrorAction SilentlyContinue }
   exit 0
 }
 
-. (Join-Path $Root "scripts\dev-common.ps1")
-$Python = Resolve-PythonExe
-if (-not $Python) { throw "Python not found. Install Python 3.11+ or set AI_VIDEO_PYTHON in scripts/.env" }
-Write-Host "Using Python: $Python"
-
-Remove-LegacyExtraTasks
-
-$Runner = Join-Path $Root "scripts\run_weekly_due.py"
-$RunnerArgs = " --retry-failed --morning-batch --limit 3"
-if ($Owner -ne "") { $RunnerArgs += " --owner $Owner" }
-
-$Launcher = Join-Path $Root "scripts\weekly_7am.cmd"
-$LauncherBody = @"
-@echo off
-cd /d `"$Root`"
-`"$Python`" `"$Runner`"$RunnerArgs >> `"$LogPath`" 2>&1
-"@
-Set-Content -Path $Launcher -Value $LauncherBody -Encoding Ascii
-
-$Create = schtasks /Create /TN $TaskName /SC DAILY /ST $Time /RL LIMITED /F /TR "`"$Launcher`""
-if ($LASTEXITCODE -ne 0) { throw "schtasks create failed: $Create" }
-
-Write-Host "installed $TaskName daily $Time (log: $LogPath)"
-Write-Host "Morning batch: submits 3 due slots at $Time (parallel agents)."
+Install-WeeklyTask
 

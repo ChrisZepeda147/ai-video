@@ -27,6 +27,21 @@ if (Test-Path $GhSync) {
     }
 }
 
+$WeeklyInstall = Join-Path $Scripts "install_weekly_task.ps1"
+if (Test-Path $WeeklyInstall) {
+    $weeklyVbs = Join-Path $env:LOCALAPPDATA "AiVideo\weekly_7am_silent.vbs"
+    schtasks /Query /TN "AiVideoWeekly7am" /FO LIST 2>$null | Out-Null
+    $needsWeekly = ($LASTEXITCODE -ne 0) -or -not (Test-Path -LiteralPath $weeklyVbs)
+    if ($needsWeekly) {
+        Write-Host "Installing/updating weekly 7am task (3 videos per owner)..."
+        try {
+            & $WeeklyInstall | Out-Null
+        } catch {
+            Write-Warning "Weekly 7am task not installed: $_"
+        }
+    }
+}
+
 if (Test-ApiHealthy) {
     Write-Host "Discovery API already running on http://127.0.0.1:8000"
 } else {

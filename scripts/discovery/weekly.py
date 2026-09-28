@@ -555,6 +555,138 @@ def today_slot_stats(store, *, day: str, owner: str | None = None) -> dict[str, 
     return stats
 
 
+def _morning_cutoff_hour() -> int:
+    import os as _os
+
+    try:
+        return max(0, min(23, int(_os.environ.get("WEEKLY_MORNING_HOUR", "7"))))
+    except ValueError:
+        return 7
+
+
+def past_morning_cutoff(day_iso: str | None = None) -> bool:
+    """True when local time is on/after the configured morning hour for that calendar day."""
+    target = date.fromisoformat(day_iso or date.today().isoformat())
+    today = date.today()
+    if target < today:
+        return True
+    if target > today:
+        return False
+    hour = _morning_cutoff_hour()
+    return datetime.now().hour >= hour
+
+
+def day_morning_status(store, *, day: str, owner: str | None = None) -> dict[str, Any]:
+    """Per-calendar-day batch outcome for 7am + UI checklist."""
+    if owner:
+        owner = normalize_owner(owner)
+    stats = today_slot_stats(store, day=day, owner=owner)
+    filled = sum(stats.values())
+    expected = VIDEOS_PER_DAY if filled >= VIDEOS_PER_DAY else max(filled, VIDEOS_PER_DAY)
+    last = _read_last_run()
+    morning_submitted = bool(
+        last
+        and str(last.get("day") or "") == day
+        and int(last.get("count") or 0) > 0
+        and (owner is None or str(last.get("owner") or "") in ("", owner))
+    )
+    catchup = _read_catchup_state()
+    catchup_ran = bool(catchup.get("day") == day and catchup.get("ran"))
+
+    done = int(stats.get("done") or 0)
+    running = int(stats.get("running") or 0)
+    failed = int(stats.get("failed") or 0)
+    queued = int(stats.get("queued") or 0)
+
+    if filled == 0:
+        outcome = "empty"
+    elif done >= min(expected, filled) and queued == 0 and running == 0 and failed == 0:
+        outcome = "finished"
+    elif failed > 0 and done + running == 0:
+        outcome = "failed"
+    elif running > 0 or (done > 0 and queued + running > 0):
+        outcome = "in_progress"
+    elif past_morning_cutoff(day) and queued > 0:
+        outcome = "not_finished"
+    else:
+        outcome = "pending"
+
+    return {
+        "day": day,
+        "expected": expected,
+        "filled": filled,
+        "stats": stats,
+        "outcome": outcome,
+        "morning_submitted": morning_submitted,
+        "catchup_ran": catchup_ran,
+        "past_morning_cutoff": past_morning_cutoff(day),
+        "last_run": last,
+    }
+
+
+def _catchup_state_path() -> Path:
+    return project_root() / "data" / "logs" / "weekly-morning-catchup.json"
+
+
+def _read_catchup_state() -> dict[str, Any]:
+    import json as _json
+
+    path = _catchup_state_path()
+    if not path.is_file():
+        return {}
+    try:
+        return _json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _write_catchup_state(payload: dict[str, Any]) -> None:
+    import json as _json
+
+    path = _catchup_state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_json.dumps({**payload, "at": _now()}, indent=2), encoding="utf-8")
+
+
+def maybe_run_morning_catchup(store) -> dict[str, Any] | None:
+    """If 7am task missed and slots still queued, submit morning batch once per day (API startup)."""
+    import os as _os
+
+    if _os.environ.get("WEEKLY_MORNING_CATCHUP", "1").strip().lower() in {"0", "false", "no"}:
+        return None
+    today = date.today().isoformat()
+    state = _read_catchup_state()
+    if state.get("day") == today and state.get("ran"):
+        return state
+    if not past_morning_cutoff(today):
+        return None
+
+    any_due = False
+    results: list[dict[str, Any]] = []
+    for owner in OWNERS:
+        due_n = len(due_slots(store, day=today, owner=owner))
+        if due_n <= 0:
+            continue
+        any_due = True
+        batch = run_weekly_due_batch(
+            store,
+            day=today,
+            owner=owner,
+            limit=VIDEOS_PER_DAY,
+            dry_run=False,
+            serial=False,
+            retry_failed=True,
+        )
+        results.append({"owner": owner, **{k: batch.get(k) for k in ("count", "deferred", "error", "submitted")}})
+
+    if not any_due:
+        _write_catchup_state({"day": today, "ran": True, "skipped": "nothing_due"})
+        return _read_catchup_state()
+
+    _write_catchup_state({"day": today, "ran": True, "results": results})
+    return _read_catchup_state()
+
+
 def weekly_health(store, *, day: str | None = None, owner: str | None = None) -> dict[str, Any]:
     day = day or date.today().isoformat()
     if owner:
@@ -572,6 +704,7 @@ def weekly_health(store, *, day: str | None = None, owner: str | None = None) ->
         "reconcile": reconcile,
         "due_count": len(due),
         "today_stats": stats,
+        "day_morning": day_morning_status(store, day=day, owner=owner),
         "queue_busy": busy,
         "running_weekly_slots": count_running_weekly_slots(store),
         "running_command_jobs": count_running_command_jobs(store),
@@ -714,7 +847,7 @@ def run_weekly_due_batch(
     reconcile = reconcile_slots(store)
     preflight = weekly_preflight()
     if not dry_run and not preflight["ok"]:
-        return {
+        blocked = {
             "day": day,
             "owner": owner_norm,
             "submitted": [],
@@ -724,6 +857,8 @@ def run_weekly_due_batch(
             "preflight": preflight,
             "error": "; ".join(preflight["issues"]),
         }
+        write_last_run(blocked)
+        return blocked
 
     if retry_failed:
         target = date.fromisoformat(day)
