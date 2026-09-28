@@ -44,6 +44,29 @@ def default_db_path() -> Path:
     return discovery_data_dir() / "catalog.sqlite"
 
 
+def resolve_python_exe() -> str:
+    """Real Python for subprocess workers (not Windows Store stub)."""
+    import sys
+
+    load_env()
+    env_py = os.environ.get("AI_VIDEO_PYTHON", "").strip()
+    if env_py and "WindowsApps" not in env_py and Path(env_py).is_file():
+        return env_py
+    candidates = [
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Python" / "bin" / "python.exe",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Python" / "Python313" / "python.exe",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Python" / "Python312" / "python.exe",
+        Path(os.environ.get("ProgramFiles", "")) / "Python313" / "python.exe",
+    ]
+    for path in candidates:
+        if path.is_file():
+            return str(path)
+    exe = Path(sys.executable)
+    if "WindowsApps" not in exe.parts:
+        return str(exe)
+    return str(exe)
+
+
 def load_env() -> None:
     """Load scripts/.env without overriding existing environment variables."""
     env_path = Path(__file__).resolve().parent.parent / ".env"

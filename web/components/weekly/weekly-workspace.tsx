@@ -260,7 +260,9 @@ export function WeeklyWorkspace() {
 
   async function onRunWeek() {
     setBusy(true);
-    setStatus("Running montages (one at a time) — can take up to ~2 hours for 3 videos…");
+    setStatus(
+      "Rendering Monday videos (1→2→3) in the API — leave this tab open. Button stays busy until all finish (~15–45 min each). No extra console window when API is restarted.",
+    );
     try {
       if (pasteText.trim()) {
         const ok = await saveWeekFromPaste();
@@ -432,7 +434,7 @@ export function WeeklyWorkspace() {
             disabled={busy}
             className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 disabled:opacity-50"
           >
-            Run {runTarget.label} now (3 videos)
+            {busy ? `Rendering ${runTarget.label}…` : `Run ${runTarget.label} now (3 videos)`}
           </button>
         </div>
         <textarea

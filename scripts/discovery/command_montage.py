@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from discovery.config import default_db_path, project_root
+from discovery.config import default_db_path, project_root, resolve_python_exe
 from discovery.motivation_build import _build_command
 from discovery.reuse_policy import normalize_reuse_policy, parse_reuse_policy
 from discovery.store import DiscoveryStore
@@ -365,16 +365,8 @@ def run_direct_montage_command(
 
 def spawn_direct_montage_job(store, job_key: str) -> None:
     """Start montage in a detached process so API reload does not kill the render."""
-    from discovery.command_jobs import now_iso
-
     root = project_root()
-    python = os.environ.get("AI_VIDEO_PYTHON", "").strip()
-    if not python or "WindowsApps" in python:
-        python = sys.executable
-    if "WindowsApps" in python:
-        local = Path(os.environ.get("LOCALAPPDATA", "")) / "Python" / "bin" / "python.exe"
-        if local.is_file():
-            python = str(local)
+    python = resolve_python_exe()
     script = root / "scripts" / "run_direct_job.py"
     if not script.is_file():
         raise FileNotFoundError(f"Missing {script}")
@@ -390,9 +382,10 @@ def spawn_direct_montage_job(store, job_key: str) -> None:
     store._conn.commit()
 
     env = dict(subprocess_env() if subprocess_env else os.environ)
+    env["AI_VIDEO_PYTHON"] = python
     flags = 0
     if sys.platform == "win32":
-        flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        flags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
     subprocess.Popen(
         [python, str(script), "--job-key", job_key],
         cwd=root,

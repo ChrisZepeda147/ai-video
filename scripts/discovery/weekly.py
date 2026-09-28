@@ -801,12 +801,12 @@ def weekly_submit_command(
 
     record = create_command_job(store, user_command=user_command, video_id=video_id)
     job_key = str(record["job_key"])
-    if _montage_inline():
+    # Run Monday / wait-complete: inline in API (no flashing console). 7am task sets WEEKLY_MONTAGE_INLINE.
+    if _montage_inline() or wait_montage:
         start_command_job(store, job_key=job_key, agent_model=None, block_montage=True)
     else:
         spawn_direct_montage_job(store, job_key)
-        if wait_montage:
-            _wait_for_command_job(store, job_key, deadline=_time.monotonic() + max(120, wait_timeout_sec))
+        _wait_for_command_job(store, job_key, deadline=_time.monotonic() + max(120, wait_timeout_sec))
     job = get_command_job(store, job_key)
     return dict(job or record)
 
@@ -907,14 +907,21 @@ def failed_slots_digest(store, *, owner: str | None = None, limit: int = 10) -> 
 
 
 def tail_weekly_log(*, lines: int = 80) -> str:
-    path = project_root() / "data" / "logs" / "weekly-7am.log"
-    if not path.is_file():
-        return ""
-    try:
-        content = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return ""
-    return "\n".join(content[-max(1, min(lines, 500)) :])
+    cap = max(1, min(lines, 500))
+    chunks: list[str] = []
+    log_dir = project_root() / "data" / "logs"
+    for name in ("weekly-montage-worker.log", "weekly-7am.log"):
+        path = log_dir / name
+        if not path.is_file():
+            continue
+        try:
+            content = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        if content:
+            chunks.append(f"=== {name} ===")
+            chunks.extend(content[-cap:])
+    return "\n".join(chunks)
 
 
 def run_weekly_due_batch(
@@ -1027,7 +1034,7 @@ def run_weekly_due_batch(
                 store,
                 user_command=command,
                 agent_model=None,
-                wait_montage=False,
+                wait_montage=wait_complete,
                 wait_timeout_sec=wait_timeout_sec,
             )
         except Exception as exc:  # noqa: BLE001
@@ -1037,8 +1044,6 @@ def run_weekly_due_batch(
             continue
 
         job_key = str(result.get("job_key") or "")
-        if wait_complete and job_key:
-            _wait_for_command_job(store, job_key, deadline=deadline)
         _sync_slot_from_job(store, int(slot["id"]), job_key)
         refresh_plan_completion(store, plan_id=int(slot["plan_id"]))
         submitted.append({"slot_id": str(slot["id"]), "job_key": job_key})
