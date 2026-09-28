@@ -31,6 +31,21 @@ class ReusePolicyTests(unittest.TestCase):
         )
         self.assertEqual(parse_reuse_policy(text), "allow")
 
+    def test_weekly_montage_brief_stays_allow(self) -> None:
+        from discovery.motivation_command_brief import compose_from_slot
+
+        cmd = compose_from_slot(
+            {
+                "day": "mon",
+                "slot": 1,
+                "speaker": "Goggins",
+                "visual_direction": "Sunrise mountain summit",
+                "week_start": "2026-09-28",
+                "owner": "chris",
+            }
+        )
+        self.assertEqual(parse_reuse_policy(cmd), "allow")
+
 
 class ToolchainTests(unittest.TestCase):
     def test_classify_ffmpeg_missing(self) -> None:

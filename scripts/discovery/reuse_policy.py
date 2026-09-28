@@ -39,8 +39,13 @@ def normalize_reuse_policy(value: str | None, *, default: str = "allow") -> str:
 _BOILERPLATE = (
     r"do not reuse the same excerpt unless[^\n.]*",
     r"avoid reusing the same excerpt unless[^\n.]*",
+    r"skip the same excerpt unless[^\n.]*",
     r"use `--reuse-policy require_new` when[^\n.]*",
     r"use --reuse-policy require_new when[^\n.]*",
+    r"reuse of prior sources is allowed by default[^\n.]*",
+    r"unused-only only if extra instructions say[^\n.]*",
+    r"only enforce unused-only when[^\n.]*",
+    r"unused-only only when[^\n.]*",
 )
 
 

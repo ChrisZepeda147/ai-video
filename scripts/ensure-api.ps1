@@ -19,7 +19,7 @@ if ($Restart) {
     Write-Host "Discovery API already running on http://127.0.0.1:8000"
     exit 0
 } elseif (Test-ApiPortListening) {
-    Write-Host "Port 8000 busy but /health failed — restarting API..."
+    Write-Host "Port 8000 busy but /health failed - restarting API..."
     & (Join-Path $Scripts "stop-api.ps1") -Port 8000 | Out-Null
 } else {
     Write-Host "Starting Discovery API on http://127.0.0.1:8000 ..."

@@ -46,6 +46,10 @@ if (Test-Path $WeeklyInstall) {
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
+if (-not (Test-ApiHealthy)) {
+    Write-Error "Discovery API is not healthy after ensure-api. Check data/logs/api-dev.err"
+    exit 1
+}
 
 Write-Host "Backend healthy. Starting dashboard..."
 & (Join-Path $Scripts "start-dashboard.ps1")
