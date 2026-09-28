@@ -23,7 +23,7 @@ $Runner = Join-Path $Scripts "run_weekly_due.py"
 $stamp = Get-Date -Format "o"
 Add-Content -Path $LogPath -Value "`n$stamp  weekly_7am start python=$Python" -Encoding UTF8
 
-& $Python $Runner --retry-failed --morning-batch --limit 3 --all-owners 2>&1 |
+& $Python $Runner --retry-failed --all-owners --serial --wait-complete --limit 3 2>&1 |
     ForEach-Object { Add-Content -Path $LogPath -Value $_ -Encoding UTF8 }
 
 $code = $LASTEXITCODE

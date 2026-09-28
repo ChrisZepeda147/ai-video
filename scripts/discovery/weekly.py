@@ -311,6 +311,7 @@ def build_slot_brief(slot: dict[str, Any], *, image_paths: list[str] | None = No
 
 def get_week(store, *, week_start: str, owner: str) -> dict[str, Any]:
     ensure_weekly_tables(store)
+    weekly_reconcile_pipeline(store)
     owner = normalize_owner(owner)
     row = store._conn.execute(
         "SELECT * FROM weekly_plans WHERE week_start = ? AND owner = ?",
@@ -401,6 +402,16 @@ def activate_plans_for_day(store, *, day: str) -> None:
         (ts, monday),
     )
     store._conn.commit()
+
+
+def weekly_reconcile_pipeline(store) -> dict[str, Any]:
+    """Stale jobs → slot status sync → resume stuck queued."""
+    from discovery.command_jobs import reconcile_stale_command_jobs, resume_weekly_queued_jobs
+
+    stale = reconcile_stale_command_jobs(store)
+    slots = reconcile_slots(store)
+    resumed = resume_weekly_queued_jobs(store)
+    return {"stale": stale, "slots": slots, "resumed": resumed}
 
 
 def reconcile_slots(store) -> dict[str, int]:
@@ -656,9 +667,12 @@ def maybe_run_morning_catchup(store) -> dict[str, Any] | None:
         return None
     today = date.today().isoformat()
     state = _read_catchup_state()
-    if state.get("day") == today and state.get("ran"):
+    due_remaining = sum(len(due_slots(store, day=today, owner=o)) for o in OWNERS)
+    if state.get("day") == today and state.get("ran") and due_remaining <= 0:
         return state
     if not past_morning_cutoff(today):
+        return None
+    if due_remaining <= 0:
         return None
 
     any_due = False
@@ -691,7 +705,8 @@ def weekly_health(store, *, day: str | None = None, owner: str | None = None) ->
     day = day or date.today().isoformat()
     if owner:
         owner = normalize_owner(owner)
-    reconcile = reconcile_slots(store)
+    pipe = weekly_reconcile_pipeline(store)
+    reconcile = pipe.get("slots") or reconcile_slots(store)
     preflight = weekly_preflight()
     due = due_slots(store, day=day, owner=owner)
     stats = today_slot_stats(store, day=day, owner=owner)
@@ -701,7 +716,7 @@ def weekly_health(store, *, day: str | None = None, owner: str | None = None) ->
         "day": day,
         "owner": owner,
         "preflight": preflight,
-        "reconcile": reconcile,
+        "reconcile": {**pipe, "slots": reconcile},
         "due_count": len(due),
         "today_stats": stats,
         "day_morning": day_morning_status(store, day=day, owner=owner),
@@ -844,6 +859,7 @@ def run_weekly_due_batch(
 
     owner_norm = normalize_owner(owner) if owner else None
     activate_plans_for_day(store, day=day)
+    weekly_reconcile_pipeline(store)
     reconcile = reconcile_slots(store)
     preflight = weekly_preflight()
     if not dry_run and not preflight["ok"]:
@@ -921,7 +937,9 @@ def run_weekly_due_batch(
                 "preflight": preflight,
             }
 
-    model = weekly_agent_model()
+    from discovery.command_montage import should_use_direct_montage
+
+    default_model = weekly_agent_model()
     max_submit = cap if (wait_complete or not serial) else 1
     submitted: list[dict[str, str]] = []
     deadline = _time.monotonic() + max(60, wait_timeout_sec)
@@ -940,8 +958,9 @@ def run_weekly_due_batch(
 
         slot = due.pop(0)
         command = slot_command_text(slot)
+        agent_model = None if should_use_direct_montage(command) else default_model
         try:
-            result = submit_fn(store, user_command=command, agent_model=model)
+            result = submit_fn(store, user_command=command, agent_model=agent_model)
         except Exception as exc:  # noqa: BLE001
             mark_slot(store, int(slot["id"]), status="failed", error=str(exc)[:500])
             if not wait_complete:
@@ -973,7 +992,7 @@ def run_weekly_due_batch(
         "deferred": False,
         "reconcile": reconcile,
         "preflight": preflight,
-        "agent_model": model,
+        "agent_model": default_model,
     }
     write_last_run(out)
     return out

@@ -455,6 +455,11 @@ export function WeeklyWorkspace() {
             {!health.preflight.ok && health.preflight.issues.length ? (
               <p className="text-amber-300">{health.preflight.issues.join(" · ")}</p>
             ) : null}
+            {(health.reconcile?.stale?.stale_failed ?? 0) > 0 ? (
+              <p className="text-amber-300">
+                Cleared {health.reconcile?.stale?.stale_failed} stuck job(s) — use Run now or Retry on failed slots.
+              </p>
+            ) : null}
           </div>
         ) : null}
 

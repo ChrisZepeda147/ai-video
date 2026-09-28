@@ -258,6 +258,100 @@ def get_command_job(store, job_key: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+def _parse_iso_ts(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    try:
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _stale_job_minutes() -> int:
+    try:
+        return max(15, int(os.environ.get("WEEKLY_STALE_JOB_MINUTES", "90")))
+    except ValueError:
+        return 90
+
+
+def reconcile_stale_command_jobs(store) -> dict[str, int]:
+    """Mark hung running/queued jobs failed (API reload kills daemon agent threads)."""
+    max_age = _stale_job_minutes()
+    now = datetime.now(timezone.utc)
+    failed = restarted = 0
+    rows = store._conn.execute(
+        """
+        SELECT job_key, status, started_at, created_at, user_command
+        FROM cursor_command_jobs
+        WHERE status IN ('running', 'queued')
+        """
+    ).fetchall()
+    for row in rows:
+        job_key = str(row["job_key"])
+        status = str(row["status"])
+        anchor = _parse_iso_ts(row["started_at"]) or _parse_iso_ts(row["created_at"])
+        if not anchor:
+            continue
+        if anchor.tzinfo is None:
+            anchor = anchor.replace(tzinfo=timezone.utc)
+        age_min = (now - anchor.astimezone(timezone.utc)).total_seconds() / 60.0
+        if status == "running" and age_min >= max_age:
+            msg = (
+                f"Stale after {int(age_min)}m (likely API restart or agent hung). "
+                "Retry from Weekly or Command."
+            )
+            store._conn.execute(
+                """
+                UPDATE cursor_command_jobs
+                SET status = 'failed', error_message = ?, completed_at = ?
+                WHERE job_key = ?
+                """,
+                (msg, now_iso(), job_key),
+            )
+            failed += 1
+        elif status == "queued" and age_min >= min(15, max_age):
+            cmd = str(row["user_command"] or "")
+            model = None
+            if should_use_direct_montage(cmd):
+                start_command_job(store, job_key=job_key, agent_model=None)
+            else:
+                from discovery.weekly import weekly_agent_model
+
+                start_command_job(store, job_key=job_key, agent_model=weekly_agent_model())
+            restarted += 1
+    if failed or restarted:
+        store._conn.commit()
+    return {"stale_failed": failed, "queued_restarted": restarted}
+
+
+def resume_weekly_queued_jobs(store) -> int:
+    """Restart queued jobs still tied to weekly slots (submit thread never ran)."""
+    rows = store._conn.execute(
+        """
+        SELECT DISTINCT j.job_key, j.user_command
+        FROM weekly_slots s
+        JOIN cursor_command_jobs j ON j.job_key = s.job_key
+        WHERE s.status = 'running' AND j.status = 'queued'
+        """
+    ).fetchall()
+    n = 0
+    for row in rows:
+        cmd = str(row["user_command"] or "")
+        model = None
+        if not should_use_direct_montage(cmd):
+            from discovery.weekly import weekly_agent_model
+
+            model = weekly_agent_model()
+        start_command_job(store, job_key=str(row["job_key"]), agent_model=model)
+        n += 1
+    return n
+
+
 def list_command_jobs(store, *, limit: int = 50) -> list[dict[str, Any]]:
     rows = store._conn.execute(
         """

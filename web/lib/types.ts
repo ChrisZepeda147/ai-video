@@ -1072,4 +1072,5 @@ export type WeeklyHealthResponse = {
     owner: string;
   }>;
   log_tail?: string;
+  reconcile?: { stale?: { stale_failed?: number; queued_restarted?: number }; slots?: { reconciled_done?: number; reconciled_failed?: number }; resumed?: number };
 };
