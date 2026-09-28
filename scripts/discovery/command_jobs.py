@@ -528,6 +528,7 @@ def submit_command(
     session_id: str | None = None,
     batch_count: int | None = None,
     agent_model: str | None = None,
+    block_montage: bool = False,
 ) -> dict[str, Any]:
     refs = parse_video_refs(user_command)
     if video_id is None and refs:
@@ -546,7 +547,11 @@ def submit_command(
             session_id=session_id,
         )
         started = start_command_job(
-            store, job_key=record["job_key"], session_id=session_id, agent_model=agent_model
+            store,
+            job_key=record["job_key"],
+            session_id=session_id,
+            agent_model=agent_model,
+            block_montage=block_montage,
         )
         record.update(
             {

@@ -790,23 +790,30 @@ def weekly_submit_command(
     wait_timeout_sec: int = 14_400,
     **_: Any,
 ) -> dict[str, Any]:
-    """Weekly always uses direct montage — never Cursor Agent (reliable 7am + Run now)."""
+    """Same direct montage path as Make Short (submit_command); block until done when waiting."""
     import time as _time
 
-    from discovery.command_jobs import create_command_job, get_command_job, start_command_job
+    from discovery.command_jobs import get_command_job, submit_command
     from discovery.command_montage import should_use_direct_montage, spawn_direct_montage_job
 
     if not should_use_direct_montage(user_command):
         raise ValueError("Weekly slot is not a montage brief — re-save the week from ChatGPT paste.")
 
-    record = create_command_job(store, user_command=user_command, video_id=video_id)
+    inline = _montage_inline() or wait_montage
+    if inline:
+        record = submit_command(
+            store,
+            user_command=user_command,
+            video_id=video_id,
+            agent_model=None,
+            block_montage=True,
+        )
+        return dict(get_command_job(store, str(record["job_key"])) or record)
+
+    record = submit_command(store, user_command=user_command, video_id=video_id, agent_model=None)
     job_key = str(record["job_key"])
-    # Run Monday / wait-complete: inline in API (no flashing console). 7am task sets WEEKLY_MONTAGE_INLINE.
-    if _montage_inline() or wait_montage:
-        start_command_job(store, job_key=job_key, agent_model=None, block_montage=True)
-    else:
-        spawn_direct_montage_job(store, job_key)
-        _wait_for_command_job(store, job_key, deadline=_time.monotonic() + max(120, wait_timeout_sec))
+    spawn_direct_montage_job(store, job_key)
+    _wait_for_command_job(store, job_key, deadline=_time.monotonic() + max(120, wait_timeout_sec))
     job = get_command_job(store, job_key)
     return dict(job or record)
 

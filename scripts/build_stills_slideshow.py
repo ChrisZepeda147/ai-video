@@ -143,7 +143,32 @@ def _ass_escape(text: str) -> str:
     return "  ".join(escaped.split())
 
 
-def _ass_header(*, width: int, height: int, phrase_size: int = 46, hook_size: int = 64) -> str:
+def normalize_caption_align(align: str | None, *, caption_mode: str = "phrase") -> str:
+    """Map CLI/UI align to center (word) or lower_middle (phrase default)."""
+    if align:
+        key = align.strip().lower().replace("-", "_")
+        if key in {"center", "lower_middle"}:
+            return key
+    if (caption_mode or "phrase").strip().lower() == "word":
+        return "center"
+    return "lower_middle"
+
+
+def _ass_layout(*, caption_align: str, height: int) -> tuple[int, int]:
+    if caption_align == "lower_middle":
+        return 2, max(120, int(height * 0.22))
+    return 5, 80
+
+
+def _ass_header(
+    *,
+    width: int,
+    height: int,
+    phrase_size: int = 46,
+    hook_size: int = 64,
+    caption_align: str = "center",
+) -> str:
+    align, margin_v = _ass_layout(caption_align=caption_align, height=height)
     return f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {width}
@@ -152,8 +177,8 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial Bold,{phrase_size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,4,0,5,80,80,0,1
-Style: Hook,Arial Bold,{hook_size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H90000000,1,0,0,0,100,100,0,0,1,5,0,5,80,80,0,1
+Style: Default,Arial Bold,{phrase_size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,4,0,{align},80,80,{margin_v},1
+Style: Hook,Arial Bold,{hook_size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H90000000,1,0,0,0,100,100,0,0,1,5,0,{align},80,80,{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -191,13 +216,21 @@ def parse_json3_words(json3_path: Path, *, start: float, duration: float) -> lis
 
 
 def build_word_ass(
-    words: list[tuple[float, float, str]], *, width: int, height: int, ass_path: Path
+    words: list[tuple[float, float, str]],
+    *,
+    width: int,
+    height: int,
+    ass_path: Path,
+    caption_align: str = "center",
 ) -> None:
     dialogue_lines = [
         f"Dialogue: 0,{_seconds_to_ass(start)},{_seconds_to_ass(end)},Default,,0,0,0,,{_ass_escape(word)}"
         for start, end, word in words
     ]
-    ass_path.write_text(_ass_header(width=width, height=height) + "\n".join(dialogue_lines) + "\n", encoding="utf-8")
+    ass_path.write_text(
+        _ass_header(width=width, height=height, caption_align=caption_align) + "\n".join(dialogue_lines) + "\n",
+        encoding="utf-8",
+    )
 
 
 def group_words_into_phrases(
@@ -250,6 +283,7 @@ def build_phrase_ass(
     hook_text: str | None = None,
     phrase_size: int = 46,
     hook_size: int = 64,
+    caption_align: str = "lower_middle",
 ) -> None:
     hook_norm = " ".join((hook_text or "").upper().split())
     dialogue_lines: list[str] = []
@@ -266,7 +300,13 @@ def build_phrase_ass(
             f"Dialogue: 0,{_seconds_to_ass(start)},{_seconds_to_ass(end)},{style},,0,0,0,,{_ass_escape(text)}"
         )
     ass_path.write_text(
-        _ass_header(width=width, height=height, phrase_size=phrase_size, hook_size=hook_size)
+        _ass_header(
+            width=width,
+            height=height,
+            phrase_size=phrase_size,
+            hook_size=hook_size,
+            caption_align=caption_align,
+        )
         + "\n".join(dialogue_lines)
         + "\n",
         encoding="utf-8",
@@ -308,14 +348,16 @@ def burn_captions(
     hook_text: str | None = None,
     phrase_min_words: int = 2,
     phrase_max_words: int = 5,
+    caption_align: str | None = None,
 ) -> None:
     ass_path = captions.with_suffix(".burn.ass")
     mode = caption_mode or ("word" if word_by_word else "phrase")
+    align = normalize_caption_align(caption_align, caption_mode=mode)
     if mode == "word":
         words = parse_json3_words(captions, start=audio_start, duration=audio_duration)
         if not words:
             raise RuntimeError(f"No words found in {captions} for the selected audio window")
-        build_word_ass(words, width=width, height=height, ass_path=ass_path)
+        build_word_ass(words, width=width, height=height, ass_path=ass_path, caption_align=align)
     elif mode == "phrase" and captions.suffix.lower() == ".json3":
         words = parse_json3_words(captions, start=audio_start, duration=audio_duration)
         if not words:
@@ -331,6 +373,7 @@ def burn_captions(
             height=height,
             ass_path=ass_path,
             hook_text=hook_text,
+            caption_align=align,
         )
     else:
         trimmed = captions.with_suffix(".trim.srt")
