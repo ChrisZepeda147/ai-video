@@ -42,20 +42,9 @@ if (Test-Path $WeeklyInstall) {
     }
 }
 
-# Always restart API so npm run dev picks up latest Python/API code (matches start-api.ps1).
-Write-Host "Restarting Discovery API on http://127.0.0.1:8000 ..."
-& (Join-Path $Scripts "stop-api.ps1") -Port 8000 | Out-Null
-$Python = Resolve-PythonExe
-if (-not $Python) {
-    Write-Error "Python not found. Install Python 3.11+ or set AI_VIDEO_PYTHON in scripts/.env"
-    exit 1
-}
-Write-Host "Using Python: $Python"
-$env:AI_VIDEO_PYTHON = $Python
-Start-ApiServer -Root $Root -Python $Python -Background
-if (-not (Wait-ApiHealthy -Seconds 45)) {
-    Write-Error "Discovery API failed to start. Dashboard will not start. Check data/logs/api-dev.err"
-    exit 1
+& (Join-Path $Scripts "ensure-api.ps1") -Restart
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
 }
 
 Write-Host "Backend healthy. Starting dashboard..."

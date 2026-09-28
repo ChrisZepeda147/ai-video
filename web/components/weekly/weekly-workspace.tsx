@@ -122,18 +122,30 @@ export function WeeklyWorkspace() {
     });
   }, [weekStart, owner, focusDay]);
 
+  const activeDay = focusDay;
+  const batchDayIso = useMemo(
+    () => calendarDateForWeekDay(effectiveWeekStartForPaste(weekStart), activeDay as WeekDayId),
+    [weekStart, activeDay],
+  );
+
   const anyRunning = useMemo(() => {
-    const slotRunning = Object.values(slotMeta).some((m) => m.status === "running");
-    return slotRunning || Boolean(health?.queue_busy) || (health?.running_command_jobs ?? 0) > 0;
+    const active = Object.values(slotMeta).some((m) =>
+      ["running", "rerunning"].includes(m.status ?? ""),
+    );
+    return active || Boolean(health?.queue_busy) || (health?.running_command_jobs ?? 0) > 0;
   }, [slotMeta, health]);
 
   useEffect(() => {
-    if (!anyRunning) return;
+    if (!anyRunning && !busy) return;
+    const ms = busy ? 5000 : 15_000;
     const timer = setInterval(() => {
       void load();
-    }, 15_000);
+      void fetchWeeklyHealth({ owner, day: batchDayIso }).then((h) => {
+        if (h.ok) setHealth(h.data);
+      });
+    }, ms);
     return () => clearInterval(timer);
-  }, [anyRunning, load]);
+  }, [anyRunning, busy, load, owner, batchDayIso]);
 
   useEffect(() => {
     const t = pasteText.trim();
@@ -155,13 +167,7 @@ export function WeeklyWorkspace() {
     return () => clearTimeout(timer);
   }, [pasteText]);
 
-  const activeDay = focusDay;
   const dayProgress = useMemo(() => progress?.days.find((d) => d.day === activeDay), [progress, activeDay]);
-
-  const batchDayIso = useMemo(
-    () => calendarDateForWeekDay(effectiveWeekStartForPaste(weekStart), activeDay as WeekDayId),
-    [weekStart, activeDay],
-  );
 
   const dayMorning = useMemo(() => {
     if (!health || health.day !== batchDayIso) return health?.day_morning ?? null;
@@ -174,9 +180,9 @@ export function WeeklyWorkspace() {
       case "finished":
         return { text: "Yes — finished", className: "border-emerald-800/60 bg-emerald-950/40 text-emerald-200" };
       case "in_progress":
-        return { text: "In progress", className: "border-amber-800/60 bg-amber-950/40 text-amber-200" };
+        return { text: "Rerunning / in progress", className: "border-amber-800/60 bg-amber-950/40 text-amber-200" };
       case "failed":
-        return { text: "Failed — retry slots", className: "border-red-800/60 bg-red-950/40 text-red-200" };
+        return { text: "Failed — run again or retry slot", className: "border-red-800/60 bg-red-950/40 text-red-200" };
       case "not_finished":
         return {
           text: "No — 7am batch did not finish (still queued)",
@@ -259,17 +265,34 @@ export function WeeklyWorkspace() {
   }
 
   async function onRunWeek() {
+    const ws = effectiveWeekStartForPaste(weekStart);
+    const target = runBatchTarget(ws);
     setBusy(true);
+    setFocusDay(target.dayId);
+    setSlotMeta((prev) => {
+      const next = { ...prev };
+      for (const n of SLOTS) {
+        const key = `${target.dayId}-${n}` as SlotKey;
+        const cur = next[key];
+        if (cur?.status === "failed" || cur?.status === "queued") {
+          next[key] = {
+            ...cur,
+            status: cur.status === "failed" ? "rerunning" : cur.status,
+            error_message: null,
+            job_key: null,
+          };
+        }
+      }
+      return next;
+    });
     setStatus(
-      "Rendering Monday videos (1→2→3) in the API — leave this tab open. Button stays busy until all finish (~15–45 min each). No extra console window when API is restarted.",
+      "Rendering Monday videos (1→2→3) in the API — leave this tab open. Failed slots show Rerunning until this batch finishes.",
     );
     try {
       if (pasteText.trim()) {
         const ok = await saveWeekFromPaste();
         if (!ok) return;
       }
-      const ws = effectiveWeekStartForPaste(weekStart);
-      const target = runBatchTarget(ws);
       const res = await postWeeklyRunDue({
         day: target.day,
         owner,
@@ -309,10 +332,19 @@ export function WeeklyWorkspace() {
 
   async function retrySlot(slotId: number) {
     setBusy(true);
+    setSlotMeta((prev) => {
+      const next = { ...prev };
+      for (const key of Object.keys(next) as SlotKey[]) {
+        if (next[key]?.id === slotId) {
+          next[key] = { ...next[key], status: "rerunning", error_message: null, job_key: null };
+        }
+      }
+      return next;
+    });
     try {
       const res = await postWeeklyRetrySlot(slotId);
       if (res.ok) await load();
-      setStatus(res.ok ? "Re-queued" : res.message);
+      setStatus(res.ok ? "Marked rerunning — use Run now to render" : res.message);
     } finally {
       setBusy(false);
     }
@@ -320,15 +352,25 @@ export function WeeklyWorkspace() {
 
   function statusBadge(st?: string) {
     const s = st || "queued";
+    const label = s === "rerunning" ? "rerunning" : s;
     const colors: Record<string, string> = {
       queued: "bg-zinc-800 text-zinc-300",
+      rerunning: "bg-violet-900/60 text-violet-200",
       running: "bg-amber-900/60 text-amber-200",
       done: "bg-emerald-900/50 text-emerald-200",
       failed: "bg-red-900/50 text-red-200",
     };
     return (
-      <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${colors[s] ?? colors.queued}`}>{s}</span>
+      <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${colors[s] ?? colors.queued}`}>
+        {label}
+      </span>
     );
+  }
+
+  function displaySlotStatus(st?: string) {
+    if (st === "rerunning") return "rerunning";
+    if (st === "running") return "running";
+    return st || "queued";
   }
 
   function renderSlot(n: number) {
@@ -350,13 +392,13 @@ export function WeeklyWorkspace() {
               {meta.job_key}
             </a>
           ) : null}
-          {meta?.status === "failed" && meta.id ? (
+          {meta?.status === "failed" && meta.id && !busy ? (
             <button type="button" onClick={() => retrySlot(meta.id!)} className="text-xs text-violet-400">
               Retry
             </button>
           ) : null}
         </div>
-        {meta?.error_message ? (
+        {meta?.status === "failed" && meta?.error_message ? (
           <p className="mt-1 text-xs text-red-400" title={meta.error_message}>
             {meta.error_message.length > 120 ? `${meta.error_message.slice(0, 120)}…` : meta.error_message}
           </p>
@@ -517,12 +559,13 @@ export function WeeklyWorkspace() {
                 {dayMorning.stats.done}/3 done
                 {dayMorning.stats.running ? ` · ${dayMorning.stats.running} running` : ""}
                 {dayMorning.stats.queued ? ` · ${dayMorning.stats.queued} queued` : ""}
+                {dayMorning.stats.rerunning ? ` · ${dayMorning.stats.rerunning} rerunning` : ""}
               </p>
             ) : null}
             <ul className="mt-3 space-y-2">
               {SLOTS.map((n) => {
                 const key = `${activeDay}-${n}` as SlotKey;
-                const st = slotMeta[key]?.status ?? "queued";
+                const st = displaySlotStatus(slotMeta[key]?.status);
                 const sp = slots[key]?.speaker?.trim() || `Video ${n}`;
                 const done = st === "done";
                 return (

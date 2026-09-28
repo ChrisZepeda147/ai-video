@@ -19,7 +19,9 @@ export function BackendStatusBanner({
       </p>
       <p className={`mt-1 ${isOffline ? "text-amber-200/80" : "text-red-200/80"}`}>{message}</p>
       {isOffline ? (
-        <p className="mt-2 font-mono text-xs text-amber-200/70">npm run dev</p>
+        <p className="mt-2 font-mono text-xs text-amber-200/70">
+          npm run dev:api · npm run dev:web · npm run dev (full restart)
+        </p>
       ) : (
         <p className="mt-2 text-xs text-red-200/70">
           API is running — check <code className="text-red-100">data/logs/api-dev.err</code> or restart with{" "}

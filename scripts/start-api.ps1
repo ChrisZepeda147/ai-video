@@ -1,4 +1,4 @@
-# Start the FastAPI discovery backend (port 8000). Kills stale API first.
+# Start the FastAPI discovery backend (port 8000) in this terminal (reload on).
 $Root = Split-Path -Parent $PSScriptRoot
 $Scripts = $PSScriptRoot
 
@@ -16,4 +16,5 @@ if (-not $Python) {
 }
 
 Write-Host "Using Python: $Python"
+$env:AI_VIDEO_PYTHON = $Python
 Start-ApiServer -Root $Root -Python $Python

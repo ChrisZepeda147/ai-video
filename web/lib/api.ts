@@ -36,9 +36,15 @@ import type {
 
 const DEFAULT_API_URL = "http://127.0.0.1:8000";
 const API_FETCH_TIMEOUT_MS = 5000;
+const HEALTH_FETCH_TIMEOUT_MS = 12_000;
 
 export function getApiBaseUrl(): string {
-  return process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || DEFAULT_API_URL;
+  const fromEnv = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
+  if (fromEnv) return fromEnv;
+  if (typeof window !== "undefined") {
+    return `${window.location.origin}/discovery-api`;
+  }
+  return DEFAULT_API_URL;
 }
 
 function internalHeaders(): Record<string, string> {
@@ -118,13 +124,28 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<ApiResult<
     return {
       ok: false,
       error: "offline",
-      message: "Discovery backend is offline. Start it with npm run dev from the repo root.",
+      message:
+        "Discovery backend is offline. Run npm run dev:api (keeps running) or npm run dev:web (starts API if needed).",
     };
   }
 }
 
 export async function fetchHealth(): Promise<ApiResult<{ status: string }>> {
-  return fetchJson<{ status: string }>(buildUrl("/health"));
+  const url = buildUrl("/health");
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = await fetchJson<{ status: string }>(url, {
+      signal: AbortSignal.timeout(HEALTH_FETCH_TIMEOUT_MS),
+    });
+    if (result.ok) return result;
+    if (result.error !== "offline" || attempt > 0) return result;
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  return {
+    ok: false,
+    error: "offline",
+    message:
+      "Discovery backend is offline. Run npm run dev:api (keeps running) or npm run dev:web (starts API if needed).",
+  };
 }
 
 export async function fetchDiscoveryStats(): Promise<ApiResult<DiscoveryStats>> {

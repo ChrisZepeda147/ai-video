@@ -1,8 +1,13 @@
-# Start the Next.js dashboard (port 3000). Always refreshes — kills stale dev servers first.
+# Start the Next.js dashboard (port 3000). Starts API in background if port 8000 is down.
 $Root = Split-Path -Parent $PSScriptRoot
 $Scripts = $PSScriptRoot
 $Web = Join-Path $Root "web"
 $Port = 3000
+
+& (Join-Path $Scripts "ensure-api.ps1")
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
 
 . (Join-Path $Scripts "dev-common.ps1")
 Import-DevPath

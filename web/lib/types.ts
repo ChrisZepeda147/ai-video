@@ -1047,7 +1047,7 @@ export type WeeklyDayMorningStatus = {
   morning_submitted: boolean;
   catchup_ran: boolean;
   past_morning_cutoff: boolean;
-  stats: { queued: number; running: number; done: number; failed: number };
+  stats: { queued: number; rerunning?: number; running: number; done: number; failed: number };
 };
 
 export type WeeklyHealthResponse = {
@@ -1055,7 +1055,7 @@ export type WeeklyHealthResponse = {
   owner: string | null;
   preflight: { ok: boolean; agent_available: boolean; api_key_set: boolean; issues: string[] };
   due_count: number;
-  today_stats: { queued: number; running: number; done: number; failed: number };
+  today_stats: { queued: number; rerunning?: number; running: number; done: number; failed: number };
   day_morning?: WeeklyDayMorningStatus;
   queue_busy: boolean;
   running_weekly_slots: number;

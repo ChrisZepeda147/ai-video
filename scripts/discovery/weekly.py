@@ -345,7 +345,7 @@ def due_slots(store, *, day: str, owner: str | None = None) -> list[dict[str, An
         SELECT s.*, p.week_start, p.owner, p.status AS plan_status
         FROM weekly_slots s
         JOIN weekly_plans p ON p.id = s.plan_id
-        WHERE p.week_start = ? AND s.day = ? AND s.status = 'queued'
+        WHERE p.week_start = ? AND s.day = ? AND s.status IN ('queued', 'rerunning')
           AND p.status IN ('ready', 'active')
         """
     args: list[Any] = [monday, weekday]
@@ -461,18 +461,30 @@ def mark_slot(
     job_key: str | None = None,
     video_id: int | None = None,
     error: str | None = None,
+    reset_job_key: bool = False,
 ) -> None:
     ensure_weekly_tables(store)
-    store._conn.execute(
-        """
-        UPDATE weekly_slots
-        SET status = ?, job_key = COALESCE(?, job_key),
-            video_id = COALESCE(?, video_id),
-            error_message = ?, updated_at = ?
-        WHERE id = ?
-        """,
-        (status, job_key, video_id, error, _now(), slot_id),
-    )
+    if reset_job_key:
+        store._conn.execute(
+            """
+            UPDATE weekly_slots
+            SET status = ?, job_key = ?, video_id = COALESCE(?, video_id),
+                error_message = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (status, job_key, video_id, error, _now(), slot_id),
+        )
+    else:
+        store._conn.execute(
+            """
+            UPDATE weekly_slots
+            SET status = ?, job_key = COALESCE(?, job_key),
+                video_id = COALESCE(?, video_id),
+                error_message = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (status, job_key, video_id, error, _now(), slot_id),
+        )
     store._conn.commit()
 
 
@@ -533,7 +545,7 @@ def requeue_slot(store, slot_id: int) -> bool:
     store._conn.execute(
         """
         UPDATE weekly_slots
-        SET status = 'queued', job_key = NULL, error_message = NULL, updated_at = ?
+        SET status = 'rerunning', job_key = NULL, error_message = NULL, updated_at = ?
         WHERE id = ?
         """,
         (ts, slot_id),
@@ -558,7 +570,7 @@ def today_slot_stats(store, *, day: str, owner: str | None = None) -> dict[str, 
         query += " AND p.owner = ?"
         args.append(normalize_owner(owner))
     query += " GROUP BY s.status"
-    stats = {"queued": 0, "running": 0, "done": 0, "failed": 0}
+    stats = {"queued": 0, "rerunning": 0, "running": 0, "done": 0, "failed": 0}
     for row in store._conn.execute(query, args).fetchall():
         key = str(row["status"] or "")
         if key in stats:
@@ -608,15 +620,17 @@ def day_morning_status(store, *, day: str, owner: str | None = None) -> dict[str
     running = int(stats.get("running") or 0)
     failed = int(stats.get("failed") or 0)
     queued = int(stats.get("queued") or 0)
+    rerunning = int(stats.get("rerunning") or 0)
+    waiting = queued + rerunning
 
     if filled == 0:
         outcome = "empty"
-    elif done >= min(expected, filled) and queued == 0 and running == 0 and failed == 0:
+    elif done >= min(expected, filled) and waiting == 0 and running == 0 and failed == 0:
         outcome = "finished"
-    elif failed > 0 and done + running == 0:
-        outcome = "failed"
-    elif running > 0 or (done > 0 and queued + running > 0):
+    elif running > 0 or rerunning > 0 or (done > 0 and waiting > 0):
         outcome = "in_progress"
+    elif failed > 0:
+        outcome = "failed"
     elif past_morning_cutoff(day) and queued > 0:
         outcome = "not_finished"
     else:
@@ -794,26 +808,22 @@ def weekly_submit_command(
     import time as _time
 
     from discovery.command_jobs import get_command_job, submit_command
-    from discovery.command_montage import should_use_direct_montage, spawn_direct_montage_job
+    from discovery.command_montage import should_use_direct_montage
 
     if not should_use_direct_montage(user_command):
         raise ValueError("Weekly slot is not a montage brief — re-save the week from ChatGPT paste.")
 
-    inline = _montage_inline() or wait_montage
-    if inline:
-        record = submit_command(
-            store,
-            user_command=user_command,
-            video_id=video_id,
-            agent_model=None,
-            block_montage=True,
-        )
-        return dict(get_command_job(store, str(record["job_key"])) or record)
-
-    record = submit_command(store, user_command=user_command, video_id=video_id, agent_model=None)
+    # Threaded montage (same as Make Short) so API /health stays up during long renders.
+    record = submit_command(
+        store,
+        user_command=user_command,
+        video_id=video_id,
+        agent_model=None,
+        block_montage=False,
+    )
     job_key = str(record["job_key"])
-    spawn_direct_montage_job(store, job_key)
-    _wait_for_command_job(store, job_key, deadline=_time.monotonic() + max(120, wait_timeout_sec))
+    if wait_montage or _montage_inline():
+        _wait_for_command_job(store, job_key, deadline=_time.monotonic() + max(120, wait_timeout_sec))
     job = get_command_job(store, job_key)
     return dict(job or record)
 
@@ -844,7 +854,7 @@ def _sync_slot_from_job(store, slot_id: int, job_key: str) -> None:
             error=str(job.get("error_message") or "Job failed")[:500],
         )
     else:
-        mark_slot(store, slot_id, status="running", job_key=job_key)
+        mark_slot(store, slot_id, status="running", job_key=job_key, error="")
 
 
 def export_week(store, *, week_start: str, owner: str) -> dict[str, Any]:
@@ -1035,6 +1045,7 @@ def run_weekly_due_batch(
             # Morning batch: keep submitting until 3 agents started (ignore busy from prior submits).
 
         slot = due.pop(0)
+        mark_slot(store, int(slot["id"]), status="running", job_key=None, error="", reset_job_key=True)
         command = slot_command_text(slot)
         try:
             result = submit_fn(
