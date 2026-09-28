@@ -368,7 +368,13 @@ def spawn_direct_montage_job(store, job_key: str) -> None:
     from discovery.command_jobs import now_iso
 
     root = project_root()
-    python = os.environ.get("AI_VIDEO_PYTHON", "").strip() or sys.executable
+    python = os.environ.get("AI_VIDEO_PYTHON", "").strip()
+    if not python or "WindowsApps" in python:
+        python = sys.executable
+    if "WindowsApps" in python:
+        local = Path(os.environ.get("LOCALAPPDATA", "")) / "Python" / "bin" / "python.exe"
+        if local.is_file():
+            python = str(local)
     script = root / "scripts" / "run_direct_job.py"
     if not script.is_file():
         raise FileNotFoundError(f"Missing {script}")

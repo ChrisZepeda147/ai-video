@@ -260,6 +260,7 @@ export function WeeklyWorkspace() {
 
   async function onRunWeek() {
     setBusy(true);
+    setStatus("Running montages (one at a time) — can take up to ~2 hours for 3 videos…");
     try {
       if (pasteText.trim()) {
         const ok = await saveWeekFromPaste();
@@ -284,7 +285,7 @@ export function WeeklyWorkspace() {
       if (d.error) {
         setStatus(`Could not start: ${d.error}`);
       } else if (d.deferred) {
-        setStatus(`Deferred (${d.reason ?? "busy"}) — finish or wait on running Cursor jobs, then Run again.`);
+        setStatus(`Deferred (${d.reason ?? "busy"}) — wait for current montage, then Run again.`);
       } else if ((d.count ?? 0) === 0) {
         const issues = d.preflight?.issues?.filter(Boolean).join(" · ");
         setStatus(
@@ -295,7 +296,7 @@ export function WeeklyWorkspace() {
       } else {
         const keys = (d.submitted ?? []).map((s) => s.job_key).filter(Boolean);
         setStatus(
-          `Started ${d.count} agent(s) for ${target.label} — status turns running below; open ${keys[0] ? "job link" : "Command"} to watch.`,
+          `Completed ${d.count} montage(s) for ${target.label}${keys.length ? ` · ${keys.join(", ")}` : ""}.`,
         );
       }
       await load();

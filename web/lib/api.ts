@@ -940,6 +940,7 @@ export async function postWeeklyRunDue(body: {
     method: "POST",
     body: JSON.stringify(body),
     headers: internalHeaders(),
+    signal: AbortSignal.timeout(4 * 60 * 60 * 1000),
   });
 }
 

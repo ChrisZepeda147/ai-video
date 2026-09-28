@@ -1027,7 +1027,7 @@ def run_weekly_due_batch(
                 store,
                 user_command=command,
                 agent_model=None,
-                wait_montage=wait_complete,
+                wait_montage=False,
                 wait_timeout_sec=wait_timeout_sec,
             )
         except Exception as exc:  # noqa: BLE001
@@ -1037,6 +1037,8 @@ def run_weekly_due_batch(
             continue
 
         job_key = str(result.get("job_key") or "")
+        if wait_complete and job_key:
+            _wait_for_command_job(store, job_key, deadline=deadline)
         _sync_slot_from_job(store, int(slot["id"]), job_key)
         refresh_plan_completion(store, plan_id=int(slot["plan_id"]))
         submitted.append({"slot_id": str(slot["id"]), "job_key": job_key})

@@ -308,7 +308,7 @@ def reconcile_stale_command_jobs(store) -> dict[str, int]:
         if (
             is_montage
             and status == "running"
-            and age_min >= 1
+            and age_min >= 8
             and not str(row["stdout_log"] or "").strip()
         ):
             msg = (
