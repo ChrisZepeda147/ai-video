@@ -1184,7 +1184,7 @@ def run_weekly_due_batch(
 
     weekly_reconcile_pipeline(store)
     reconcile = reconcile_slots(store)
-    if production_queue_busy(store, owner=None) and count_running_weekly_slots(store, owner=owner_norm) > 0:
+    if production_queue_busy(store, owner=None):
         return {
             "day": day,
             "owner": owner_norm,

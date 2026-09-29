@@ -130,6 +130,7 @@ def parse_montage_command(text: str) -> dict[str, Any] | None:
         else:
             reuse_policy = parse_reuse_policy(extra)
     else:
+        extra = ""
         reuse_policy = parse_reuse_policy(text)
     reuse_policy = normalize_reuse_policy(reuse_policy, default="allow")
 

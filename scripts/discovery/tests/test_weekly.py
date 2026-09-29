@@ -126,9 +126,11 @@ class TestWeekly(unittest.TestCase):
             ("cmd_busy", "x", "x", "running", ts, ts),
         )
         self.store._conn.commit()
-        with __import__("unittest.mock").patch(
-            "discovery.config.resolve_python_exe", return_value="C:/Python/python.exe"
-        ), __import__("unittest.mock").patch("toolchain_env.check_toolchain", return_value=toolchain):
+        from unittest.mock import patch
+
+        with patch("discovery.config.resolve_python_exe", return_value="C:/Python/python.exe"), patch(
+            "toolchain_env.check_toolchain", return_value=toolchain
+        ):
             result = weekly.run_weekly_due_batch(
                 self.store,
                 day="2026-09-28",
@@ -191,9 +193,11 @@ class TestWeekly(unittest.TestCase):
                 weekly._sync_slot_from_job(store, int(slot_id), job_key)
             return {"job_key": job_key, "status": "completed"}
 
-        with __import__("unittest.mock").patch(
-            "discovery.config.resolve_python_exe", return_value="C:/Python/python.exe"
-        ), __import__("unittest.mock").patch("toolchain_env.check_toolchain", return_value=toolchain):
+        from unittest.mock import patch
+
+        with patch("discovery.config.resolve_python_exe", return_value="C:/Python/python.exe"), patch(
+            "toolchain_env.check_toolchain", return_value=toolchain
+        ):
             result = weekly.run_weekly_due_batch(
                 self.store,
                 day="2026-09-28",

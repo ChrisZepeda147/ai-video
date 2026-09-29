@@ -11,6 +11,7 @@ _REQUIRE_NEW_PATTERNS = (
     r"\bdo not reuse\b",
     r"\bdon't reuse\b",
     r"\bnever used\b",
+    r"\bnever use\b",
     r"\bnot used before\b",
     r"\bfind something we have never used\b",
     r"\bavoid anything previously used\b",

@@ -71,7 +71,6 @@ export function WeeklyWorkspace() {
   const [status, setStatus] = useState<string | null>(null);
   const [planSummary, setPlanSummary] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [batchRunDayId, setBatchRunDayId] = useState<string | null>(null);
   const [health, setHealth] = useState<WeeklyHealthResponse | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [slotMeta, setSlotMeta] = useState<
@@ -286,7 +285,6 @@ export function WeeklyWorkspace() {
     const ws = effectiveWeekStartForPaste(weekStart);
     const target = runBatchTarget(ws);
     setBusy(true);
-    setBatchRunDayId(target.dayId);
     setFocusDay(target.dayId);
     setStatus(
       `Rendering ${target.label} videos 1→2→3 (one at a time). Rendering = active job; Queued = waiting for turn.`,
@@ -330,7 +328,6 @@ export function WeeklyWorkspace() {
       await load();
     } finally {
       setBusy(false);
-      setBatchRunDayId(null);
     }
   }
 
