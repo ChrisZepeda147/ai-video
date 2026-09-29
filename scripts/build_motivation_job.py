@@ -344,6 +344,8 @@ def download_one_audio(candidate: VideoCandidate, audio_dir: Path) -> tuple[Path
 
 
 def download_subs(url: str, audio_dir: Path) -> Path:
+    import time as _time
+
     audio_dir.mkdir(parents=True, exist_ok=True)
     opts = {
         "quiet": True,
@@ -354,9 +356,28 @@ def download_subs(url: str, audio_dir: Path) -> Path:
         "subtitleslangs": ["en"],
         "subtitlesformat": "json3/srt/best",
         "outtmpl": str(audio_dir / "subs.%(ext)s"),
+        "sleep_interval_subtitles": 2,
+        "retries": 5,
+        "fragment_retries": 5,
     }
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        ydl.download([url])
+    last_err: Exception | None = None
+    for attempt in range(4):
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                ydl.download([url])
+            last_err = None
+            break
+        except Exception as exc:  # noqa: BLE001
+            last_err = exc
+            msg = str(exc).lower()
+            if "429" in msg or "too many requests" in msg:
+                wait = min(90, 8 * (2**attempt))
+                print(f"  subtitle rate limit — retry in {wait}s (attempt {attempt + 1}/4)")
+                _time.sleep(wait)
+                continue
+            raise
+    if last_err is not None:
+        raise last_err
     json3 = audio_dir / "subs.en.json3"
     if json3.is_file():
         return json3

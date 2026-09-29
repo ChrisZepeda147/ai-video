@@ -335,6 +335,26 @@ def get_week(store, *, week_start: str, owner: str) -> dict[str, Any]:
     return {"plan": dict(row), "slots": slots, "progress": build_week_progress(slots)}
 
 
+def count_failed_slots_for_calendar_day(store, *, day: str, owner: str | None = None) -> int:
+    """Failed slots for a calendar date (for catch-up retry after a bad batch)."""
+    ensure_weekly_tables(store)
+    target = date.fromisoformat(day)
+    monday = week_start_monday(target).isoformat()
+    weekday = DAYS[target.weekday()]
+    query = """
+        SELECT COUNT(*) AS n FROM weekly_slots s
+        JOIN weekly_plans p ON p.id = s.plan_id
+        WHERE p.week_start = ? AND s.day = ? AND s.status = 'failed'
+          AND p.status IN ('ready', 'active')
+    """
+    args: list[Any] = [monday, weekday]
+    if owner:
+        query += " AND p.owner = ?"
+        args.append(normalize_owner(owner))
+    row = store._conn.execute(query, args).fetchone()
+    return int(row["n"] if row else 0)
+
+
 def due_slots(store, *, day: str, owner: str | None = None) -> list[dict[str, Any]]:
     """Slots due for a calendar date (YYYY-MM-DD). Only ready/active plans, queued slots."""
     ensure_weekly_tables(store)
@@ -682,11 +702,17 @@ def maybe_run_morning_catchup(store) -> dict[str, Any] | None:
     today = date.today().isoformat()
     state = _read_catchup_state()
     due_remaining = sum(len(due_slots(store, day=today, owner=o)) for o in OWNERS)
-    if state.get("day") == today and state.get("ran") and due_remaining <= 0:
+    failed_remaining = sum(
+        count_failed_slots_for_calendar_day(store, day=today, owner=o) for o in OWNERS
+    )
+    work_remaining = due_remaining + failed_remaining
+    if state.get("day") == today and state.get("ran") and work_remaining <= 0:
         return state
     if not past_morning_cutoff(today):
         return None
-    if due_remaining <= 0:
+    if work_remaining <= 0:
+        return None
+    if count_running_command_jobs(store) > 0 or count_running_weekly_slots(store) > 0:
         return None
 
     any_due = False
@@ -695,7 +721,8 @@ def maybe_run_morning_catchup(store) -> dict[str, Any] | None:
         if count_running_weekly_slots(store, owner=owner) > 0:
             continue
         due_n = len(due_slots(store, day=today, owner=owner))
-        if due_n <= 0:
+        failed_n = count_failed_slots_for_calendar_day(store, day=today, owner=owner)
+        if due_n <= 0 and failed_n <= 0:
             continue
         any_due = True
         batch = run_weekly_due_batch(
@@ -704,7 +731,8 @@ def maybe_run_morning_catchup(store) -> dict[str, Any] | None:
             owner=owner,
             limit=VIDEOS_PER_DAY,
             dry_run=False,
-            serial=False,
+            serial=True,
+            wait_complete=True,
             retry_failed=True,
         )
         results.append({"owner": owner, **{k: batch.get(k) for k in ("count", "deferred", "error", "submitted")}})
