@@ -39,6 +39,12 @@ class TestCommandMontage(unittest.TestCase):
         self.assertEqual(plan["max_seconds"], 90.0)
         self.assertEqual(plan["reuse_policy"], "allow")
 
+    def test_blank_extra_section_is_allow(self) -> None:
+        text = SAMPLE.split("Extra instructions:")[0] + "Extra instructions:\n"
+        plan = parse_montage_command(text)
+        assert plan is not None
+        self.assertEqual(plan["reuse_policy"], "allow")
+
     def test_extra_instructions_can_require_new(self) -> None:
         plan = parse_montage_command(
             SAMPLE + "\n\nExtra instructions:\nDo not reuse. Unused-only B-roll.\n"

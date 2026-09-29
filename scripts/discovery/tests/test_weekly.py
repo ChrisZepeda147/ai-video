@@ -107,33 +107,36 @@ class TestWeekly(unittest.TestCase):
         self.assertEqual(len(due), 1)
 
     def test_run_batch_defers_when_command_running(self) -> None:
-        import os
+        from discovery.command_jobs import now_iso
 
-        os.environ["CURSOR_BRIDGE_DRY_RUN"] = "1"
-        self.addCleanup(os.environ.pop, "CURSOR_BRIDGE_DRY_RUN", None)
+        toolchain = {"ok": True}
         weekly.save_slots(
             self.store,
             week_start="2026-09-28",
             owner="chris",
             slots=[{"day": "mon", "slot": 1, "speaker": "A", "visual_direction": "v"}],
         )
+        ts = now_iso()
         self.store._conn.execute(
             """
             INSERT INTO cursor_command_jobs
-                (job_key, user_command, enriched_prompt, status, created_at)
-            VALUES (?, ?, ?, ?, ?)
+                (job_key, user_command, enriched_prompt, status, created_at, started_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            ("cmd_busy", "x", "x", "running", "2026-09-28T00:00:00"),
+            ("cmd_busy", "x", "x", "running", ts, ts),
         )
         self.store._conn.commit()
-        result = weekly.run_weekly_due_batch(
-            self.store,
-            day="2026-09-28",
-            owner="chris",
-            dry_run=False,
-            serial=True,
-            submit_fn=lambda *a, **k: {"job_key": "should_not_run"},
-        )
+        with __import__("unittest.mock").patch(
+            "discovery.config.resolve_python_exe", return_value="C:/Python/python.exe"
+        ), __import__("unittest.mock").patch("toolchain_env.check_toolchain", return_value=toolchain):
+            result = weekly.run_weekly_due_batch(
+                self.store,
+                day="2026-09-28",
+                owner="chris",
+                dry_run=False,
+                serial=True,
+                submit_fn=lambda *a, **k: {"job_key": "should_not_run"},
+            )
         self.assertTrue(result["deferred"])
         self.assertEqual(result["count"], 0)
 
@@ -158,10 +161,9 @@ class TestWeekly(unittest.TestCase):
         self.assertEqual(row["status"], "done")
 
     def test_morning_batch_submits_three(self) -> None:
-        import os
+        from discovery.command_jobs import create_command_job, now_iso
 
-        os.environ["CURSOR_BRIDGE_DRY_RUN"] = "1"
-        self.addCleanup(os.environ.pop, "CURSOR_BRIDGE_DRY_RUN", None)
+        toolchain = {"ok": True}
         weekly.save_slots(
             self.store,
             week_start="2026-09-28",
@@ -174,18 +176,32 @@ class TestWeekly(unittest.TestCase):
         )
         calls: list[int] = []
 
-        def fake_submit(store, user_command, agent_model=None):
-            calls.append(1)
-            return {"job_key": f"cmd_{len(calls):06d}"}
+        def fake_submit(store, user_command, slot_id=None, **_kw):
+            calls.append(int(slot_id or 0))
+            record = create_command_job(store, user_command=user_command)
+            job_key = str(record["job_key"])
+            if slot_id is not None:
+                weekly.mark_slot(store, int(slot_id), status="running", job_key=job_key)
+            store._conn.execute(
+                "UPDATE cursor_command_jobs SET status = 'completed', completed_at = ? WHERE job_key = ?",
+                (now_iso(), job_key),
+            )
+            store._conn.commit()
+            if slot_id is not None:
+                weekly._sync_slot_from_job(store, int(slot_id), job_key)
+            return {"job_key": job_key, "status": "completed"}
 
-        result = weekly.run_weekly_due_batch(
-            self.store,
-            day="2026-09-28",
-            owner="chris",
-            limit=3,
-            serial=False,
-            submit_fn=fake_submit,
-        )
+        with __import__("unittest.mock").patch(
+            "discovery.config.resolve_python_exe", return_value="C:/Python/python.exe"
+        ), __import__("unittest.mock").patch("toolchain_env.check_toolchain", return_value=toolchain):
+            result = weekly.run_weekly_due_batch(
+                self.store,
+                day="2026-09-28",
+                owner="chris",
+                limit=3,
+                serial=False,
+                submit_fn=fake_submit,
+            )
         self.assertEqual(result["count"], 3)
         self.assertEqual(len(calls), 3)
 

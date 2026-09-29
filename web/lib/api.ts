@@ -935,9 +935,13 @@ export async function fetchWeeklyHealth(params?: { day?: string; owner?: string 
 }
 
 export async function postWeeklyRetrySlot(slotId: number) {
-  return fetchJson<{ slot_id: number; status: string }>(
+  return fetchJson<{ slot_id: number; status: string; batch?: { count?: number } }>(
     buildUrl(`/api/weekly/slots/${slotId}/retry`),
-    { method: "POST", headers: internalHeaders() },
+    {
+      method: "POST",
+      headers: internalHeaders(),
+      signal: AbortSignal.timeout(4 * 60 * 60 * 1000),
+    },
   );
 }
 

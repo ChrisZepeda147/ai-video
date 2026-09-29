@@ -579,19 +579,36 @@ def production_queue_busy(store, *, owner: str | None = None) -> bool:
 
 
 def weekly_preflight() -> dict[str, Any]:
-    from discovery.config import cursor_api_key
+    from discovery.config import cursor_api_key, project_root, resolve_python_exe
     from discovery.cursor_bridge import agent_available
 
-    key_ok = bool(cursor_api_key())
-    agent_ok = agent_available()
-    dry = __import__("os").environ.get("CURSOR_BRIDGE_DRY_RUN", "").strip().lower() in {"1", "true", "yes"}
-    ok = agent_ok or dry
+    try:
+        from toolchain_env import check_toolchain, format_toolchain_report
+    except ImportError:
+
+        def check_toolchain() -> dict:  # type: ignore[misc]
+            return {"ok": True}
+
+        def format_toolchain_report(_check: dict | None = None) -> str:
+            return "toolchain_env missing"
+
     issues: list[str] = []
-    if not agent_ok and not dry:
-        issues.append("Cursor Agent CLI not found — install Cursor Agent or set CURSOR_BRIDGE_DRY_RUN=1")
-    if not key_ok and not dry:
-        issues.append("CURSOR_API_KEY not set in scripts/.env (optional for local Agent CLI)")
-    return {"ok": ok, "agent_available": agent_ok, "api_key_set": key_ok, "issues": issues}
+    if not resolve_python_exe():
+        issues.append("Python not found — set AI_VIDEO_PYTHON in scripts/.env")
+    worker = project_root() / "scripts" / "run_direct_job.py"
+    if not worker.is_file():
+        issues.append(f"Missing detached montage worker: {worker}")
+    toolchain = check_toolchain()
+    if not toolchain.get("ok"):
+        issues.append(format_toolchain_report(toolchain).strip() or "Toolchain check failed")
+    ok = len(issues) == 0
+    return {
+        "ok": ok,
+        "agent_available": agent_available(),
+        "api_key_set": bool(cursor_api_key()),
+        "issues": issues,
+        "toolchain": toolchain,
+    }
 
 
 def requeue_slot(store, slot_id: int) -> bool:
@@ -880,34 +897,60 @@ def weekly_submit_command(
     store,
     *,
     user_command: str,
+    slot_id: int | None = None,
     agent_model: str | None = None,
     video_id: int | None = None,
-    wait_montage: bool = False,
+    wait_montage: bool = True,
     wait_timeout_sec: int = 14_400,
     **_: Any,
 ) -> dict[str, Any]:
-    """Same direct montage path as Make Short (submit_command); block until done when waiting."""
-    import time as _time
-
-    from discovery.command_jobs import get_command_job
-    from discovery.command_montage import should_use_direct_montage
+    """Weekly direct montage: create job → attach slot → detached worker → wait → sync."""
+    from discovery.command_jobs import create_command_job, get_command_job
+    from discovery.command_montage import should_use_direct_montage, spawn_direct_montage_job
 
     if not should_use_direct_montage(user_command):
         raise ValueError("Weekly slot is not a montage brief — re-save the week from ChatGPT paste.")
 
-    from discovery.command_jobs import submit_command
-
-    # Same path as Make Short: speech search + B-roll montage in-process (no pop-up worker exe).
-    record = submit_command(
+    record = create_command_job(
         store,
         user_command=user_command,
         video_id=video_id,
-        agent_model=None,
-        block_montage=False,
     )
     job_key = str(record["job_key"])
+
+    if slot_id is not None:
+        mark_slot(
+            store,
+            int(slot_id),
+            status="running",
+            job_key=job_key,
+            error="",
+            reset_job_key=True,
+        )
+
+    try:
+        spawn_direct_montage_job(store, job_key)
+    except Exception as exc:
+        if slot_id is not None:
+            mark_slot(
+                store,
+                int(slot_id),
+                status="failed",
+                job_key=job_key,
+                error=str(exc)[:500],
+            )
+        raise
+
     if wait_montage or _montage_inline():
-        _wait_for_command_job(store, job_key, deadline=_time.monotonic() + max(120, wait_timeout_sec))
+        _wait_for_command_job(
+            store,
+            job_key,
+            deadline=__import__("time").monotonic() + max(120, wait_timeout_sec),
+        )
+
+    if slot_id is not None:
+        _sync_slot_from_job(store, int(slot_id), job_key)
+
     job = get_command_job(store, job_key)
     return dict(job or record)
 
@@ -1025,6 +1068,43 @@ def tail_weekly_log(*, lines: int = 80) -> str:
     return "\n".join(chunks)
 
 
+def run_weekly_retry_slot(
+    store,
+    slot_id: int,
+    *,
+    wait_timeout_sec: int = 14_400,
+    submit_fn=None,
+) -> dict[str, Any]:
+    """Re-queue a failed slot and render it through the normal weekly montage path."""
+    ensure_weekly_tables(store)
+    row = store._conn.execute(
+        """
+        SELECT s.id, s.day, p.week_start, p.owner
+        FROM weekly_slots s
+        JOIN weekly_plans p ON p.id = s.plan_id
+        WHERE s.id = ?
+        """,
+        (slot_id,),
+    ).fetchone()
+    if not row:
+        raise ValueError("Slot not found")
+    if not requeue_slot(store, slot_id):
+        raise ValueError("Slot not found or not failed")
+    cal_day = slot_date(str(row["week_start"]), str(row["day"]))
+    return run_weekly_due_batch(
+        store,
+        day=cal_day,
+        owner=str(row["owner"]),
+        limit=1,
+        dry_run=False,
+        wait_complete=True,
+        wait_timeout_sec=wait_timeout_sec,
+        retry_failed=False,
+        slot_ids=[slot_id],
+        submit_fn=submit_fn,
+    )
+
+
 def run_weekly_due_batch(
     store,
     *,
@@ -1036,6 +1116,7 @@ def run_weekly_due_batch(
     wait_complete: bool = False,
     wait_timeout_sec: int = 14_400,
     retry_failed: bool = False,
+    slot_ids: list[int] | None = None,
     submit_fn=None,
 ) -> dict[str, Any]:
     """Submit due weekly slots. Serial mode: one agent at a time (default 1 per invocation)."""
@@ -1081,6 +1162,9 @@ def run_weekly_due_batch(
             requeue_slot(store, int(row["id"]))
 
     due = due_slots(store, day=day, owner=owner_norm)
+    if slot_ids:
+        want = {int(x) for x in slot_ids}
+        due = [s for s in due if int(s["id"]) in want]
     cap = max(1, min(int(limit), 12))
     due = due[:cap]
 
@@ -1098,6 +1182,8 @@ def run_weekly_due_batch(
             "dry_run": True,
         }
 
+    weekly_reconcile_pipeline(store)
+    reconcile = reconcile_slots(store)
     if production_queue_busy(store, owner=None) and count_running_weekly_slots(store, owner=owner_norm) > 0:
         return {
             "day": day,
@@ -1110,67 +1196,46 @@ def run_weekly_due_batch(
             "preflight": preflight,
         }
 
-    serial = True
     wait_complete = True
     max_submit = cap
     submitted: list[dict[str, str]] = []
     deadline = _time.monotonic() + max(60, wait_timeout_sec)
+    pending = list(due)
 
-    for waiting in due:
-        mark_slot(
-            store,
-            int(waiting["id"]),
-            status="rerunning",
-            job_key=None,
-            error="",
-            reset_job_key=True,
-        )
-
-    while len(submitted) < max_submit and due:
+    for slot in pending:
+        if len(submitted) >= max_submit:
+            break
+        if _time.monotonic() >= deadline:
+            break
         if not _wait_for_production_idle(store, deadline=deadline):
             break
-        if production_queue_busy(store, owner=None):
-            if serial or wait_complete:
-                if not wait_complete:
-                    break
-                if _time.monotonic() >= deadline:
-                    break
-                _time.sleep(30)
-                reconcile_slots(store)
-                continue
-            # Morning batch: keep submitting until 3 agents started (ignore busy from prior submits).
 
-        slot = due.pop(0)
         slot_id = int(slot["id"])
+        row = store._conn.execute(
+            "SELECT status FROM weekly_slots WHERE id = ?", (slot_id,)
+        ).fetchone()
+        if row and str(row["status"]) == "done":
+            continue
+
         command = slot_command_text(slot)
         try:
             result = submit_fn(
                 store,
                 user_command=command,
+                slot_id=slot_id,
                 agent_model=None,
                 wait_montage=wait_complete,
                 wait_timeout_sec=wait_timeout_sec,
             )
         except Exception as exc:  # noqa: BLE001
-            mark_slot(store, slot_id, status="failed", error=str(exc)[:500])
-            if not wait_complete:
-                break
+            mark_slot(store, slot_id, status="failed", error=str(exc)[:500], reset_job_key=True)
             _time.sleep(12)
             continue
 
         job_key = str(result.get("job_key") or "")
-        mark_slot(store, slot_id, status="running", job_key=job_key, error="", reset_job_key=True)
-        _sync_slot_from_job(store, slot_id, job_key)
         refresh_plan_completion(store, plan_id=int(slot["plan_id"]))
         submitted.append({"slot_id": str(slot["id"]), "job_key": job_key})
-
-        if serial and not wait_complete:
-            break
-
-        if wait_complete and len(submitted) < max_submit:
-            _wait_for_production_idle(store, deadline=deadline)
-            _time.sleep(12)
-            due = due_slots(store, day=day, owner=owner_norm)[: cap - len(submitted)]
+        _time.sleep(12)
 
     out = {
         "day": day,

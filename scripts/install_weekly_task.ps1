@@ -1,5 +1,5 @@
 # Install / manage the daily 7am weekly runner (Windows Task Scheduler).
-# 7am submits all 3 due slots per owner in one batch (parallel Cursor agents).
+# 7am runs serial direct montage batch (3 videos per owner, one at a time).
 param(
   [string]$Time = "07:00",
   [string]$TaskName = "AiVideoWeekly7am",
@@ -56,7 +56,7 @@ function Install-WeeklyTask {
   $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
   Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
   Write-Host "installed $TaskName daily $Time (StartWhenAvailable; silent launcher: $vbs)"
-  Write-Host "Morning batch: run_weekly_due --all-owners --limit 3 (log: $LogPath)"
+  Write-Host "Morning batch: serial direct montage, 3 videos/owner (log: $LogPath)"
 }
 
 if ($Status) {
@@ -72,4 +72,4 @@ if ($Uninstall) {
 }
 
 Install-WeeklyTask
-
+

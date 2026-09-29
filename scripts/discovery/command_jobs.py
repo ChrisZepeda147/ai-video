@@ -305,26 +305,6 @@ def reconcile_stale_command_jobs(store) -> dict[str, int]:
         stale_min = max_age
         if is_montage:
             stale_min = max(stale_min, 240)
-        if (
-            is_montage
-            and status == "running"
-            and age_min >= 8
-            and not str(row["stdout_log"] or "").strip()
-        ):
-            msg = (
-                "Montage never started (background thread died, often after API reload). "
-                "Retry from Weekly (runs synchronously now)."
-            )
-            store._conn.execute(
-                """
-                UPDATE cursor_command_jobs
-                SET status = 'failed', error_message = ?, completed_at = ?
-                WHERE job_key = ?
-                """,
-                (msg, now_iso(), job_key),
-            )
-            failed += 1
-            continue
         if status == "running" and age_min >= stale_min:
             msg = (
                 f"Stale after {int(age_min)}m (likely API restart or agent hung). "

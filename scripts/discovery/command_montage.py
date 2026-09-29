@@ -122,9 +122,15 @@ def parse_montage_command(text: str) -> dict[str, Any] | None:
         except ImportError:
             pass
 
-    extra = _first_match(r"Extra instructions:\s*(.+)$", text, flags=re.IGNORECASE | re.DOTALL) or ""
-    extra = re.split(r"Before downloading audio", extra, maxsplit=1)[0]
-    reuse_policy = parse_reuse_policy(extra if extra.strip() else text)
+    extra_match = re.search(r"Extra instructions:\s*(.*)$", text, flags=re.IGNORECASE | re.DOTALL)
+    if extra_match:
+        extra = re.split(r"Before downloading audio", extra_match.group(1), maxsplit=1)[0].strip()
+        if not extra:
+            reuse_policy = "allow"
+        else:
+            reuse_policy = parse_reuse_policy(extra)
+    else:
+        reuse_policy = parse_reuse_policy(text)
     reuse_policy = normalize_reuse_policy(reuse_policy, default="allow")
 
     extra_duration = re.search(r"(\d+)\s*-\s*(\d+)\s*seconds", extra, flags=re.IGNORECASE)
@@ -381,6 +387,13 @@ def spawn_direct_montage_job(store, job_key: str) -> None:
     if not script.is_file():
         raise FileNotFoundError(f"Missing {script}")
 
+    env = dict(subprocess_env() if subprocess_env else os.environ)
+    env["AI_VIDEO_PYTHON"] = python
+    exe = Path(python)
+    pythonw = exe.with_name("pythonw.exe")
+    launch_python = str(pythonw) if pythonw.is_file() else python
+    flags = CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
     store._conn.execute(
         """
         UPDATE cursor_command_jobs
@@ -391,22 +404,28 @@ def spawn_direct_montage_job(store, job_key: str) -> None:
     )
     store._conn.commit()
 
-    env = dict(subprocess_env() if subprocess_env else os.environ)
-    env["AI_VIDEO_PYTHON"] = python
-    exe = Path(python)
-    pythonw = exe.with_name("pythonw.exe")
-    if pythonw.is_file():
-        python = str(pythonw)
-    flags = CREATE_NO_WINDOW if sys.platform == "win32" else 0
-    subprocess.Popen(
-        [python, str(script), "--job-key", job_key],
-        cwd=root,
-        env=env,
-        creationflags=flags,
-        close_fds=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    try:
+        subprocess.Popen(
+            [launch_python, str(script), "--job-key", job_key],
+            cwd=root,
+            env=env,
+            creationflags=flags,
+            close_fds=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError as exc:
+        msg = f"Failed to launch direct montage worker: {exc}"[:500]
+        store._conn.execute(
+            """
+            UPDATE cursor_command_jobs
+            SET status = 'failed', error_message = ?, completed_at = ?
+            WHERE job_key = ?
+            """,
+            (msg, _now_iso(), job_key),
+        )
+        store._conn.commit()
+        raise RuntimeError(msg) from exc
 
 
 def should_use_direct_montage(text: str) -> bool:

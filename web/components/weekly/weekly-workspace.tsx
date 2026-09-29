@@ -101,37 +101,7 @@ export function WeeklyWorkspace() {
       };
     }
     setSlots(next);
-    setSlotMeta((prev) => {
-      const dayPrefix = batchRunDayId;
-      if (!dayPrefix && !busy) return meta;
-      const out = { ...meta };
-      for (const n of SLOTS) {
-        const key = `${dayPrefix ?? focusDay}-${n}` as SlotKey;
-        if (dayPrefix && !key.startsWith(`${dayPrefix}-`)) continue;
-        const row = out[key];
-        const prior = prev[key];
-        if (!row) continue;
-        if (row.status === "done") continue;
-        if (row.status === "failed" && (busy || dayPrefix) && prior?.status !== "failed") {
-          out[key] = {
-            ...row,
-            status: prior?.status === "running" ? "running" : "rerunning",
-            error_message: null,
-          };
-        } else if (
-          (row.status === "failed" || row.status === "queued") &&
-          (busy || dayPrefix) &&
-          (prior?.status === "rerunning" || prior?.status === "running" || prior?.status === "waiting")
-        ) {
-          out[key] = {
-            ...row,
-            status: prior?.status === "running" ? "running" : prior?.status ?? "rerunning",
-            error_message: null,
-          };
-        }
-      }
-      return out;
-    });
+    setSlotMeta(meta);
     const prog = res.data.progress ?? null;
     setProgress(prog);
 
@@ -140,7 +110,7 @@ export function WeeklyWorkspace() {
         ? `Week ${res.data.plan.status} · starts ${weekStart}`
         : "Copy ChatGPT prompt → paste reply → Save week (7am auto) or Run now.",
     );
-  }, [weekStart, owner, batchRunDayId, busy, focusDay]);
+  }, [weekStart, owner, focusDay]);
 
   useEffect(() => {
     load();
@@ -318,24 +288,8 @@ export function WeeklyWorkspace() {
     setBusy(true);
     setBatchRunDayId(target.dayId);
     setFocusDay(target.dayId);
-    setSlotMeta((prev) => {
-      const next = { ...prev };
-      for (const n of SLOTS) {
-        const key = `${target.dayId}-${n}` as SlotKey;
-        const cur = next[key];
-        if (cur?.status === "failed" || cur?.status === "queued" || cur?.status === "rerunning") {
-          next[key] = {
-            ...cur,
-            status: "rerunning",
-            error_message: null,
-            job_key: null,
-          };
-        }
-      }
-      return next;
-    });
     setStatus(
-      `Rendering ${target.label} videos 1→2→3 (one at a time). Leave this tab open — yellow = queued/running, green = done, red only if this run fails.`,
+      `Rendering ${target.label} videos 1→2→3 (one at a time). Rendering = active job; Queued = waiting for turn.`,
     );
     try {
       if (pasteText.trim()) {
@@ -382,45 +336,42 @@ export function WeeklyWorkspace() {
 
   async function retrySlot(slotId: number) {
     setBusy(true);
-    setSlotMeta((prev) => {
-      const next = { ...prev };
-      for (const key of Object.keys(next) as SlotKey[]) {
-        if (next[key]?.id === slotId) {
-          next[key] = { ...next[key], status: "rerunning", error_message: null, job_key: null };
-        }
-      }
-      return next;
-    });
+    setStatus("Retrying slot — direct montage (may take up to ~45 min)…");
     try {
       const res = await postWeeklyRetrySlot(slotId);
       if (res.ok) await load();
-      setStatus(res.ok ? "Marked rerunning — use Run now to render" : res.message);
+      setStatus(res.ok ? "Retry batch finished — refresh slot status above." : res.message);
     } finally {
       setBusy(false);
     }
   }
 
-  function slotUiStatus(key: SlotKey, meta?: (typeof slotMeta)[SlotKey]) {
+  function slotUiStatus(_key: SlotKey, meta?: (typeof slotMeta)[SlotKey]) {
     const st = meta?.status ?? "queued";
+    const jobKey = (meta?.job_key ?? "").trim();
     if (st === "done") return "done";
-    const inBatch = Boolean(batchRunDayId && key.startsWith(`${batchRunDayId}-`));
-    if (inBatch && (busy || st === "running" || st === "rerunning" || st === "queued")) {
-      if (st === "running") return "running";
-      if (st === "failed") return "rerunning";
-      if (st === "rerunning" || st === "queued") return "waiting";
-    }
+    if (st === "failed") return "failed";
+    if (st === "running" && jobKey) return "rendering";
+    if ((st === "queued" || st === "rerunning") && !jobKey) return "queued";
+    if (st === "running") return "rendering";
     return st;
   }
 
   function statusBadge(st?: string) {
     const s = st || "queued";
     const label =
-      s === "waiting" ? "waiting" : s === "rerunning" ? "rerunning" : s === "running" ? "running" : s;
+      s === "rendering"
+        ? "Rendering"
+        : s === "queued"
+          ? "Queued"
+          : s === "done"
+            ? "Done"
+            : s === "failed"
+              ? "Failed"
+              : s;
     const colors: Record<string, string> = {
-      queued: "bg-zinc-800 text-zinc-300",
-      waiting: "bg-amber-900/50 text-amber-100",
-      rerunning: "bg-amber-900/60 text-amber-100",
-      running: "bg-amber-500/80 text-amber-950",
+      queued: "bg-amber-900/50 text-amber-100",
+      rendering: "bg-amber-500/80 text-amber-950",
       done: "bg-emerald-600/80 text-emerald-50",
       failed: "bg-red-900/50 text-red-200",
     };
@@ -440,7 +391,7 @@ export function WeeklyWorkspace() {
     const v = slots[key];
     const meta = slotMeta[key];
     const uiStatus = slotUiStatus(key, meta);
-    const inProgress = ["running", "rerunning", "waiting"].includes(uiStatus);
+    const inProgress = ["rendering", "queued"].includes(uiStatus);
     return (
       <div
         key={n}
