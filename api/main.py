@@ -262,6 +262,36 @@ def _start_brother_auto_sync() -> None:
 
 
 @app.on_event("startup")
+def _start_weekly_morning_catchup() -> None:
+    import logging
+    import threading
+
+    from discovery.config import default_db_path
+    from discovery.weekly import maybe_run_morning_catchup, weekly_reconcile_pipeline
+
+    def _run() -> None:
+        log = logging.getLogger("uvicorn.error")
+        db = default_db_path()
+        if not Path(db).is_file():
+            return
+        store = DiscoveryStore(db)
+        try:
+            pipe = weekly_reconcile_pipeline(store)
+            if pipe.get("stale", {}).get("stale_failed"):
+                log.info("Weekly reconcile: stale jobs failed=%s", pipe["stale"])
+            result = maybe_run_morning_catchup(store)
+        except Exception as exc:
+            log.warning("Weekly morning catchup failed: %s", exc)
+            return
+        finally:
+            store.close()
+        if result and result.get("results"):
+            log.info("Weekly morning catchup: %s", result.get("results"))
+
+    threading.Thread(target=_run, name="weekly-morning-catchup", daemon=True).start()
+
+
+@app.on_event("startup")
 def _start_analytics_auto_refresh() -> None:
     import logging
     import os
@@ -1722,7 +1752,10 @@ def weekly_chatgpt_prompt_endpoint(
     prev_start = date_cls.fromisoformat(week_start) - timedelta(days=7)
     prev = get_week(store, week_start=prev_start.isoformat(), owner=owner)
     summary = summarize_week_for_prompt(list(prev.get("slots") or []))
-    return {"prompt": CHATGPT_FORMAT_TEMPLATE.format(previous_week=summary)}
+    return {
+        "prompt": CHATGPT_FORMAT_TEMPLATE.format(previous_week=summary, week_start=week_start),
+        "week_start": week_start,
+    }
 
 
 @app.post("/api/weekly/parse-paste")
@@ -1742,14 +1775,21 @@ def weekly_apply_paste_endpoint(
     from discovery.weekly import save_slots
     from discovery.weekly_paste import parse_weekly_paste
 
+    from discovery.weekly_paste import resolve_week_start
+
     text = str(body.get("text") or "")
     slots, warnings = parse_weekly_paste(text)
     if not slots:
-        raise HTTPException(status_code=422, detail="; ".join(warnings) or "Nothing parsed")
+        hint = "; ".join(warnings[:8]) if warnings else "Nothing parsed"
+        raise HTTPException(
+            status_code=422,
+            detail=f"{hint}. Use day headers (MONDAY…) and lines like: 1. Speaker | B-roll search",
+        )
+    week_start = resolve_week_start(body.get("week_start"))
     try:
         saved = save_slots(
             store,
-            week_start=str(body.get("week_start") or ""),
+            week_start=week_start,
             owner=str(body.get("owner") or "chris"),
             slots=slots,
             replace_week=bool(body.get("replace_week", True)),
@@ -1796,11 +1836,28 @@ def weekly_retry_slot_endpoint(
     store: Annotated[DiscoveryStore, Depends(get_store)],
     _: Annotated[None, Depends(require_internal_key)],
 ):
-    from discovery.weekly import requeue_slot
+    from discovery.weekly import run_weekly_retry_slot
 
-    if not requeue_slot(store, slot_id):
-        raise HTTPException(status_code=404, detail="Slot not found or not failed")
-    return {"slot_id": slot_id, "status": "queued"}
+    try:
+        result = run_weekly_retry_slot(store, slot_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if result.get("error"):
+        raise HTTPException(status_code=422, detail=str(result["error"]))
+    return {"slot_id": slot_id, "status": "rerunning", "batch": result}
+
+
+@app.post("/api/production/pause")
+def production_pause_endpoint(
+    body: dict,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    _: Annotated[None, Depends(require_internal_key)],
+):
+    from discovery.production_pause import pause_local_production
+
+    reason = str(body.get("reason") or "Paused from dashboard").strip()
+    owner = body.get("owner") or None
+    return pause_local_production(store, reason=reason, owner=owner)
 
 
 @app.post("/api/weekly/run-due")
@@ -1817,6 +1874,9 @@ def weekly_run_due_endpoint(
     serial = body.get("serial", True)
     if isinstance(serial, str):
         serial = serial.strip().lower() not in {"0", "false", "no"}
+    wait_complete = body.get("wait_complete", True)
+    if isinstance(wait_complete, str):
+        wait_complete = wait_complete.strip().lower() not in {"0", "false", "no"}
     try:
         return run_weekly_due_batch(
             store,
@@ -1825,7 +1885,7 @@ def weekly_run_due_endpoint(
             limit=limit,
             dry_run=False,
             serial=bool(serial),
-            wait_complete=bool(body.get("wait_complete")),
+            wait_complete=bool(wait_complete),
             wait_timeout_sec=max(60, int(body.get("wait_timeout_minutes") or 240) * 60),
             retry_failed=bool(body.get("retry_failed")),
         )

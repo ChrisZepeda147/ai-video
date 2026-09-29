@@ -4,7 +4,11 @@
   "description": "Root scripts proxy to the Next.js dashboard in web/",
   "scripts": {
     "dev": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-dev.ps1",
-    "dev:web": "npm run dev --prefix web",
+    "dev:web": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-dashboard.ps1",
+    "dev:api": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ensure-api.ps1",
+    "dev:api:restart": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ensure-api.ps1 -Restart",
+    "pause-production": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pause_production.ps1",
+    "pause:production": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pause_production.ps1",
     "restart:dev": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/restart-dev.ps1",
     "build": "npm run build --prefix web",
     "start": "npm run start --prefix web",
