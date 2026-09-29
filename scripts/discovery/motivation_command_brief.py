@@ -79,6 +79,10 @@ def compose_montage_command(
         lines.append("Search for audio: pick fitting motivational audio (any type — not limited to speeches).")
 
     lines.append(f"Visual / B-roll search: {broll}")
+    lines.append(
+        "Pipeline: download speech from YouTube, scrape captions for the clip, search B-roll for the visual line, "
+        "grade + phrase captions, register in production library."
+    )
     lines.append(f"Default target length: {min_seconds}–{max_seconds} seconds unless extra instructions override.")
 
     for hint in visual_production_hints(broll):

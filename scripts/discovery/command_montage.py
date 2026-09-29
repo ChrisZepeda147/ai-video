@@ -17,6 +17,16 @@ from discovery.motivation_build import _build_command
 from discovery.reuse_policy import normalize_reuse_policy, parse_reuse_policy
 from discovery.store import DiscoveryStore
 
+CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+
+
+def _subprocess_run(*popenargs, **kwargs):
+    """subprocess.run without flashing a console on Windows."""
+    if sys.platform == "win32" and "creationflags" not in kwargs:
+        kwargs["creationflags"] = CREATE_NO_WINDOW
+    return subprocess.run(*popenargs, **kwargs)
+
+
 try:
     from toolchain_env import check_toolchain, format_toolchain_report, subprocess_env
 except ImportError:
@@ -168,7 +178,7 @@ def _resolve_speech_url(title: str, root: Path) -> str | None:
     if not query:
         return None
     try:
-        result = subprocess.run(
+        result = _subprocess_run(
             [
                 sys.executable,
                 "-m",
@@ -269,7 +279,7 @@ def run_direct_montage_command(
                     "hook": plan.get("hook"),
                 }
                 cmd, slug, rel_output = _build_command(body, root)
-                result = subprocess.run(
+                result = _subprocess_run(
                     cmd,
                     cwd=root,
                     capture_output=True,
@@ -383,15 +393,19 @@ def spawn_direct_montage_job(store, job_key: str) -> None:
 
     env = dict(subprocess_env() if subprocess_env else os.environ)
     env["AI_VIDEO_PYTHON"] = python
-    flags = 0
-    if sys.platform == "win32":
-        flags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    exe = Path(python)
+    pythonw = exe.with_name("pythonw.exe")
+    if pythonw.is_file():
+        python = str(pythonw)
+    flags = CREATE_NO_WINDOW if sys.platform == "win32" else 0
     subprocess.Popen(
         [python, str(script), "--job-key", job_key],
         cwd=root,
         env=env,
         creationflags=flags,
         close_fds=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
 
 

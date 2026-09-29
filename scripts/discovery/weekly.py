@@ -895,19 +895,19 @@ def weekly_submit_command(
     if not should_use_direct_montage(user_command):
         raise ValueError("Weekly slot is not a montage brief — re-save the week from ChatGPT paste.")
 
-    from discovery.command_jobs import create_command_job
-    from discovery.command_montage import spawn_direct_montage_job
+    from discovery.command_jobs import submit_command
 
-    record = create_command_job(store, user_command=user_command, video_id=video_id)
+    # Same path as Make Short: speech search + B-roll montage in-process (no pop-up worker exe).
+    record = submit_command(
+        store,
+        user_command=user_command,
+        video_id=video_id,
+        agent_model=None,
+        block_montage=False,
+    )
     job_key = str(record["job_key"])
     if wait_montage or _montage_inline():
-        # Detached worker survives API hot-reload; one process at a time via _wait_for_production_idle.
-        spawn_direct_montage_job(store, job_key)
         _wait_for_command_job(store, job_key, deadline=_time.monotonic() + max(120, wait_timeout_sec))
-    else:
-        from discovery.command_jobs import start_command_job
-
-        start_command_job(store, job_key=job_key, agent_model=None, block_montage=False)
     job = get_command_job(store, job_key)
     return dict(job or record)
 

@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from discovery.config import project_root
+from discovery.config import project_root, resolve_python_exe
 from discovery.motivation_paths import (
     default_job_date,
     job_dir_for,
@@ -102,11 +102,11 @@ def _build_command(body: dict[str, Any], root: Path) -> tuple[list[str], str, st
             speaker = infer_speaker(speech_query) or ""
         except ImportError:
             pass
-    if not speaker:
+    if not speaker and not speech_query:
         speaker = str(config.get("speaker") or "").strip()
 
     script = root / "scripts" / "build_motivation_job.py"
-    cmd = [sys.executable, str(script), "--slug", slug, "--broll-query", broll_query]
+    cmd = [resolve_python_exe(), str(script), "--slug", slug, "--broll-query", broll_query]
     if speech_query:
         cmd.extend(["--speech-query", speech_query])
     if speech_url:
