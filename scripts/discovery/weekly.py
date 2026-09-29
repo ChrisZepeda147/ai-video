@@ -822,6 +822,18 @@ def _wait_for_command_job(store, job_key: str, *, deadline: float) -> None:
         reconcile_slots(store)
 
 
+def _wait_for_production_idle(store, *, deadline: float) -> bool:
+    """One montage at a time — wait until no command job is running."""
+    import time as _time
+
+    while _time.monotonic() < deadline:
+        if count_running_command_jobs(store) == 0 and count_running_weekly_slots(store) == 0:
+            return True
+        _time.sleep(5)
+        reconcile_slots(store)
+    return False
+
+
 def weekly_submit_command(
     store,
     *,
@@ -1060,7 +1072,19 @@ def run_weekly_due_batch(
     submitted: list[dict[str, str]] = []
     deadline = _time.monotonic() + max(60, wait_timeout_sec)
 
+    for waiting in due:
+        mark_slot(
+            store,
+            int(waiting["id"]),
+            status="rerunning",
+            job_key=None,
+            error="",
+            reset_job_key=True,
+        )
+
     while len(submitted) < max_submit and due:
+        if not _wait_for_production_idle(store, deadline=deadline):
+            break
         if production_queue_busy(store, owner=None):
             if serial or wait_complete:
                 if not wait_complete:
@@ -1087,6 +1111,7 @@ def run_weekly_due_batch(
             mark_slot(store, int(slot["id"]), status="failed", error=str(exc)[:500])
             if not wait_complete:
                 break
+            _time.sleep(12)
             continue
 
         job_key = str(result.get("job_key") or "")
@@ -1098,13 +1123,8 @@ def run_weekly_due_batch(
             break
 
         if wait_complete and len(submitted) < max_submit:
-            while _time.monotonic() < deadline:
-                _time.sleep(20)
-                rec = reconcile_slots(store)
-                if rec["reconciled_done"] or rec["reconciled_failed"]:
-                    break
-                if not production_queue_busy(store, owner=None):
-                    break
+            _wait_for_production_idle(store, deadline=deadline)
+            _time.sleep(12)
             due = due_slots(store, day=day, owner=owner_norm)[: cap - len(submitted)]
 
     out = {
