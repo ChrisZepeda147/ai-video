@@ -255,6 +255,15 @@ def build_week_progress(slots: list[dict[str, Any]]) -> dict[str, Any]:
         if focus_day is None and not any(r["filled"] for r in day_rows):
             focus_day = "mon"
 
+    # Suggest today's weekday when it still has work (UI may stay on user-picked tab).
+    from datetime import date as _date
+
+    today_key = DAYS[_date.today().weekday()]
+    for row in day_rows:
+        if row["day"] == today_key and row["filled"] > 0 and not row["complete"]:
+            focus_day = today_key
+            break
+
     return {
         "days": day_rows,
         "focus_day": focus_day,

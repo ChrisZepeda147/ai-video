@@ -59,6 +59,17 @@ export function dayIdForCalendarDate(weekStartMon: string, iso: string): WeekDay
 }
 
 /** Which calendar day to run when user clicks Run (Sunday → Monday of selected week). */
+/** Default tab when opening weekly: today if in this plan week, else Monday. */
+export function defaultFocusDayId(weekStartMon: string): WeekDayId {
+  return runBatchTarget(weekStartMon).dayId;
+}
+
+export function nextWeekDay(day: WeekDayId): WeekDayId | null {
+  const idx = WEEK_DAYS.indexOf(day);
+  if (idx < 0 || idx >= WEEK_DAYS.length - 1) return null;
+  return WEEK_DAYS[idx + 1];
+}
+
 export function runBatchTarget(weekStartMon: string): { day: string; dayId: WeekDayId; label: string } {
   const today = todayIso();
   const weekEnd = addDays(weekStartMon, 6);

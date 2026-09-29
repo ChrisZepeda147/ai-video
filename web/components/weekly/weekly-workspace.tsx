@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   fetchWeekly,
@@ -21,6 +21,8 @@ import {
   mondayOf,
   planningWeekStart,
   runBatchTarget,
+  defaultFocusDayId,
+  nextWeekDay,
   calendarDateForWeekDay,
   type WeekDayId,
 } from "@/lib/weekly-planning";
@@ -62,7 +64,8 @@ export function WeeklyWorkspace() {
   const [weekStart, setWeekStart] = useState(() => planningWeekStart());
   const [slots, setSlots] = useState<Record<SlotKey, SlotCell>>(emptyGrid);
   const [progress, setProgress] = useState<WeeklyProgress | null>(null);
-  const [focusDay, setFocusDay] = useState<string>("mon");
+  const [focusDay, setFocusDay] = useState<string>(() => defaultFocusDayId(planningWeekStart()));
+  const focusPickedByUser = useRef(false);
   const [pasteText, setPasteText] = useState("");
   const [parseHint, setParseHint] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -131,8 +134,6 @@ export function WeeklyWorkspace() {
     });
     const prog = res.data.progress ?? null;
     setProgress(prog);
-    const nextFocus = (prog?.focus_day as WeekDayId | undefined) ?? "mon";
-    setFocusDay(nextFocus);
 
     setPlanSummary(
       res.data.plan
@@ -144,6 +145,11 @@ export function WeeklyWorkspace() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    focusPickedByUser.current = false;
+    setFocusDay(defaultFocusDayId(weekStart));
+  }, [weekStart, owner]);
 
   useEffect(() => {
     const ws = effectiveWeekStartForPaste(weekStart);
@@ -274,9 +280,20 @@ export function WeeklyWorkspace() {
       `Saved ${res.data.slots_saved} videos for week ${ws} · Monday first${warn.length ? ` · ${warn.join("; ")}` : ""}`,
     );
     setPasteText("");
-    setFocusDay("mon");
+    setFocusDay(defaultFocusDayId(ws));
+    focusPickedByUser.current = false;
     await load();
     return true;
+  }
+
+  function selectFocusDay(day: WeekDayId) {
+    focusPickedByUser.current = true;
+    setFocusDay(day);
+  }
+
+  function advanceToNextDay() {
+    const next = nextWeekDay(activeDay as WeekDayId);
+    if (next) selectFocusDay(next);
   }
 
   async function onSaveWeek() {
@@ -580,7 +597,7 @@ export function WeeklyWorkspace() {
               <button
                 key={d}
                 type="button"
-                onClick={() => setFocusDay(d)}
+                onClick={() => selectFocusDay(d as WeekDayId)}
                 className={`rounded-lg px-3 py-2 text-xs font-medium capitalize ${
                   isFocus
                     ? "bg-violet-600 text-white"
@@ -599,10 +616,28 @@ export function WeeklyWorkspace() {
         <p className="mt-3 text-sm text-zinc-400">
           {progress?.week_complete
             ? "Week complete — paste a new ChatGPT plan."
-            : progress?.focus_day === activeDay
-              ? `Focus ${DAY_LABEL_SHORT[activeDay]} — finish 3/3 then next day.`
+            : dayProgress?.complete
+              ? `${DAY_LABEL_SHORT[activeDay]} finished — pick another day or run the next batch.`
               : `Viewing ${DAY_LABEL_SHORT[activeDay]}${dayProgress ? ` (${dayProgress.done}/${dayProgress.filled} done)` : ""}`}
         </p>
+        {dayProgress?.complete && nextWeekDay(activeDay as WeekDayId) ? (
+          <button
+            type="button"
+            onClick={advanceToNextDay}
+            className="mt-2 rounded-lg border border-emerald-800/50 bg-emerald-950/30 px-3 py-1.5 text-xs font-medium text-emerald-200"
+          >
+            {DAY_LABEL_SHORT[activeDay]} finished → open {DAY_LABEL_SHORT[nextWeekDay(activeDay as WeekDayId)!]}
+          </button>
+        ) : null}
+        {!dayProgress?.complete && progress?.focus_day && progress.focus_day !== activeDay ? (
+          <button
+            type="button"
+            onClick={() => selectFocusDay(progress.focus_day as WeekDayId)}
+            className="mt-2 text-xs text-zinc-500 underline hover:text-zinc-300"
+          >
+            Suggested focus: {DAY_LABEL_SHORT[progress.focus_day]} (click any day tab above)
+          </button>
+        ) : null}
 
         {dayOutcomeLabel ? (
           <div className={`mt-4 rounded-xl border p-4 ${dayOutcomeLabel.className}`}>
