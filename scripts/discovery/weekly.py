@@ -424,14 +424,55 @@ def activate_plans_for_day(store, *, day: str) -> None:
     store._conn.commit()
 
 
+def reconcile_zombie_weekly_slots(store) -> int:
+    """Clear weekly rows stuck running/rerunning with no live command job (API reload mid-batch)."""
+    ensure_weekly_tables(store)
+    rows = store._conn.execute(
+        """
+        SELECT s.id, s.job_key, s.plan_id, s.status
+        FROM weekly_slots s
+        WHERE s.status IN ('running', 'rerunning')
+        """
+    ).fetchall()
+    cleared = 0
+    plan_ids: set[int] = set()
+    for row in rows:
+        slot_id = int(row["id"])
+        job_key = str(row["job_key"] or "").strip()
+        if not job_key:
+            mark_slot(
+                store,
+                slot_id,
+                status="failed",
+                job_key=None,
+                error="Batch interrupted (no active job — often API restart). Run this day again.",
+                reset_job_key=True,
+            )
+            cleared += 1
+            plan_ids.add(int(row["plan_id"]))
+            continue
+        job = store._conn.execute(
+            "SELECT status FROM cursor_command_jobs WHERE job_key = ?",
+            (job_key,),
+        ).fetchone()
+        if not job or str(job["status"] or "") in {"completed", "failed", "cancelled"}:
+            _sync_slot_from_job(store, slot_id, job_key)
+            cleared += 1
+            plan_ids.add(int(row["plan_id"]))
+    for pid in plan_ids:
+        refresh_plan_completion(store, plan_id=pid)
+    return cleared
+
+
 def weekly_reconcile_pipeline(store) -> dict[str, Any]:
     """Stale jobs → slot status sync → resume stuck queued."""
     from discovery.command_jobs import reconcile_stale_command_jobs, resume_weekly_queued_jobs
 
+    zombies = reconcile_zombie_weekly_slots(store)
     stale = reconcile_stale_command_jobs(store)
     slots = reconcile_slots(store)
     resumed = resume_weekly_queued_jobs(store)
-    return {"stale": stale, "slots": slots, "resumed": resumed}
+    return {"stale": stale, "slots": slots, "resumed": resumed, "zombies": zombies}
 
 
 def reconcile_slots(store) -> dict[str, int]:
@@ -827,10 +868,11 @@ def _wait_for_production_idle(store, *, deadline: float) -> bool:
     import time as _time
 
     while _time.monotonic() < deadline:
+        reconcile_zombie_weekly_slots(store)
+        reconcile_slots(store)
         if count_running_command_jobs(store) == 0 and count_running_weekly_slots(store) == 0:
             return True
         _time.sleep(5)
-        reconcile_slots(store)
     return False
 
 
@@ -847,23 +889,25 @@ def weekly_submit_command(
     """Same direct montage path as Make Short (submit_command); block until done when waiting."""
     import time as _time
 
-    from discovery.command_jobs import get_command_job, submit_command
+    from discovery.command_jobs import get_command_job
     from discovery.command_montage import should_use_direct_montage
 
     if not should_use_direct_montage(user_command):
         raise ValueError("Weekly slot is not a montage brief — re-save the week from ChatGPT paste.")
 
-    # Threaded montage (same as Make Short) so API /health stays up during long renders.
-    record = submit_command(
-        store,
-        user_command=user_command,
-        video_id=video_id,
-        agent_model=None,
-        block_montage=False,
-    )
+    from discovery.command_jobs import create_command_job
+    from discovery.command_montage import spawn_direct_montage_job
+
+    record = create_command_job(store, user_command=user_command, video_id=video_id)
     job_key = str(record["job_key"])
     if wait_montage or _montage_inline():
+        # Detached worker survives API hot-reload; one process at a time via _wait_for_production_idle.
+        spawn_direct_montage_job(store, job_key)
         _wait_for_command_job(store, job_key, deadline=_time.monotonic() + max(120, wait_timeout_sec))
+    else:
+        from discovery.command_jobs import start_command_job
+
+        start_command_job(store, job_key=job_key, agent_model=None, block_montage=False)
     job = get_command_job(store, job_key)
     return dict(job or record)
 
@@ -1097,7 +1141,7 @@ def run_weekly_due_batch(
             # Morning batch: keep submitting until 3 agents started (ignore busy from prior submits).
 
         slot = due.pop(0)
-        mark_slot(store, int(slot["id"]), status="running", job_key=None, error="", reset_job_key=True)
+        slot_id = int(slot["id"])
         command = slot_command_text(slot)
         try:
             result = submit_fn(
@@ -1108,14 +1152,15 @@ def run_weekly_due_batch(
                 wait_timeout_sec=wait_timeout_sec,
             )
         except Exception as exc:  # noqa: BLE001
-            mark_slot(store, int(slot["id"]), status="failed", error=str(exc)[:500])
+            mark_slot(store, slot_id, status="failed", error=str(exc)[:500])
             if not wait_complete:
                 break
             _time.sleep(12)
             continue
 
         job_key = str(result.get("job_key") or "")
-        _sync_slot_from_job(store, int(slot["id"]), job_key)
+        mark_slot(store, slot_id, status="running", job_key=job_key, error="", reset_job_key=True)
+        _sync_slot_from_job(store, slot_id, job_key)
         refresh_plan_completion(store, plan_id=int(slot["plan_id"]))
         submitted.append({"slot_id": str(slot["id"]), "job_key": job_key})
 
