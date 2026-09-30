@@ -553,7 +553,13 @@ def update_video_posting_status(
         (json.dumps(manual_by_owner), posted, json.dumps(meta), now, video_id),
     )
     store._conn.commit()
-    return get_video(store, video_id)
+    video = get_video(store, video_id)
+    if any(v is True for v in updates.values()):
+        from discovery.combinations import ensure_combination_usage_for_library_video
+
+        ensure_combination_usage_for_library_video(store, video_id, owners=[owner])
+        video = get_video(store, video_id)
+    return video
 
 
 def _row_to_component(row, *, root: Path | None = None) -> dict[str, Any]:

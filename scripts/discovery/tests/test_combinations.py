@@ -14,13 +14,15 @@ from discovery.combination_render import render_combination
 from discovery.combinations import (
     catalog_payload,
     combination_status,
+    ensure_combination_usage_for_library_video,
     import_usage_from_videos,
     list_audio_catalog,
     record_combination_usage,
+    sync_combination_usage_from_posted_videos,
     sync_visual_packs,
 )
 from discovery.config import project_root
-from discovery.production_library import register_video
+from discovery.production_library import register_video, update_video_posting_status
 from discovery.store import DiscoveryStore
 
 
@@ -107,6 +109,35 @@ class CombinationTests(unittest.TestCase):
         self.assertFalse(chris_item["available"])
         self.assertTrue(stephen_item["used_by_other_owner"])
         self.assertTrue(stephen_item["available"])
+
+    def test_posting_status_records_combination_usage(self) -> None:
+        update_video_posting_status(
+            self.store,
+            self.video_id,
+            owner="chris",
+            tiktok=True,
+            marked_by="test",
+        )
+        chris = combination_status(self.store, owner="chris", audio_component_id=self.audio_id)
+        item = chris["visuals"][0]
+        self.assertTrue(item["used_by_selected_owner"])
+
+    def test_sync_posted_videos_updates_combinations(self) -> None:
+        self.store._conn.execute(
+            "UPDATE production_library_videos SET posted = 1 WHERE id = ?",
+            (self.video_id,),
+        )
+        self.store._conn.commit()
+        out = sync_combination_usage_from_posted_videos(self.store, owner="stephen")
+        self.assertGreaterEqual(out["video_count"], 1)
+        stephen = combination_status(self.store, owner="stephen", audio_component_id=self.audio_id)
+        self.assertTrue(stephen["visuals"][0]["used_by_selected_owner"])
+
+    def test_ensure_usage_helper(self) -> None:
+        result = ensure_combination_usage_for_library_video(
+            self.store, self.video_id, owners=["chris"]
+        )
+        self.assertTrue(result["ok"])
 
     def test_import_usage_idempotent(self) -> None:
         first = import_usage_from_videos(self.store, owner="stephen", video_ids=[self.video_id])

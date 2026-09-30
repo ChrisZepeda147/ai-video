@@ -780,6 +780,64 @@ def record_combination_usage(
     return dict(row) if row else {}
 
 
+def owners_with_posting_flags(video: dict[str, Any]) -> list[str]:
+    """Owners who marked at least one platform for this library video."""
+    status = video.get("posting_status") or {}
+    by_owner = status.get("by_owner") or {}
+    found: list[str] = []
+    for name, slot in by_owner.items():
+        if name not in OWNERS:
+            continue
+        manual = (slot or {}).get("manual") or {}
+        if any(bool(v) for v in manual.values()):
+            found.append(str(name))
+    if found:
+        return sorted(set(found))
+    if video.get("posted") or video.get("used"):
+        return sorted(OWNERS)
+    return []
+
+
+def ensure_combination_usage_for_library_video(
+    store,
+    video_id: int,
+    *,
+    owners: list[str] | None = None,
+) -> dict[str, Any]:
+    """Record audio+visual pairing from a finished library video for Combination Board."""
+    sync_visual_packs(store)
+    video = get_video(store, video_id)
+    if not video:
+        return {"video_id": video_id, "ok": False, "reason": "video_not_found"}
+    target_owners = [normalize_owner(o) for o in (owners or owners_with_posting_flags(video))]
+    if not target_owners:
+        return {"video_id": video_id, "ok": False, "reason": "no_posting_owner"}
+    by_owner: dict[str, Any] = {}
+    for owner in target_owners:
+        by_owner[owner] = import_usage_from_videos(store, owner=owner, video_ids=[int(video_id)])
+    return {"video_id": int(video_id), "ok": True, "by_owner": by_owner}
+
+
+def sync_combination_usage_from_posted_videos(
+    store,
+    *,
+    owner: str | None = None,
+) -> dict[str, Any]:
+    """Backfill combination usage from all library videos marked posted (used pile)."""
+    sync_visual_packs(store)
+    rows = store._conn.execute(
+        "SELECT id FROM production_library_videos WHERE posted = 1 ORDER BY id"
+    ).fetchall()
+    video_ids = [int(row["id"]) for row in rows]
+    if not video_ids:
+        return {"video_count": 0, "by_owner": {}}
+    owners = [normalize_owner(owner)] if owner else sorted(OWNERS)
+    by_owner: dict[str, Any] = {}
+    for name in owners:
+        by_owner[name] = import_usage_from_videos(store, owner=name, video_ids=video_ids)
+    return {"video_count": len(video_ids), "by_owner": by_owner}
+
+
 def import_usage_from_videos(
     store,
     *,
@@ -871,6 +929,7 @@ def import_usage_from_videos(
 def catalog_payload(store, *, owner: str | None = None, prune_missing: bool = False) -> dict[str, Any]:
     if prune_missing:
         prune_stale_combination_catalog(store)
+    sync_combination_usage_from_posted_videos(store, owner=owner)
     sync_visual_packs(store)
     audio_items = list_audio_catalog(store)
     packs = list_visual_packs(store)
