@@ -92,6 +92,22 @@ class TestWeekly(unittest.TestCase):
         os.environ.pop("WEEKLY_AGENT_MODEL", None)
         self.assertEqual(weekly.weekly_agent_model(), "composer-2.5-fast")
 
+    def test_zombie_reconcile_keeps_queued_rerunning_without_job(self) -> None:
+        weekly.save_slots(
+            self.store,
+            week_start="2026-09-28",
+            owner="chris",
+            slots=[{"day": "mon", "slot": 1, "speaker": "A", "visual_direction": "v"}],
+        )
+        slot = weekly.due_slots(self.store, day="2026-09-28", owner="chris")[0]
+        weekly.mark_slot(self.store, int(slot["id"]), status="rerunning", job_key=None, reset_job_key=True)
+        weekly.reconcile_zombie_weekly_slots(self.store)
+        row = self.store._conn.execute(
+            "SELECT status FROM weekly_slots WHERE id = ?", (slot["id"],)
+        ).fetchone()
+        self.assertEqual(row["status"], "queued")
+        self.assertEqual(len(weekly.due_slots(self.store, day="2026-09-28", owner="chris")), 1)
+
     def test_requeue_failed_slot(self) -> None:
         weekly.save_slots(
             self.store,
