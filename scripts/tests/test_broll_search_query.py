@@ -51,6 +51,14 @@ class BrollSearchQueryTests(unittest.TestCase):
         self.assertFalse(wants_vehicle(BRIEF))
         self.assertTrue(wants_vehicle("porsche 911 gt3 exterior 60fps"))
 
+    def test_weekly_hike_sunrise_expands(self) -> None:
+        queries = expand_broll_search_queries("Dark 5AM hike → sunrise")
+        self.assertGreaterEqual(len(queries), 2)
+        blob = " ".join(queries).lower()
+        self.assertIn("hiking", blob)
+        self.assertIn("sunrise", blob)
+        self.assertFalse(is_storyboard_query("Dark 5AM hike → sunrise"))
+
     def test_to_storyboard_still_finds_road_city_car(self) -> None:
         brief = (
             "Dark early-morning bedroom → alarm / shoes / empty road to gym "

@@ -6,6 +6,8 @@ import re
 
 BEAT_SPLIT = re.compile(r"[→>]|/{1}|\bor\b|\bto\b", re.IGNORECASE)
 STORYBOARD_MARK = re.compile(r"[→>]| then |\s/\s|\sto\s", re.IGNORECASE)
+# Single arrow or "X to Y" edit briefs (weekly visual lines), not full storyboards.
+SIMPLE_BEAT = re.compile(r"^[→>]|→|->", re.IGNORECASE)
 WEAK_BEAT = frozenset(
     {
         "alarm",
@@ -30,6 +32,13 @@ SCENE_SEARCHES: tuple[tuple[str, str], ...] = (
     ("porsche", "porsche exterior driving 60fps"),
     ("ferrari", "ferrari exterior driving 60fps"),
     ("road", "empty road dawn cinematic 60fps"),
+    ("hike", "mountain hiking trail sunrise cinematic 60fps"),
+    ("hiking", "mountain hiking trail sunrise cinematic 60fps"),
+    ("trail", "mountain trail sunrise cinematic 60fps"),
+    ("beach", "empty beach dawn cinematic 60fps"),
+    ("ocean", "ocean sunrise drone cinematic 60fps"),
+    ("mountain", "snow mountain peak cinematic 60fps"),
+    ("peak", "mountain peak sunrise cinematic 60fps"),
     ("highway", "empty highway dawn cinematic 60fps"),
     ("apartment", "luxury penthouse window skyline view cinematic 60fps"),
     ("penthouse", "penthouse window city skyline view cinematic 60fps"),
@@ -41,7 +50,15 @@ def is_storyboard_query(query: str) -> bool:
     text = (query or "").strip()
     if not text:
         return False
-    return bool(STORYBOARD_MARK.search(text)) or text.count("/") >= 2
+    if text.count("/") >= 2:
+        return True
+    if not STORYBOARD_MARK.search(text):
+        return False
+    # One transition (hike → sunrise): expand beats, not multi-scene montage storyboard.
+    if SIMPLE_BEAT.search(text) and text.count("→") + text.count("->") <= 1:
+        beats = _beats(text)
+        return len(beats) > 2
+    return True
 
 
 def _beats(query: str) -> list[str]:
@@ -70,22 +87,31 @@ def _searches_for_beat(beat: str) -> list[str]:
     return [query]
 
 
-def expand_broll_search_queries(query: str) -> list[str]:
-    """Return one or more YouTube searches. Storyboards become scene queries."""
-    text = (query or "").strip()
-    if not text:
-        return []
-    if not is_storyboard_query(text):
-        return [text]
+def _collect_beat_searches(query: str) -> list[str]:
     found: list[str] = []
     seen: set[str] = set()
-    for beat in _beats(text):
+    for beat in _beats(query):
         for search in _searches_for_beat(beat):
             if search in seen:
                 continue
             seen.add(search)
             found.append(search)
-    return found or [re.sub(r"[→>/]+", " ", text).strip()]
+    return found
+
+
+def expand_broll_search_queries(query: str) -> list[str]:
+    """Return one or more YouTube searches. Storyboards become scene queries."""
+    text = (query or "").strip()
+    if not text:
+        return []
+    if STORYBOARD_MARK.search(text) or "->" in text:
+        found = _collect_beat_searches(text)
+        if found:
+            return found
+    if is_storyboard_query(text):
+        found = _collect_beat_searches(text)
+        return found or [re.sub(r"[→>/]+", " ", text).strip()]
+    return [text]
 
 
 def gate_subject_for_query(query: str, subject: str = "") -> str:

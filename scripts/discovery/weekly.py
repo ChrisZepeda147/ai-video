@@ -425,7 +425,7 @@ def activate_plans_for_day(store, *, day: str) -> None:
 
 
 def reconcile_zombie_weekly_slots(store) -> int:
-    """Clear weekly rows stuck running/rerunning with no live command job (API reload mid-batch)."""
+    """Clear weekly rows stuck running with no live job. Queued/rerunning without job_key stays eligible."""
     ensure_weekly_tables(store)
     rows = store._conn.execute(
         """
@@ -440,14 +440,25 @@ def reconcile_zombie_weekly_slots(store) -> int:
         slot_id = int(row["id"])
         job_key = str(row["job_key"] or "").strip()
         if not job_key:
-            mark_slot(
-                store,
-                slot_id,
-                status="failed",
-                job_key=None,
-                error="Batch interrupted (no active job — often API restart). Run this day again.",
-                reset_job_key=True,
-            )
+            st = str(row["status"] or "")
+            if st == "rerunning":
+                mark_slot(
+                    store,
+                    slot_id,
+                    status="queued",
+                    job_key=None,
+                    error="",
+                    reset_job_key=True,
+                )
+            else:
+                mark_slot(
+                    store,
+                    slot_id,
+                    status="failed",
+                    job_key=None,
+                    error="Batch interrupted (no active job — often API restart). Run this day again.",
+                    reset_job_key=True,
+                )
             cleared += 1
             plan_ids.add(int(row["plan_id"]))
             continue
@@ -623,7 +634,7 @@ def requeue_slot(store, slot_id: int) -> bool:
     store._conn.execute(
         """
         UPDATE weekly_slots
-        SET status = 'rerunning', job_key = NULL, error_message = NULL, updated_at = ?
+        SET status = 'queued', job_key = NULL, error_message = NULL, updated_at = ?
         WHERE id = ?
         """,
         (ts, slot_id),

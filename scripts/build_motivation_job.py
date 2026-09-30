@@ -59,6 +59,7 @@ from toolchain_env import (
     subprocess_env,
 )
 from build_stills_slideshow import burn_captions, normalize_caption_align, parse_json3_words
+from broll_search_query import expand_broll_search_queries, gate_subject_for_query
 from youtube_popular_downloader import (
     VideoCandidate,
     discover_search,
@@ -1678,26 +1679,18 @@ def broll_download_plan(
     return resolved_limit, resolved_clip_length, resolved_max_parts
 
 
-def prepare_broll(
+def _discover_broll_candidates_for_search(
+    search_query: str,
     *,
-    clips_dir: Path,
-    query: str,
     limit: int,
-    clip_length: int,
-    max_parts: int | None,
+    subject: str,
     min_views: int,
     min_duration: int,
-    start_offset: float = 0.0,
-    subject: str = "",
-    use_vision: bool = True,
-    frame_gate: bool = True,
-    reuse_policy: str = "allow",
-    jobs_root: Path | None = None,
-    split_full_source: bool = True,
-) -> list[str]:
-    raw = discover_search(query=query, limit=max(limit * 4, 16))
-    if not title_suggests_usable_fps(query):
-        extra = discover_search(query=f"{query} 60fps", limit=max(limit * 3, 12))
+    reuse_policy: str,
+) -> list[VideoCandidate]:
+    raw = discover_search(query=search_query, limit=max(limit * 4, 16))
+    if not title_suggests_usable_fps(search_query):
+        extra = discover_search(query=f"{search_query} 60fps", limit=max(limit * 3, 12))
         seen = {item.video_id for item in raw}
         raw = [*extra, *[item for item in raw if item.video_id not in seen]]
     used = used_ids()
@@ -1705,7 +1698,7 @@ def prepare_broll(
         pool = [item for item in raw if item.video_id not in used]
     else:
         pool = list(raw)
-    wanted = subject_tokens(query, subject)
+    wanted = subject_tokens(search_query, subject)
     if wanted:
         titled = [item for item in pool if title_matches_subject(item.title, wanted)]
         if titled:
@@ -1713,7 +1706,7 @@ def prepare_broll(
             pool = titled
         elif reuse_policy != "require_new":
             print(f"No B-roll title matched {wanted}; using search hits")
-    if wants_vehicle(subject or query):
+    if wants_vehicle(subject or search_query):
         outside = [item for item in pool if not is_cabin_titled(item)]
         cabin = [item for item in pool if is_cabin_titled(item)]
         if outside and cabin:
@@ -1732,13 +1725,70 @@ def prepare_broll(
     candidates = pick_usable_fps_candidates(candidates, limit=limit)
     if reuse_policy == "prefer_new":
         candidates.sort(key=lambda item: item.video_id in used)
+    return candidates
+
+
+def prepare_broll(
+    *,
+    clips_dir: Path,
+    query: str,
+    limit: int,
+    clip_length: int,
+    max_parts: int | None,
+    min_views: int,
+    min_duration: int,
+    start_offset: float = 0.0,
+    subject: str = "",
+    use_vision: bool = True,
+    frame_gate: bool = True,
+    reuse_policy: str = "allow",
+    jobs_root: Path | None = None,
+    split_full_source: bool = True,
+) -> list[str]:
+    search_queries = expand_broll_search_queries(query) or [query]
+    if len(search_queries) > 1:
+        gate = ""
+    else:
+        gate_subject = gate_subject_for_query(query, subject or query)
+        gate = gate_subject or subject or query
+    token_fallback = " ".join(subject_tokens(query, subject)[:4])
+    if token_fallback and "60fps" not in token_fallback.lower():
+        token_fallback = f"{token_fallback} cinematic 60fps"
+    if token_fallback and token_fallback not in search_queries:
+        search_queries = [*search_queries, token_fallback]
+
+    candidates: list[VideoCandidate] = []
+    seen_ids: set[str] = set()
+    for search_query in search_queries:
+        batch = _discover_broll_candidates_for_search(
+            search_query,
+            limit=limit,
+            subject=gate,
+            min_views=min_views,
+            min_duration=min_duration,
+            reuse_policy=reuse_policy,
+        )
+        if batch:
+            print(f"B-roll candidates from search: {search_query!r} ({len(batch)})")
+        for item in batch:
+            if item.video_id in seen_ids:
+                continue
+            seen_ids.add(item.video_id)
+            candidates.append(item)
+        if len(candidates) >= limit:
+            break
+
     if not candidates:
         if reuse_policy == "require_new":
             raise MotivationJobError(
                 "REUSE_RESTRICTION",
                 f"No unused B-roll for query: {query}",
             )
-        raise MotivationJobError("NO_CANDIDATE_FOUND", f"No B-roll candidates for query: {query}")
+        tried = ", ".join(search_queries[:6])
+        raise MotivationJobError(
+            "NO_CANDIDATE_FOUND",
+            f"No B-roll candidates for query: {query} (tried: {tried})",
+        )
     return download_broll_candidates(
         clips_dir,
         candidates,
