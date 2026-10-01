@@ -1362,7 +1362,12 @@ def combinations_sync_catalog_endpoint(
     body = body or {}
     pruned = prune_stale_combination_catalog(store) if body.get("prune_missing", True) else {}
     synced = sync_visual_packs(store)
-    return {"synced": len(synced), "pruned": pruned}
+    usage = None
+    if body.get("sync_usage"):
+        from discovery.combinations import sync_combination_usage_from_posted_videos
+
+        usage = sync_combination_usage_from_posted_videos(store, owner=body.get("owner"))
+    return {"synced": len(synced), "pruned": pruned, "usage_sync": usage}
 
 
 @app.post("/api/library/combinations/status")
