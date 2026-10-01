@@ -610,6 +610,24 @@ def _usage_for_pair(
     return dict(row) if row else None
 
 
+def pair_used_by_any_owner(
+    store,
+    *,
+    audio_component_id: int,
+    visual_pack_id: int,
+) -> bool:
+    """True if Chris or Stephen already used this audio + visual pairing."""
+    row = store._conn.execute(
+        """
+        SELECT 1 FROM production_combination_usage
+        WHERE audio_component_id = ? AND visual_pack_id = ?
+        LIMIT 1
+        """,
+        (audio_component_id, visual_pack_id),
+    ).fetchone()
+    return row is not None
+
+
 def combination_status(
     store,
     *,
@@ -636,16 +654,18 @@ def combination_status(
             available = False
         elif other_use:
             status = "used_by_other_owner"
-            available = True
+            available = False
         else:
             status = "available"
             available = True
 
         prior_ids: list[int] = []
-        if own and own.get("rendered_video_id"):
-            prior_ids.append(int(own["rendered_video_id"]))
-        if other_use and other_use.get("rendered_video_id"):
-            prior_ids.append(int(other_use["rendered_video_id"]))
+        for usage in (own, other_use):
+            if not usage or not usage.get("rendered_video_id"):
+                continue
+            vid = int(usage["rendered_video_id"])
+            if vid not in prior_ids:
+                prior_ids.append(vid)
 
         visual_items.append(
             {

@@ -22,14 +22,13 @@ type Owner = "chris" | "stephen";
 
 function statusClasses(status: CombinationVisualStatus["status"]) {
   if (status === "available") return "border-emerald-800 bg-emerald-950/40 text-emerald-200";
-  if (status === "used_by_selected_owner") return "border-red-800 bg-red-950/40 text-red-200";
-  return "border-amber-800 bg-amber-950/40 text-amber-200";
+  return "border-red-800 bg-red-950/40 text-red-200";
 }
 
 function statusLabel(item: CombinationVisualStatus, owner: Owner) {
   if (item.status === "available") return "Available";
-  if (item.status === "used_by_selected_owner") return `Used by ${owner}`;
-  return `Used by ${item.other_owner || "other owner"}`;
+  if (item.status === "used_by_selected_owner") return `Used (${owner})`;
+  return `Used (${item.other_owner || "other owner"})`;
 }
 
 export function CombinationsWorkspace() {
@@ -144,8 +143,12 @@ export function CombinationsWorkspace() {
 
   async function handleRender() {
     if (!selectedAudioId || !selectedPackId) return;
-    if (selectedPairing?.used_by_selected_owner && !forceRender) {
-      setMessage("This exact pairing was already used for this owner. Check “Use anyway” to render.");
+    if (selectedPairing && !selectedPairing.available && !forceRender) {
+      const who =
+        selectedPairing.status === "used_by_other_owner"
+          ? selectedPairing.other_owner || "the other owner"
+          : owner;
+      setMessage(`This pairing is already used (${who}). Check “Use anyway” only for a deliberate remake.`);
       return;
     }
     setBusy(true);
@@ -179,8 +182,8 @@ export function CombinationsWorkspace() {
     <div className="space-y-8">
       <section className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
         <p className="text-sm text-zinc-400">
-          Combine reusable audio + visual packs. Pairing memory is per owner — same combo can be green for Stephen
-          after Chris used it (yellow warning).
+          Combine reusable audio + visual packs. Pairing memory is shared for Chris and Stephen — if either posted a
+          combo, it shows red for both so you do not duplicate the other account&apos;s post.
         </p>
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Owner</span>
@@ -363,8 +366,8 @@ export function CombinationsWorkspace() {
                       {visual?.rendered_video_ids?.length ? (
                         <p className="mt-1 text-[11px] opacity-80">
                           Video{" "}
-                          {visual.rendered_video_ids.map((id, index) => (
-                            <span key={id}>
+                          {[...new Set(visual.rendered_video_ids)].map((id, index) => (
+                            <span key={`${packId}-video-${id}`}>
                               {index > 0 ? ", " : null}
                               <Link href={`/library/${id}`} className="text-violet-300 hover:underline">
                                 #{id}
@@ -441,11 +444,14 @@ export function CombinationsWorkspace() {
                   Output length: {formatDuration(outputDurationSec)} — visual montage matched to audio
                 </p>
               ) : null}
-              {selectedPairing?.used_by_other_owner ? (
-                <p className="mt-2 text-amber-300">Warning: used on {selectedPairing.other_owner}&apos;s channel.</p>
-              ) : null}
-              {selectedPairing?.used_by_selected_owner ? (
-                <p className="mt-2 text-red-300">Already rendered for {owner}.</p>
+              {selectedPairing && !selectedPairing.available ? (
+                <p className="mt-2 text-red-300">
+                  Already used on shared channel
+                  {selectedPairing.status === "used_by_other_owner"
+                    ? ` (${selectedPairing.other_owner})`
+                    : ` (${owner})`}
+                  .
+                </p>
               ) : null}
             </div>
             <div className="space-y-2">
@@ -481,7 +487,7 @@ export function CombinationsWorkspace() {
               ) : null}
               <label className="flex items-center gap-2 text-xs text-zinc-400">
                 <input type="checkbox" checked={forceRender} onChange={(e) => setForceRender(e.target.checked)} />
-                Use anyway (same owner duplicate pairing)
+                Use anyway (override shared pairing lock)
               </label>
             </div>
           </div>

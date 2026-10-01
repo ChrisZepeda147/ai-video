@@ -92,7 +92,7 @@ class CombinationTests(unittest.TestCase):
         self.assertIn("Andrew Tate", catalog["audio_by_speaker"])
         self.assertGreaterEqual(catalog["visual_pack_count"], 1)
 
-    def test_owner_separate_usage_and_cross_owner_warning(self) -> None:
+    def test_shared_channel_blocks_both_owners_after_one_posts(self) -> None:
         record_combination_usage(
             self.store,
             owner="chris",
@@ -108,7 +108,28 @@ class CombinationTests(unittest.TestCase):
         self.assertTrue(chris_item["used_by_selected_owner"])
         self.assertFalse(chris_item["available"])
         self.assertTrue(stephen_item["used_by_other_owner"])
-        self.assertTrue(stephen_item["available"])
+        self.assertFalse(stephen_item["available"])
+
+    def test_rendered_video_ids_deduped_when_both_owners_share_library_video(self) -> None:
+        record_combination_usage(
+            self.store,
+            owner="chris",
+            audio_component_id=self.audio_id,
+            visual_pack_id=self.pack_id,
+            rendered_video_id=self.video_id,
+            force=True,
+        )
+        record_combination_usage(
+            self.store,
+            owner="stephen",
+            audio_component_id=self.audio_id,
+            visual_pack_id=self.pack_id,
+            rendered_video_id=self.video_id,
+            force=True,
+        )
+        chris = combination_status(self.store, owner="chris", audio_component_id=self.audio_id)
+        item = next(v for v in chris["visuals"] if int(v["visual_pack_id"]) == self.pack_id)
+        self.assertEqual(item["rendered_video_ids"], [self.video_id])
 
     def test_posting_status_records_combination_usage(self) -> None:
         update_video_posting_status(
@@ -172,6 +193,27 @@ class CombinationTests(unittest.TestCase):
         tate = [item for item in audio if item["speaker"] == "Andrew Tate"]
         self.assertEqual(len(tate), 1)
         self.assertTrue(tate[0]["display_id"].endswith("A"))
+
+    @patch("build_motivation_job.render_job")
+    @patch("build_clips_montage.probe_duration", return_value=67.0)
+    def test_render_blocked_when_other_owner_used_pairing(self, _probe, mock_render) -> None:
+        record_combination_usage(
+            self.store,
+            owner="chris",
+            audio_component_id=self.audio_id,
+            visual_pack_id=self.pack_id,
+            rendered_video_id=self.video_id,
+            force=True,
+        )
+        with self.assertRaises(ValueError) as ctx:
+            render_combination(
+                self.store,
+                owner="stephen",
+                audio_component_id=self.audio_id,
+                visual_pack_id=self.pack_id,
+            )
+        self.assertIn("shared channel", str(ctx.exception).lower())
+        self.assertFalse(mock_render.called)
 
     @patch("build_motivation_job.render_job")
     @patch("build_clips_montage.probe_duration", return_value=67.0)

@@ -17,6 +17,7 @@ from discovery.combinations import (
     get_audio_component,
     get_visual_pack,
     normalize_owner,
+    pair_used_by_any_owner,
     record_combination_usage,
 )
 from discovery.config import project_root
@@ -196,6 +197,15 @@ def render_combination(
     pack = get_visual_pack(store, visual_pack_id)
     if not pack:
         raise ValueError(f"Visual pack {visual_pack_id} not found")
+
+    if not force_usage and pair_used_by_any_owner(
+        store,
+        audio_component_id=audio_component_id,
+        visual_pack_id=visual_pack_id,
+    ):
+        raise ValueError(
+            "This audio + visual pairing is already used on the shared channel (Chris and Stephen)."
+        )
 
     root = project_root()
     audio_path = root / str(audio["local_path"])
