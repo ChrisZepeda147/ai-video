@@ -1,4 +1,7 @@
 # Pause montage / weekly renders on THIS machine (cancel DB jobs + kill worker processes).
+param(
+    [switch]$KillOnly
+)
 $ErrorActionPreference = "Continue"
 $Root = Split-Path -Parent $PSScriptRoot
 $Scripts = $PSScriptRoot
@@ -8,22 +11,24 @@ Set-Location $Root
 Import-ApiEnvFile -Root $Root
 Import-DevPath
 
-$Python = Resolve-PythonExe
-if (-not $Python) {
-    Write-Error "Python not found."
-    exit 1
-}
-
-$ownerArg = @()
-if ($args -contains "--owner") {
-    $i = [array]::IndexOf($args, "--owner")
-    if ($i -ge 0 -and $i + 1 -lt $args.Count) {
-        $ownerArg = @("--owner", $args[$i + 1])
+if (-not $KillOnly) {
+    $Python = Resolve-PythonExe
+    if (-not $Python) {
+        Write-Error "Python not found."
+        exit 1
     }
-}
 
-& $Python (Join-Path $Scripts "pause_production.py") @ownerArg
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $ownerArg = @()
+    if ($args -contains "--owner") {
+        $i = [array]::IndexOf($args, "--owner")
+        if ($i -ge 0 -and $i + 1 -lt $args.Count) {
+            $ownerArg = @("--owner", $args[$i + 1])
+        }
+    }
+
+    & $Python (Join-Path $Scripts "pause_production.py") @ownerArg
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
 
 function Stop-ProcessTree {
     param([int]$ProcessId)

@@ -945,6 +945,28 @@ export async function postWeeklyRetrySlot(slotId: number) {
   );
 }
 
+export async function postWeeklyRestartDay(body: {
+  day: string;
+  owner: string;
+  run_after?: boolean;
+  kill_workers?: boolean;
+  wait_timeout_minutes?: number;
+}) {
+  return fetchJson<{
+    day: string;
+    owner: string;
+    jobs_cancelled: number;
+    slots_reset: number;
+    job_keys: string[];
+    batch?: { count?: number; error?: string; deferred?: boolean };
+  }>(buildUrl("/api/weekly/restart-day"), {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: internalHeaders(),
+    signal: AbortSignal.timeout(4 * 60 * 60 * 1000),
+  });
+}
+
 export async function postWeeklyRunDue(body: {
   day: string;
   owner?: string;

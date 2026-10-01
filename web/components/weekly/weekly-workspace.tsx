@@ -8,6 +8,7 @@ import {
   fetchWeeklyHealth,
   postWeeklyApplyPaste,
   postWeeklyParsePaste,
+  postWeeklyRestartDay,
   postWeeklyRetrySlot,
   postWeeklyRunDue,
   postWeeklySlots,
@@ -344,6 +345,45 @@ export function WeeklyWorkspace() {
     }
   }
 
+  async function onRestartBatch() {
+    const label = DAY_LABEL[activeDay as WeekDayId] ?? activeDay;
+    if (
+      !window.confirm(
+        `Stop any stuck montage worker, reset incomplete ${label} videos, and run the batch again?`,
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setStatus(`Restarting ${label} batch — stopping workers, then rendering 1→2→3…`);
+    try {
+      const res = await postWeeklyRestartDay({
+        day: batchDayIso,
+        owner,
+        run_after: true,
+        kill_workers: true,
+      });
+      if (!res.ok) {
+        setStatus(res.message);
+        return;
+      }
+      const d = res.data;
+      const batch = d.batch;
+      if (batch?.error) {
+        setStatus(`Restart partial: ${batch.error}`);
+      } else if (batch?.deferred) {
+        setStatus("Restart queued DB state — montage deferred (queue busy). Run again in a minute.");
+      } else {
+        setStatus(
+          `Restart done — cancelled ${d.jobs_cancelled} job(s), reset ${d.slots_reset} slot(s), completed ${batch?.count ?? 0} montage(s).`,
+        );
+      }
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function retrySlot(slotId: number) {
     setBusy(true);
     setStatus("Retrying slot — direct montage (may take up to ~45 min)…");
@@ -514,6 +554,17 @@ export function WeeklyWorkspace() {
           >
             {busy ? `Rendering ${runTarget.label}…` : `Run ${runTarget.label} now (3 videos)`}
           </button>
+          {(anyRunning || (dayProgress && !dayProgress.complete && (dayProgress.running > 0 || dayProgress.failed > 0))) &&
+          activeDay === runTarget.dayId ? (
+            <button
+              type="button"
+              onClick={onRestartBatch}
+              disabled={busy}
+              className="rounded-lg border border-amber-600/60 bg-amber-950/40 px-4 py-2 text-sm font-medium text-amber-100 disabled:opacity-50"
+            >
+              Restart {DAY_LABEL_SHORT[activeDay]} batch
+            </button>
+          ) : null}
         </div>
         <textarea
           value={pasteText}
@@ -612,6 +663,20 @@ export function WeeklyWorkspace() {
           >
             Suggested focus: {DAY_LABEL_SHORT[progress.focus_day]} (click any day tab above)
           </button>
+        ) : null}
+
+        {!dayProgress?.complete && (anyRunning || dayMorning?.outcome === "in_progress") ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={onRestartBatch}
+              disabled={busy}
+              className="rounded-lg border border-amber-600/60 bg-amber-950/40 px-3 py-1.5 text-xs font-medium text-amber-100 disabled:opacity-50"
+            >
+              Taking too long? Restart this day&apos;s batch
+            </button>
+            <span className="text-[11px] text-zinc-500">Stops worker, resets incomplete slots, runs 1→2→3 again.</span>
+          </div>
         ) : null}
 
         {dayOutcomeLabel ? (

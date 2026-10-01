@@ -1138,6 +1138,113 @@ def tail_weekly_log(*, lines: int = 80) -> str:
     return "\n".join(chunks)
 
 
+def restart_weekly_day_batch(
+    store,
+    *,
+    day: str,
+    owner: str,
+    run_after: bool = True,
+    kill_workers: bool = True,
+    wait_timeout_sec: int = 14_400,
+    submit_fn=None,
+) -> dict[str, Any]:
+    """Cancel stuck montage jobs for one calendar day, reset incomplete slots, optionally re-run."""
+    from discovery.production_pause import kill_local_montage_workers
+
+    ensure_weekly_tables(store)
+    owner_norm = normalize_owner(owner)
+    target = date.fromisoformat(day)
+    monday = week_start_monday(target).isoformat()
+    weekday = DAYS[target.weekday()]
+    reason = "Restarted from Weekly — previous run stopped"
+
+    rows = store._conn.execute(
+        """
+        SELECT s.id, s.job_key, s.status
+        FROM weekly_slots s
+        JOIN weekly_plans p ON p.id = s.plan_id
+        WHERE p.week_start = ? AND s.day = ? AND p.owner = ?
+          AND s.status != 'done'
+        ORDER BY s.slot
+        """,
+        (monday, weekday, owner_norm),
+    ).fetchall()
+
+    job_keys: set[str] = set()
+    slots_reset = 0
+    for row in rows:
+        key = str(row["job_key"] or "").strip()
+        if key:
+            job_keys.add(key)
+        st = str(row["status"] or "")
+        if st == "queued" and not key:
+            continue
+        if st not in {"running", "rerunning", "failed", "queued"}:
+            continue
+        mark_slot(
+            store,
+            int(row["id"]),
+            status="queued",
+            job_key=None,
+            error="",
+            reset_job_key=True,
+        )
+        store._conn.execute(
+            "UPDATE weekly_slots SET render_started_at = NULL WHERE id = ?",
+            (int(row["id"]),),
+        )
+        slots_reset += 1
+    store._conn.commit()
+
+    extra_running = store._conn.execute(
+        "SELECT job_key FROM cursor_command_jobs WHERE status IN ('running', 'queued')"
+    ).fetchall()
+    for row in extra_running:
+        job_keys.add(str(row["job_key"]))
+
+    cancelled: list[str] = []
+    ts = _now()
+    for key in sorted(job_keys):
+        store._conn.execute(
+            """
+            UPDATE cursor_command_jobs
+            SET status = 'cancelled', error_message = ?, completed_at = ?
+            WHERE job_key = ? AND status IN ('running', 'queued')
+            """,
+            (reason, ts, key),
+        )
+        cancelled.append(key)
+    store._conn.commit()
+
+    killed = 0
+    if kill_workers:
+        killed = kill_local_montage_workers(project_root())
+
+    weekly_reconcile_pipeline(store)
+    out: dict[str, Any] = {
+        "day": day,
+        "owner": owner_norm,
+        "jobs_cancelled": len(cancelled),
+        "job_keys": cancelled,
+        "slots_reset": slots_reset,
+        "workers_killed": killed,
+    }
+    if run_after:
+        out["batch"] = run_weekly_due_batch(
+            store,
+            day=day,
+            owner=owner_norm,
+            limit=VIDEOS_PER_DAY,
+            dry_run=False,
+            serial=True,
+            wait_complete=True,
+            wait_timeout_sec=wait_timeout_sec,
+            retry_failed=False,
+            submit_fn=submit_fn,
+        )
+    return out
+
+
 def run_weekly_retry_slot(
     store,
     slot_id: int,

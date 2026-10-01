@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 from discovery.config import default_db_path, project_root
 from discovery.store import DiscoveryStore
@@ -70,6 +73,37 @@ def pause_local_production(
         "job_keys": job_keys,
         "slots_reset": len(slot_rows),
     }
+
+
+def kill_local_montage_workers(root: Path | None = None) -> int:
+    """Stop detached run_direct_job / build_motivation_job / motivational ffmpeg (Windows)."""
+    root = root or project_root()
+    if sys.platform != "win32":
+        return 0
+    script = root / "scripts" / "pause_production.ps1"
+    if not script.is_file():
+        return 0
+    try:
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(script),
+                "-KillOnly",
+            ],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.stdout:
+            print(result.stdout.strip())
+        return 0 if result.returncode == 0 else result.returncode
+    except (OSError, subprocess.TimeoutExpired):
+        return 1
 
 
 def main() -> int:

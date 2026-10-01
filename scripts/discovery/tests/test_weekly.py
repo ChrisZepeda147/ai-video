@@ -237,6 +237,53 @@ class TestWeekly(unittest.TestCase):
         )
         self.assertEqual(result["due_count"], 1)
 
+    def test_restart_day_cancels_job_and_requeues_slot(self) -> None:
+        weekly.save_slots(
+            self.store,
+            week_start="2026-09-28",
+            owner="chris",
+            slots=[{"day": "wed", "slot": 1, "speaker": "A", "visual_direction": "v"}],
+        )
+        slot = self.store._conn.execute(
+            "SELECT id FROM weekly_slots ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        self.store._conn.execute(
+            """
+            INSERT INTO cursor_command_jobs
+                (job_key, user_command, enriched_prompt, status, created_at, started_at)
+            VALUES (?, ?, ?, 'running', ?, ?)
+            """,
+            ("cmd_stuck", "x", "x", "2026-10-01T00:00:00", "2026-10-01T00:00:00"),
+        )
+        self.store._conn.commit()
+        weekly.mark_slot(self.store, int(slot["id"]), status="running", job_key="cmd_stuck")
+        from unittest.mock import patch
+
+        def fake_batch(*_a, **_k):
+            return {"count": 0}
+
+        with patch("discovery.production_pause.kill_local_montage_workers", return_value=0), patch(
+            "discovery.weekly.run_weekly_due_batch", side_effect=fake_batch
+        ) as mock_run:
+            out = weekly.restart_weekly_day_batch(
+                self.store,
+                day="2026-09-30",
+                owner="chris",
+                run_after=True,
+                kill_workers=False,
+            )
+        self.assertEqual(out["jobs_cancelled"], 1)
+        self.assertEqual(out["slots_reset"], 1)
+        st = self.store._conn.execute(
+            "SELECT status FROM weekly_slots WHERE id = ?", (slot["id"],)
+        ).fetchone()
+        self.assertEqual(st["status"], "queued")
+        job = self.store._conn.execute(
+            "SELECT status FROM cursor_command_jobs WHERE job_key = 'cmd_stuck'"
+        ).fetchone()
+        self.assertEqual(job["status"], "cancelled")
+        mock_run.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
