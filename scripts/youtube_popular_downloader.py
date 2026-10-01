@@ -471,7 +471,7 @@ def _format_duration(seconds: float | None) -> str:
 
 def max_parts_per_source_cap() -> int | None:
     """When splitting a full download, cap part count so hour-long uploads do not explode."""
-    raw = os.environ.get("BROLL_MAX_PARTS_PER_SOURCE", "36").strip()
+    raw = os.environ.get("BROLL_MAX_PARTS_PER_SOURCE", "8").strip()
     if not raw or raw.lower() in {"0", "none", "unlimited"}:
         return None
     try:
