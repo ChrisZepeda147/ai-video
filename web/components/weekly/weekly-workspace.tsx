@@ -49,6 +49,19 @@ const DAY_LABEL_SHORT: Record<string, string> = {
   sun: "Sun",
 };
 
+function formatBatchStarted(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 function emptyGrid(): Record<SlotKey, SlotCell> {
   return Object.fromEntries(
     WEEK_DAYS.flatMap((d) =>
@@ -541,10 +554,12 @@ export function WeeklyWorkspace() {
             const row = progress?.days.find((x) => x.day === d);
             const isFocus = d === activeDay;
             const complete = row?.complete;
+            const started = formatBatchStarted(row?.batch_started_at);
             return (
               <button
                 key={d}
                 type="button"
+                title={started ? `${DAY_LABEL_SHORT[d]} batch started ${started}` : undefined}
                 onClick={() => selectFocusDay(d as WeekDayId)}
                 className={`rounded-lg px-3 py-2 text-xs font-medium capitalize ${
                   isFocus
@@ -560,6 +575,18 @@ export function WeeklyWorkspace() {
             );
           })}
         </div>
+
+        {progress?.days.some((d) => d.batch_started_at) ? (
+          <ul className="mt-2 space-y-0.5 text-[11px] text-zinc-500">
+            {progress.days
+              .filter((d) => d.batch_started_at)
+              .map((d) => (
+                <li key={d.day}>
+                  {DAY_LABEL_SHORT[d.day]} started {formatBatchStarted(d.batch_started_at)}
+                </li>
+              ))}
+          </ul>
+        ) : null}
 
         <p className="mt-3 text-sm text-zinc-400">
           {progress?.week_complete
@@ -594,6 +621,12 @@ export function WeeklyWorkspace() {
             </p>
             {dayMorning ? (
               <p className="mt-1 text-xs opacity-90">
+                {dayMorning.batch_started_at ? (
+                  <>
+                    Batch started {formatBatchStarted(dayMorning.batch_started_at)}
+                    {" · "}
+                  </>
+                ) : null}
                 7am submitted: {dayMorning.morning_submitted ? "yes" : "no"}
                 {dayMorning.catchup_ran ? " · catch-up ran on API start" : ""}
                 {" · "}

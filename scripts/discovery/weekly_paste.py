@@ -233,6 +233,12 @@ def build_week_progress(slots: list[dict[str, Any]]) -> dict[str, Any]:
                 focus_day = day
         elif total == 0 and focus_day is None and not week_complete:
             pass
+        started_at: list[str] = []
+        for item in items:
+            raw = item.get("render_started_at")
+            if raw:
+                started_at.append(str(raw))
+        batch_started_at = min(started_at) if started_at else None
         day_rows.append(
             {
                 "day": day,
@@ -241,6 +247,7 @@ def build_week_progress(slots: list[dict[str, Any]]) -> dict[str, Any]:
                 "complete": complete,
                 "running": sum(1 for st in statuses if st == "running"),
                 "failed": sum(1 for st in statuses if st == "failed"),
+                "batch_started_at": batch_started_at,
             }
         )
 

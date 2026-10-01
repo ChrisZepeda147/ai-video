@@ -94,6 +94,8 @@ def ensure_weekly_tables(store) -> None:
         store._conn.execute(
             "ALTER TABLE weekly_slots ADD COLUMN require_stills_first INTEGER NOT NULL DEFAULT 0"
         )
+    if "render_started_at" not in cols:
+        store._conn.execute("ALTER TABLE weekly_slots ADD COLUMN render_started_at TEXT")
     store._conn.commit()
 
 
@@ -309,6 +311,23 @@ def build_slot_brief(slot: dict[str, Any], *, image_paths: list[str] | None = No
     return compose_from_slot(payload)
 
 
+def enrich_slot_render_times(store, slots: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Backfill render_started_at from command job when the column was added later."""
+    for slot in slots:
+        if slot.get("render_started_at"):
+            continue
+        job_key = str(slot.get("job_key") or "").strip()
+        if not job_key:
+            continue
+        row = store._conn.execute(
+            "SELECT started_at FROM cursor_command_jobs WHERE job_key = ?",
+            (job_key,),
+        ).fetchone()
+        if row and row["started_at"]:
+            slot["render_started_at"] = row["started_at"]
+    return slots
+
+
 def get_week(store, *, week_start: str, owner: str) -> dict[str, Any]:
     ensure_weekly_tables(store)
     weekly_reconcile_pipeline(store)
@@ -330,6 +349,7 @@ def get_week(store, *, week_start: str, owner: str) -> dict[str, Any]:
             (row["id"],),
         ).fetchall()
     ]
+    slots = enrich_slot_render_times(store, slots)
     from discovery.weekly_paste import build_week_progress
 
     return {"plan": dict(row), "slots": slots, "progress": build_week_progress(slots)}
@@ -536,15 +556,21 @@ def mark_slot(
     reset_job_key: bool = False,
 ) -> None:
     ensure_weekly_tables(store)
+    ts = _now()
+    touch_render_start = status in ("running", "rerunning")
     if reset_job_key:
         store._conn.execute(
             """
             UPDATE weekly_slots
             SET status = ?, job_key = ?, video_id = COALESCE(?, video_id),
-                error_message = ?, updated_at = ?
+                error_message = ?, updated_at = ?,
+                render_started_at = CASE
+                    WHEN ? THEN COALESCE(render_started_at, ?)
+                    ELSE render_started_at
+                END
             WHERE id = ?
             """,
-            (status, job_key, video_id, error, _now(), slot_id),
+            (status, job_key, video_id, error, ts, touch_render_start, ts, slot_id),
         )
     else:
         store._conn.execute(
@@ -552,10 +578,14 @@ def mark_slot(
             UPDATE weekly_slots
             SET status = ?, job_key = COALESCE(?, job_key),
                 video_id = COALESCE(?, video_id),
-                error_message = ?, updated_at = ?
+                error_message = ?, updated_at = ?,
+                render_started_at = CASE
+                    WHEN ? THEN COALESCE(render_started_at, ?)
+                    ELSE render_started_at
+                END
             WHERE id = ?
             """,
-            (status, job_key, video_id, error, _now(), slot_id),
+            (status, job_key, video_id, error, ts, touch_render_start, ts, slot_id),
         )
     store._conn.commit()
 
@@ -634,7 +664,8 @@ def requeue_slot(store, slot_id: int) -> bool:
     store._conn.execute(
         """
         UPDATE weekly_slots
-        SET status = 'queued', job_key = NULL, error_message = NULL, updated_at = ?
+        SET status = 'queued', job_key = NULL, error_message = NULL,
+            render_started_at = NULL, updated_at = ?
         WHERE id = ?
         """,
         (ts, slot_id),
@@ -688,11 +719,38 @@ def past_morning_cutoff(day_iso: str | None = None) -> bool:
     return datetime.now().hour >= hour
 
 
+def day_batch_started_at(store, *, day: str, owner: str | None = None) -> str | None:
+    """Earliest montage start for a calendar day (slot stamp or command job started_at)."""
+    ensure_weekly_tables(store)
+    target = date.fromisoformat(day)
+    monday = week_start_monday(target).isoformat()
+    weekday = DAYS[target.weekday()]
+    query = """
+        SELECT MIN(
+            COALESCE(
+                s.render_started_at,
+                (SELECT j.started_at FROM cursor_command_jobs j WHERE j.job_key = s.job_key)
+            )
+        ) AS started
+        FROM weekly_slots s
+        JOIN weekly_plans p ON p.id = s.plan_id
+        WHERE p.week_start = ? AND s.day = ? AND p.status IN ('ready', 'active')
+    """
+    args: list[Any] = [monday, weekday]
+    if owner:
+        query += " AND p.owner = ?"
+        args.append(normalize_owner(owner))
+    row = store._conn.execute(query, args).fetchone()
+    started = row["started"] if row else None
+    return str(started) if started else None
+
+
 def day_morning_status(store, *, day: str, owner: str | None = None) -> dict[str, Any]:
     """Per-calendar-day batch outcome for 7am + UI checklist."""
     if owner:
         owner = normalize_owner(owner)
     stats = today_slot_stats(store, day=day, owner=owner)
+    batch_started_at = day_batch_started_at(store, day=day, owner=owner)
     filled = sum(stats.values())
     expected = VIDEOS_PER_DAY if filled >= VIDEOS_PER_DAY else max(filled, VIDEOS_PER_DAY)
     last = _read_last_run()
@@ -735,6 +793,7 @@ def day_morning_status(store, *, day: str, owner: str | None = None) -> dict[str
         "catchup_ran": catchup_ran,
         "past_morning_cutoff": past_morning_cutoff(day),
         "last_run": last,
+        "batch_started_at": batch_started_at,
     }
 
 

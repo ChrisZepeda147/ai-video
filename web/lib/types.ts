@@ -1009,6 +1009,7 @@ export type WeeklySlot = {
   video_id?: number | null;
   error_message?: string | null;
   require_stills_first?: boolean;
+  render_started_at?: string | null;
 };
 
 export type WeeklyPlan = {
@@ -1025,6 +1026,8 @@ export type WeeklyDayProgress = {
   complete: boolean;
   running: number;
   failed: number;
+  /** ISO timestamp when first slot for this day entered rendering */
+  batch_started_at?: string | null;
 };
 
 export type WeeklyProgress = {
@@ -1048,6 +1051,7 @@ export type WeeklyDayMorningStatus = {
   catchup_ran: boolean;
   past_morning_cutoff: boolean;
   stats: { queued: number; rerunning?: number; running: number; done: number; failed: number };
+  batch_started_at?: string | null;
 };
 
 export type WeeklyHealthResponse = {
