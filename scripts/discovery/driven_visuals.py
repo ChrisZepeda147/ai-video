@@ -19,7 +19,7 @@ def load_defaults(*, refresh: bool = False) -> dict[str, Any]:
     if _cached is not None and not refresh:
         return _cached
     if not _DEFAULTS_PATH.is_file():
-        _cached = {"preset_id": "fallback", "captions": {"mode": "phrase"}}
+        _cached = {"preset_id": "fallback", "captions": {"mode": "word"}}
         return _cached
     _cached = json.loads(_DEFAULTS_PATH.read_text(encoding="utf-8"))
     return _cached
@@ -98,7 +98,7 @@ def planning_segment_length(
 
 
 def caption_mode_default() -> str:
-    return str((load_defaults().get("captions") or {}).get("mode") or "phrase")
+    return str((load_defaults().get("captions") or {}).get("mode") or "word")
 
 
 def quality_gate_enabled() -> bool:
@@ -173,7 +173,7 @@ def agent_prompt_section(*, brief_overrides: str | None = None) -> str:
         f"then ~{opener.get('settle_beat_min_sec', 2)}–{opener.get('settle_beat_max_sec', 3.5)}s beats.",
         f"- Hook: {captions.get('words_per_phrase_min', 2)}–{captions.get('words_per_phrase_max', 5)} word phrases; "
         "strong 4–7 word hook when it matches speech (within ~1s).",
-        f"- Captions: `{captions.get('mode', 'phrase')}` blocks (not single-word karaoke default).",
+        f"- Captions: `{captions.get('mode', 'word')}` (one word at a time; `--phrase-captions` to opt in to phrases).",
         "- Pattern interrupts: vary shot type/mood every few seconds without cheesy transitions.",
         "- Visual arc supports speech emotion; three daily videos must look distinct.",
         "- No background music unless brief requests it.",
@@ -182,7 +182,7 @@ def agent_prompt_section(*, brief_overrides: str | None = None) -> str:
         "",
         "Motivation montage defaults:",
         "`python scripts/build_motivation_job.py --slug ... --broll-query ...` "
-        "(Driven pacing + phrase captions on by default; `--classic-captions` / `--uniform-pacing` to revert).",
+        "(Driven pacing + one-word captions by default; `--phrase-captions` / `--uniform-pacing` to change).",
         "",
     ]
     if brief_overrides and brief_overrides.strip():

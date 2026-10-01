@@ -1865,6 +1865,37 @@ def production_pause_endpoint(
     return pause_local_production(store, reason=reason, owner=owner)
 
 
+@app.post("/api/weekly/restart-day")
+def weekly_restart_day_endpoint(
+    body: dict,
+    store: Annotated[DiscoveryStore, Depends(get_store)],
+    _: Annotated[None, Depends(require_internal_key)],
+):
+    from discovery.weekly import restart_weekly_day_batch
+
+    day = str(body.get("day") or "").strip()
+    owner = body.get("owner")
+    if not day or not owner:
+        raise HTTPException(status_code=422, detail="day and owner are required")
+    run_after = body.get("run_after", True)
+    if isinstance(run_after, str):
+        run_after = run_after.strip().lower() not in {"0", "false", "no"}
+    kill_workers = body.get("kill_workers", True)
+    if isinstance(kill_workers, str):
+        kill_workers = kill_workers.strip().lower() not in {"0", "false", "no"}
+    try:
+        return restart_weekly_day_batch(
+            store,
+            day=day,
+            owner=str(owner),
+            run_after=bool(run_after),
+            kill_workers=bool(kill_workers),
+            wait_timeout_sec=max(60, int(body.get("wait_timeout_minutes") or 240) * 60),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @app.post("/api/weekly/run-due")
 def weekly_run_due_endpoint(
     body: dict,

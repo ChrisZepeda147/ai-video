@@ -41,7 +41,7 @@ from build_clips_montage import (
     segment_length_for_duration,
     unique_clips_required,
 )
-from discovery.driven_visuals import speech_window_defaults
+from discovery.driven_visuals import caption_mode_default, speech_window_defaults
 from discovery.motivation_paths import (
     default_job_date,
     is_date_folder,
@@ -2188,7 +2188,7 @@ def render_job(
     playback_speed: float = DEFAULT_PLAYBACK_SPEED,
     use_vision: bool = True,
     driven_pacing: bool = True,
-    caption_mode: str = "phrase",
+    caption_mode: str = "word",
     hook_text: str | None = None,
     quality_gate: bool = True,
     segment_gate: bool = True,
@@ -2244,6 +2244,7 @@ def render_job(
         caption_mode=caption_mode,
         hook_text=hook_text,
         caption_align=align,
+        keep_video_audio=False,
     )
     temp_output.unlink(missing_ok=True)
     remux_speech_over_video(captioned, audio, output, audio_start=0.0)
@@ -2340,7 +2341,7 @@ def rerender_existing_job(
     if caption_align:
         payload["caption_align"] = normalize_caption_align(
             caption_align,
-            caption_mode=str(caption_mode or payload.get("caption_mode") or "phrase"),
+            caption_mode=str(caption_mode or payload.get("caption_mode") or caption_mode_default()),
         )
     if caption_mode or caption_align:
         write_job_json(job_path, payload)
@@ -2401,7 +2402,7 @@ def rerender_existing_job(
             playback_speed=float(payload.get("playback_speed") or playback_speed),
             use_vision=use_vision,
             driven_pacing=bool(payload.get("driven_pacing", True)),
-            caption_mode=str(caption_mode or payload.get("caption_mode") or "phrase"),
+            caption_mode=str(caption_mode or payload.get("caption_mode") or caption_mode_default()),
             hook_text=str(payload.get("hook") or "") or None,
             quality_gate=quality_gate,
             segment_gate=segment_gate,
@@ -2522,7 +2523,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--classic-captions",
         action="store_true",
-        help="Revert to single-word captions instead of DrivenVisuals phrase blocks.",
+        help="Same as default: one word at a time (kept for older scripts).",
+    )
+    parser.add_argument(
+        "--phrase-captions",
+        action="store_true",
+        help="Use 2–5 word phrase captions instead of one word at a time.",
     )
     parser.add_argument(
         "--caption-align",
@@ -2642,7 +2648,7 @@ def main() -> int:
             frame_gate=gate_flags.frame_gate,
             segment_gate=gate_flags.segment_gate,
             cursor_review=gate_flags.cursor_review,
-            caption_mode="word" if args.classic_captions else None,
+            caption_mode="phrase" if args.phrase_captions else None,
             caption_align=args.caption_align,
         )
 
@@ -2796,7 +2802,7 @@ def main() -> int:
             frame_gate=gate_flags.frame_gate,
             reuse_policy=reuse_policy,
         )
-        caption_mode = "word" if args.classic_captions else "phrase"
+        caption_mode = "phrase" if args.phrase_captions else caption_mode_default()
         caption_align = normalize_caption_align(args.caption_align, caption_mode=caption_mode)
         render_job(
             jobs_root=jobs_root,

@@ -81,7 +81,7 @@ def compose_montage_command(
     lines.append(f"Visual / B-roll search: {broll}")
     lines.append(
         "Pipeline: download speech from YouTube, scrape captions for the clip, search B-roll for the visual line, "
-        "grade + phrase captions, register in production library."
+        "grade + one-word captions (centered), register in production library. No background music on B-roll unless the brief asks for it."
     )
     lines.append(f"Default target length: {min_seconds}–{max_seconds} seconds unless extra instructions override.")
 

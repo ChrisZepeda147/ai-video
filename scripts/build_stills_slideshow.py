@@ -349,6 +349,7 @@ def burn_captions(
     phrase_min_words: int = 2,
     phrase_max_words: int = 5,
     caption_align: str | None = None,
+    keep_video_audio: bool = True,
 ) -> None:
     ass_path = captions.with_suffix(".burn.ass")
     mode = caption_mode or ("word" if word_by_word else "phrase")
@@ -397,8 +398,11 @@ def burn_captions(
         "fast",
         "-crf",
         "23",
-        "-c:a",
-        "copy",
+        *(
+            ["-c:a", "copy"]
+            if keep_video_audio
+            else ["-an"]
+        ),
         "-movflags",
         "+faststart",
         str(output),
