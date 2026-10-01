@@ -791,11 +791,7 @@ def owners_with_posting_flags(video: dict[str, Any]) -> list[str]:
         manual = (slot or {}).get("manual") or {}
         if any(bool(v) for v in manual.values()):
             found.append(str(name))
-    if found:
-        return sorted(set(found))
-    if video.get("posted") or video.get("used"):
-        return sorted(OWNERS)
-    return []
+    return sorted(set(found))
 
 
 def ensure_combination_usage_for_library_video(
@@ -804,9 +800,9 @@ def ensure_combination_usage_for_library_video(
     *,
     owners: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Record audio+visual pairing from a finished library video for Combination Board."""
+    """Record one audio+visual pairing from a library video (exact pair only, per owner)."""
     sync_visual_packs(store)
-    video = get_video(store, video_id)
+    video = _video_bundle_for_usage_import(store, int(video_id))
     if not video:
         return {"video_id": video_id, "ok": False, "reason": "video_not_found"}
     target_owners = [normalize_owner(o) for o in (owners or owners_with_posting_flags(video))]
@@ -823,7 +819,7 @@ def sync_combination_usage_from_posted_videos(
     *,
     owner: str | None = None,
 ) -> dict[str, Any]:
-    """Backfill combination usage from all library videos marked posted (used pile)."""
+    """Optional manual backfill from posted library videos (not run on every catalog load)."""
     sync_visual_packs(store)
     rows = store._conn.execute(
         "SELECT id FROM production_library_videos WHERE posted = 1 ORDER BY id"
@@ -836,6 +832,29 @@ def sync_combination_usage_from_posted_videos(
     for name in owners:
         by_owner[name] = import_usage_from_videos(store, owner=name, video_ids=video_ids)
     return {"video_count": len(video_ids), "by_owner": by_owner}
+
+
+def _video_bundle_for_usage_import(store, video_id: int) -> dict[str, Any] | None:
+    """Load video + components for usage import without relocating library files."""
+    from discovery.production_library import _row_to_component, _row_to_video
+
+    row = store._conn.execute(
+        "SELECT * FROM production_library_videos WHERE id = ?",
+        (video_id,),
+    ).fetchone()
+    if not row:
+        return None
+    video = _row_to_video(row)
+    components = store._conn.execute(
+        """
+        SELECT * FROM production_video_components
+        WHERE video_id = ? ORDER BY component_type, sort_order, id
+        """,
+        (video_id,),
+    ).fetchall()
+    root = project_root()
+    video["components"] = [_row_to_component(c, root=root) for c in components]
+    return video
 
 
 def import_usage_from_videos(
@@ -869,7 +888,7 @@ def import_usage_from_videos(
     details: list[dict[str, Any]] = []
 
     for vid in video_ids or []:
-        video = get_video(store, vid)
+        video = _video_bundle_for_usage_import(store, int(vid))
         if not video:
             unknown += 1
             continue
@@ -929,7 +948,6 @@ def import_usage_from_videos(
 def catalog_payload(store, *, owner: str | None = None, prune_missing: bool = False) -> dict[str, Any]:
     if prune_missing:
         prune_stale_combination_catalog(store)
-    sync_combination_usage_from_posted_videos(store, owner=owner)
     sync_visual_packs(store)
     audio_items = list_audio_catalog(store)
     packs = list_visual_packs(store)
