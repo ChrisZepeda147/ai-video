@@ -70,14 +70,15 @@ def estimate_montage_beats(
     return beats
 
 
-def unique_clips_required(
+def broll_pool_files_required(
     *,
     target_duration: float,
     segment_length: float,
-    layout: str,
-    driven_pacing: bool,
+    layout: str = "single",
+    driven_pacing: bool = False,
     subject: str = "",
 ) -> int:
+    """Distinct B-roll part files to download — montage re-trims/reuses them across fast beats."""
     plan = segment_length
     if driven_pacing:
         from broll_frame_gate import wants_vehicle
@@ -89,19 +90,30 @@ def unique_clips_required(
             duration=target_duration,
             vehicle=wants_vehicle(subject),
         )
-    heuristic = min_unique_clips_needed(
+    base = montage_beats_needed(
         duration=target_duration,
         segment_length=plan,
         layout=layout,
     )
-    if driven_pacing and layout == "single":
-        return max(heuristic, estimate_montage_beats(
-            target_duration=target_duration,
-            segment_length=segment_length,
-            driven_pacing=True,
-            subject=subject,
-        ))
-    return heuristic
+    return max(3, min(base, 12))
+
+
+def unique_clips_required(
+    *,
+    target_duration: float,
+    segment_length: float,
+    layout: str,
+    driven_pacing: bool,
+    subject: str = "",
+) -> int:
+    """Legacy name — use broll_pool_files_required for download/montage gates."""
+    return broll_pool_files_required(
+        target_duration=target_duration,
+        segment_length=segment_length,
+        layout=layout,
+        driven_pacing=driven_pacing,
+        subject=subject,
+    )
 
 
 def _even(value: int) -> int:
@@ -226,7 +238,7 @@ def _group_clips_by_source(clips: list[Path]) -> dict[str, list[Path]]:
 
 
 class _ClipPicker:
-    """Pick montage clips once each — no file repeats within one render."""
+    """Round-robin across YouTube sources; re-trim parts when files cycle."""
 
     def __init__(self, clips: list[Path], rng: random.Random) -> None:
         self.rng = rng
@@ -248,9 +260,13 @@ class _ClipPicker:
         exclude = exclude or set()
         available_files = [clip for clip in self.unused_files if clip not in exclude]
         if not available_files:
+            self.unused_files = set(self.all_clips)
+            self._reshuffle_sources()
+            available_files = [clip for clip in self.unused_files if clip not in exclude]
+        if not available_files:
             raise RuntimeError(
-                "Not enough unique B-roll clips for this video length. "
-                "Download more sources or use a shorter speech."
+                "No B-roll clips available for this render. "
+                "Download more sources or use a broader --broll-query."
             )
 
         excluded_sources = {_source_id(item) for item in exclude}
@@ -298,10 +314,6 @@ class _ClipPicker:
 
 def _register_beat_clips(picker: _ClipPicker, beat_clips: list[Path], clips: Iterable[Path]) -> None:
     for clip in clips:
-        if clip in beat_clips:
-            raise RuntimeError(
-                f"B-roll file reused in one render (not allowed): {clip.name}"
-            )
         beat_clips.append(clip)
         picker.consume(clip)
 
@@ -847,17 +859,16 @@ def build_silent_montage(
             vehicle=wants_vehicle(subject),
         )
 
-    needed_clips = unique_clips_required(
+    min_files = broll_pool_files_required(
         target_duration=target_duration,
         segment_length=segment_length,
         layout=layout,
         driven_pacing=driven_pacing,
         subject=subject,
     )
-    if len(clips) < needed_clips:
+    if len(clips) < min_files:
         raise RuntimeError(
-            f"Need {needed_clips} unique B-roll clip files for "
-            f"{target_duration:.0f}s (one clip per beat, no repeats), have {len(clips)}."
+            f"Need at least {min_files} B-roll clip files for {target_duration:.0f}s, have {len(clips)}."
         )
 
     rng = random.Random(seed)
@@ -1005,17 +1016,16 @@ def build_montage(
             vehicle=wants_vehicle(subject),
         )
 
-    needed_clips = unique_clips_required(
+    min_files = broll_pool_files_required(
         target_duration=target_duration,
         segment_length=segment_length,
         layout=layout,
         driven_pacing=driven_pacing,
         subject=subject,
     )
-    if len(clips) < needed_clips:
+    if len(clips) < min_files:
         raise RuntimeError(
-            f"Need {needed_clips} unique B-roll clip files for "
-            f"{target_duration:.0f}s (one clip per beat, no repeats), have {len(clips)}."
+            f"Need at least {min_files} B-roll clip files for {target_duration:.0f}s, have {len(clips)}."
         )
 
     rng = random.Random(seed)

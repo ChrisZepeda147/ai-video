@@ -2061,6 +2061,24 @@ def prepare_broll_from_ids(
     )
 
 
+MIN_BROLL_SOURCES = 3
+
+
+def _broll_distinct_sources(clips: list[Path]) -> int:
+    ids = {
+        broll_pool._youtube_id_from_clip_name(clip.name) or clip.stem
+        for clip in clips
+    }
+    return len(ids)
+
+
+def _broll_sufficient(clips: list[Path], needed_clips: int) -> bool:
+    if len(clips) < needed_clips:
+        return False
+    want_sources = min(MIN_BROLL_SOURCES, needed_clips)
+    return _broll_distinct_sources(clips) >= want_sources
+
+
 def ensure_broll_clips(
     *,
     jobs_root: Path,
@@ -2094,9 +2112,14 @@ def ensure_broll_clips(
         )
 
     kept = ready()
-    if len(kept) >= needed_clips:
+    if _broll_sufficient(kept, needed_clips):
         print(f"B-roll: {len(kept)} clip(s) ready (need {needed_clips}) — using job cache")
         return broll_ids or []
+    if len(kept) >= needed_clips:
+        print(
+            f"B-roll: {len(kept)} clip(s) but only {_broll_distinct_sources(kept)} source(s) "
+            f"— fetching more for variety"
+        )
 
     missing = max(0, needed_clips - len(kept))
     broll_pool.take_from_pool(
@@ -2107,7 +2130,7 @@ def ensure_broll_clips(
         copy=True,
     )
     kept = ready()
-    if len(kept) >= needed_clips:
+    if _broll_sufficient(kept, needed_clips):
         print(f"B-roll: {len(kept)} clip(s) ready (need {needed_clips}) — pool cache")
         return broll_ids or []
 
@@ -2121,7 +2144,7 @@ def ensure_broll_clips(
             count=missing,
         )
         kept = ready()
-        if len(kept) >= needed_clips:
+        if _broll_sufficient(kept, needed_clips):
             print(f"B-roll: {len(kept)} clip(s) ready (need {needed_clips}) — known ID cache")
             return broll_ids
 
@@ -2143,7 +2166,7 @@ def ensure_broll_clips(
                 needed_clips=needed_clips,
             )
             kept = ready()
-            if len(kept) >= needed_clips:
+            if _broll_sufficient(kept, needed_clips):
                 return broll_ids
     downloaded = prepare_broll(
         clips_dir=clips_dir,
@@ -2165,8 +2188,14 @@ def ensure_broll_clips(
     have = len(list(clips_dir.glob("*_part*.mp4")))
     if have < needed_clips:
         raise RuntimeError(
-            f"Need {needed_clips} unique B-roll clips after subject gate, have {have}. "
+            f"Need {needed_clips} B-roll clips after subject gate, have {have}. "
             "Use a shorter --max-seconds or a broader --broll-query."
+        )
+    kept = ready()
+    if not _broll_sufficient(kept, needed_clips) and _broll_distinct_sources(kept) < 2:
+        raise RuntimeError(
+            f"B-roll needs clips from at least 2 YouTube sources; have {_broll_distinct_sources(kept)}. "
+            "Broaden --broll-query or clear one-source pool cache for this subject."
         )
     if broll_ids:
         return list(dict.fromkeys([*broll_ids, *downloaded]))

@@ -33,17 +33,18 @@ class ClipsMontageTests(unittest.TestCase):
         self.assertEqual(short, 5)
         self.assertEqual(long, 5)
 
-    def test_driven_23s_needs_nine_unique_clips(self) -> None:
-        needed = montage.unique_clips_required(
+    def test_driven_23s_broll_pool_capped(self) -> None:
+        needed = montage.broll_pool_files_required(
             target_duration=22.72,
             segment_length=8.0,
             layout="single",
             driven_pacing=True,
             subject="lamborghini huracan exterior 60fps",
         )
-        self.assertGreaterEqual(needed, 8)
+        self.assertGreaterEqual(needed, 3)
+        self.assertLessEqual(needed, 12)
 
-    def test_clip_picker_never_reuses_files(self) -> None:
+    def test_clip_picker_recycles_when_exhausted(self) -> None:
         clips = [
             Path("aaa_part01.mp4"),
             Path("aaa_part02.mp4"),
@@ -53,8 +54,8 @@ class ClipsMontageTests(unittest.TestCase):
         picked = [picker.pick() for _ in range(len(clips))]
         self.assertEqual(len(picked), len(clips))
         self.assertEqual(len(set(picked)), len(clips))
-        with self.assertRaises(RuntimeError):
-            picker.pick()
+        again = picker.pick()
+        self.assertIn(again, clips)
 
     def test_clip_picker_consume_and_unused(self) -> None:
         clips = [

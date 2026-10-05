@@ -130,6 +130,31 @@ def list_pool_clips(pool_dir: Path) -> list[Path]:
     return sorted(pool_dir.glob(CLIP_GLOB))
 
 
+def _eligible_pool_clips(pool_dir: Path) -> list[Path]:
+    from build_clips_montage import MIN_USABLE_FPS, is_usable_fps
+
+    pool_min_fps = max(MIN_USABLE_FPS, 50.0)
+    kept: list[Path] = []
+    for clip in list_pool_clips(pool_dir):
+        fps = _clip_fps(clip)
+        if not is_usable_fps(fps, min_fps=pool_min_fps):
+            print(f"  drop pool {clip.name}: {fps:.1f} fps")
+            clip.unlink(missing_ok=True)
+            continue
+        kept.append(clip)
+    return kept
+
+
+def _group_clips_by_youtube_id(clips: list[Path]) -> dict[str, list[Path]]:
+    groups: dict[str, list[Path]] = {}
+    for clip in clips:
+        source_id = _youtube_id_from_clip_name(clip.name) or clip.stem
+        groups.setdefault(source_id, []).append(clip)
+    for source_id in groups:
+        groups[source_id] = sorted(groups[source_id])
+    return groups
+
+
 def take_from_pool(
     jobs_root: Path,
     *,
@@ -141,28 +166,62 @@ def take_from_pool(
     """Pull pooled clips into a job folder (copy by default — pool stays cached)."""
     clips_dir.mkdir(parents=True, exist_ok=True)
     taken: list[Path] = []
-    from build_clips_montage import is_usable_fps
-
+    pending: list[Path] = []
     for pool_dir in find_matching_pools(jobs_root, subject):
-        for clip in list_pool_clips(pool_dir):
-            if count is not None and len(taken) >= count:
-                return taken
-            fps = _clip_fps(clip)
-            if not is_usable_fps(fps):
-                print(f"  drop pool {clip.name}: {fps:.1f} fps")
-                clip.unlink(missing_ok=True)
+        pending.extend(_eligible_pool_clips(pool_dir))
+    if not pending:
+        return taken
+
+    by_source = _group_clips_by_youtube_id(pending)
+    source_ids = sorted(by_source.keys())
+    max_per_source = 4
+    if count is not None and count > 0:
+        max_per_source = max(2, min(4, (count + 2) // max(1, min(3, len(source_ids)))))
+
+    per_source_taken: dict[str, int] = {sid: 0 for sid in source_ids}
+    indices: dict[str, int] = {sid: 0 for sid in source_ids}
+    rotation = 0
+
+    def pull_one() -> Path | None:
+        nonlocal rotation
+        for offset in range(len(source_ids)):
+            sid = source_ids[(rotation + offset) % len(source_ids)]
+            if per_source_taken[sid] >= max_per_source:
                 continue
-            dest = clips_dir / clip.name
-            if dest.exists():
-                continue
-            if copy:
-                shutil.copy2(clip, dest)
-            else:
-                shutil.move(str(clip), str(dest))
-            taken.append(dest)
+            parts = by_source[sid]
+            idx = indices[sid]
+            while idx < len(parts):
+                clip = parts[idx]
+                indices[sid] = idx + 1
+                dest = clips_dir / clip.name
+                if dest.exists():
+                    idx = indices[sid]
+                    continue
+                if copy:
+                    shutil.copy2(clip, dest)
+                else:
+                    shutil.move(str(clip), str(dest))
+                per_source_taken[sid] += 1
+                rotation = (rotation + offset + 1) % len(source_ids)
+                return dest
+            indices[sid] = len(parts)
+        return None
+
+    while True:
+        if count is not None and len(taken) >= count:
+            break
+        dest = pull_one()
+        if dest is None:
+            break
+        taken.append(dest)
+
     if taken:
         mode = "Copied" if copy else "Pooled"
-        print(f"{mode} {len(taken)} clip(s) for subject: {subject_pool_slug(subject)}")
+        sources = sum(1 for s in source_ids if per_source_taken[s] > 0)
+        print(
+            f"{mode} {len(taken)} clip(s) from {sources} source(s) "
+            f"for subject: {subject_pool_slug(subject)}"
+        )
     return taken
 
 
