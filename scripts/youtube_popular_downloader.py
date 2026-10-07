@@ -31,6 +31,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -809,6 +810,37 @@ def _download_broll_section_to_part(
         return part_path
 
 
+def _emit_broll_source_result(
+    *,
+    candidate: VideoCandidate,
+    record: dict[str, Any],
+    duration: float | None,
+    selected_height: int | None,
+    selected_fps: float | None,
+    parts_request: int,
+    elapsed: float,
+) -> None:
+    parts = record.get("parts") or []
+    produced = len(parts) if parts else len(
+        [p for p in (record.get("file_path"),) if p]
+    )
+    if record.get("status") == "ok" and isinstance(parts, list) and parts:
+        produced = len(parts)
+    elif record.get("status") == "ok":
+        produced = parts_request
+    print(
+        "BROLL_SOURCE_RESULT "
+        f"id={candidate.video_id} "
+        f"duration={int(duration or 0)} "
+        f"resolution={selected_height or '?'} "
+        f"fps={selected_fps if selected_fps is not None else '?'} "
+        f"mode={record.get('download_mode', '?')} "
+        f"requested={parts_request} "
+        f"produced={produced} "
+        f"seconds={elapsed:.1f}"
+    )
+
+
 def download_broll_source_parts(
     candidate: VideoCandidate,
     *,
@@ -820,10 +852,12 @@ def download_broll_source_parts(
     prefer_stream_height: int = 1440,
     start_offset: float = 0.0,
     quiet: bool = False,
+    preflight_format: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Download only the B-roll windows needed for this source (sections or capped full)."""
     from broll_candidate_rank import section_start_fractions
 
+    wall_start = time.perf_counter()
     output_dir.mkdir(parents=True, exist_ok=True)
     parts_request = max(1, parts_needed + 1)
     info = _extract_info_light(candidate.url)
@@ -864,6 +898,22 @@ def download_broll_source_parts(
         "parts": [],
         "download_mode": "full",
     }
+    sel_height = int(preflight_format.get("height") or height or 0) if preflight_format else height
+    sel_fps = float(preflight_format.get("fps") or fps or 0) if preflight_format else fps
+
+    def _done() -> dict[str, Any]:
+        record["seconds"] = time.perf_counter() - wall_start
+        if record.get("status") == "ok":
+            _emit_broll_source_result(
+                candidate=candidate,
+                record=record,
+                duration=duration,
+                selected_height=int(sel_height) if sel_height else None,
+                selected_fps=float(sel_fps) if sel_fps else None,
+                parts_request=parts_request,
+                elapsed=record["seconds"],
+            )
+        return record
 
     section_threshold = 20 * 60.0
     use_sections = duration is not None and duration > section_threshold and parts_request >= 1
@@ -899,7 +949,7 @@ def download_broll_source_parts(
                 record["status"] = "ok"
                 record["download_mode"] = "sections"
                 print("BROLL_DOWNLOAD_MODE=sections")
-                return record
+                return _done()
         except Exception as exc:
             print(f"BROLL_DOWNLOAD_MODE=full_fallback reason={exc}")
 
@@ -944,7 +994,7 @@ def download_broll_source_parts(
             if use_sections
             else "BROLL_DOWNLOAD_MODE=full"
         )
-        return record
+        return _done()
     record["status"] = "error"
     record["download_mode"] = "full_fallback" if use_sections else "full"
     print(
@@ -952,6 +1002,7 @@ def download_broll_source_parts(
         if use_sections
         else "BROLL_DOWNLOAD_MODE=full"
     )
+    record["seconds"] = time.perf_counter() - wall_start
     return record
 
 

@@ -38,7 +38,7 @@ def inspect_usable_formats(url: str) -> tuple[bool, str | None, dict[str, Any]]:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
     except Exception:
-        return True, None, {}
+        return False, "format_probe_failed", {}
     if not isinstance(info, dict):
         return True, None, {}
     formats = info.get("formats") or []

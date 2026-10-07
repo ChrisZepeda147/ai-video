@@ -11,10 +11,11 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import shutil
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any, Callable
@@ -72,8 +73,11 @@ from broll_search_query import (
     expand_broll_search_queries,
     gate_subject_for_query,
 )
+from broll_acquire_workspace import cleanup_workspace, finalize_parts, source_workspace
 from broll_candidate_rank import rank_broll_candidates
+from broll_format_preflight import inspect_usable_formats, log_candidate_skip
 from broll_search_cache import get_cached_candidates, store_cached_candidates
+from montage_speaker import SpeechSpeakerMismatchError, enforce_requested_speaker
 from broll_usable import BrollInventory, log_broll_progress, measure_usable_broll
 from broll_usable_manifest import verify_manifest, write_manifest
 from montage_timing import montage_timer
@@ -100,6 +104,7 @@ _VIDEO_CANDIDATE_KEYS = {field.name for field in fields(VideoCandidate)}
 
 KEEP_AUDIO = frozenset({"speech.mp3", "subs.en.json3"})
 KEEP_TOP = frozenset({"url.txt", "job.json", "config.json"})
+BROLL_SOURCE_TIMEOUT_SEC = float(os.environ.get("BROLL_SOURCE_TIMEOUT_SEC", "105"))
 
 
 @dataclass(frozen=True)
@@ -1363,6 +1368,11 @@ def _take_pooled_speech(
     if item is None:
         return None
     duration = clamp_pooled_speech_duration(item.duration, max_seconds)
+    if duration < min_seconds:
+        print(
+            f"  skip pooled speech: {duration:.1f}s below min {min_seconds:.0f}s — will search fresh"
+        )
+        return None
     excerpt = item.excerpt
     captions = item.captions
     source_mp3 = item.audio
@@ -1409,6 +1419,11 @@ def _take_pooled_speech(
         published_at=None,
         source="speech-pool",
     )
+    if not speaker_matches(candidate, speaker):
+        print(
+            f"  skip pooled speech: {item.title!r} does not match requested speaker {speaker!r}"
+        )
+        return None
     url_file.write_text(f"{item.url}\n", encoding="utf-8")
     content_reuse.register_video(
         youtube_id=item.youtube_id,
@@ -1416,6 +1431,12 @@ def _take_pooled_speech(
         transcript=excerpt,
         role="speech",
         record_id=speech_record_id(item.youtube_id, item.start),
+    )
+    enforce_requested_speaker(
+        requested=speaker,
+        candidate=candidate,
+        excerpt=excerpt,
+        title_match_fn=speaker_matches,
     )
     return candidate, item.start, duration, excerpt, excerpt
 
@@ -1624,6 +1645,12 @@ def prepare_speech(
     print(f"Speech picked: {chosen.title} ({chosen.video_id})")
     print(f"Excerpt: start={start:.2f}s duration={duration:.2f}s")
     print(f"  preview: {_preview(excerpt_text)}")
+    enforce_requested_speaker(
+        requested=speaker,
+        candidate=chosen,
+        excerpt=excerpt_text,
+        title_match_fn=speaker_matches,
+    )
     _stash_speech_leftovers(
         jobs_root=jobs_root,
         speaker=speaker,
@@ -1917,54 +1944,92 @@ def download_broll_candidates(
     def _process_candidate(candidate: VideoCandidate) -> str | None:
         video_id = candidate.video_id
         request_parts = _parts_for_this_source()
-        if split_full_source:
-            results = download_videos(
-                [candidate],
-                output_dir=clips_dir,
-                max_height=1080,
-                audio_only=False,
-                clip_length=clip_length,
-                max_parts=None,
-                split_parts=True,
-                keep_source=False,
-                aspect_ratio="9:16",
-                start_offset=start_offset,
-                spaced_parts=True,
-            )
-            if not results or results[0].get("status") != "ok":
-                if job_dir:
-                    record_failed_source(job_dir, video_id)
-                return None
-        else:
-            record = download_broll_source_parts(
-                candidate,
-                output_dir=clips_dir,
-                clip_length=clip_length,
-                parts_needed=request_parts,
-                aspect_ratio="9:16",
-                max_height=1080,
-                start_offset=start_offset,
-            )
-            if record.get("status") != "ok":
-                if job_dir:
-                    record_failed_source(job_dir, video_id)
-                return None
-            video_id = str(record.get("video_id") or candidate.video_id)
-        source_clips = sorted(clips_dir.glob(f"{video_id}_part*.mp4"))
-        kept = filter_broll_clip_list(
-            source_clips,
-            subject=subject,
-            use_vision=use_vision,
-            frame_gate=frame_gate,
-            jobs_root=jobs_root,
-        )
-        if not kept:
+        ok_fmt, skip_reason, fmt_meta = inspect_usable_formats(candidate.url)
+        if not ok_fmt:
+            log_candidate_skip(video_id, skip_reason or "no_50fps_format")
             if job_dir:
                 record_failed_source(job_dir, video_id)
             return None
-        if jobs_root and kept:
-            broll_pool.add_gated_clips_to_pool(jobs_root, subject=subject, clips=kept)
-        return video_id
+        workspace = (
+            source_workspace(job_dir, video_id)
+            if job_dir is not None
+            else clips_dir / f".workspace_{video_id}"
+        )
+        cleanup_workspace(workspace)
+        workspace.mkdir(parents=True, exist_ok=True)
+        try:
+            if split_full_source:
+                results = download_videos(
+                    [candidate],
+                    output_dir=workspace,
+                    max_height=1080,
+                    audio_only=False,
+                    clip_length=clip_length,
+                    max_parts=None,
+                    split_parts=True,
+                    keep_source=False,
+                    aspect_ratio="9:16",
+                    start_offset=start_offset,
+                    spaced_parts=True,
+                )
+                if not results or results[0].get("status") != "ok":
+                    if job_dir:
+                        record_failed_source(job_dir, video_id)
+                    return None
+            else:
+                record = download_broll_source_parts(
+                    candidate,
+                    output_dir=workspace,
+                    clip_length=clip_length,
+                    parts_needed=request_parts,
+                    aspect_ratio="9:16",
+                    max_height=1080,
+                    start_offset=start_offset,
+                    preflight_format=fmt_meta,
+                )
+                if record.get("status") != "ok":
+                    if job_dir:
+                        record_failed_source(job_dir, video_id)
+                    return None
+                video_id = str(record.get("video_id") or candidate.video_id)
+            source_clips = sorted(workspace.glob(f"{video_id}_part*.mp4"))
+            kept = filter_broll_clip_list(
+                source_clips,
+                subject=subject,
+                use_vision=use_vision,
+                frame_gate=frame_gate,
+                jobs_root=jobs_root,
+            )
+            if not kept:
+                if job_dir:
+                    record_failed_source(job_dir, video_id)
+                return None
+            if job_dir is not None:
+                kept = finalize_parts(workspace, clips_dir, video_id)
+            elif workspace != clips_dir:
+                finalize_parts(workspace, clips_dir, video_id)
+            if jobs_root and kept:
+                broll_pool.add_gated_clips_to_pool(jobs_root, subject=subject, clips=kept)
+            return video_id
+        finally:
+            cleanup_workspace(workspace)
+
+    def _process_candidate_timed(candidate: VideoCandidate) -> str | None:
+        if BROLL_SOURCE_TIMEOUT_SEC <= 0:
+            return _process_candidate(candidate)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_process_candidate, candidate)
+            try:
+                return future.result(timeout=BROLL_SOURCE_TIMEOUT_SEC)
+            except FuturesTimeoutError:
+                print(
+                    f"BROLL_SOURCE_TIMEOUT id={candidate.video_id} "
+                    f"seconds={BROLL_SOURCE_TIMEOUT_SEC:.0f}"
+                )
+                if job_dir:
+                    record_failed_source(job_dir, candidate.video_id)
+                    cleanup_workspace(source_workspace(job_dir, candidate.video_id))
+                return None
 
     print(f"Downloading {len(to_download)} B-roll source(s)...")
     seen_ids: set[str] = set()
@@ -2002,7 +2067,7 @@ def download_broll_candidates(
         parallel_results: list[str | None] = []
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {
-                pool.submit(_process_candidate, candidate): candidate
+                pool.submit(_process_candidate_timed, candidate): candidate
                 for candidate in batch[:workers]
             }
             for future in as_completed(futures):
@@ -2022,7 +2087,7 @@ def download_broll_candidates(
             if candidate.video_id in seen_ids:
                 continue
             seen_ids.add(candidate.video_id)
-            vid = _process_candidate(candidate)
+            vid = _process_candidate_timed(candidate)
             if _after_source(vid):
                 break
     failed = len([c for c in candidates if c.video_id not in ok_ids and c.video_id not in blocked])
@@ -3381,6 +3446,7 @@ def main() -> int:
                 agent_speech_vet=gate_flags.speech_vet,
                 review_out_dir=job_dir / "cursor-review",
             )
+        requested_speaker = speaker
         speaker_resolution: dict[str, object] = {}
         try:
             from discovery.config import default_db_path, load_env
@@ -3392,7 +3458,7 @@ def main() -> int:
             try:
                 resolved_speaker, speaker_resolution = resolve_registration_speaker(
                     _speaker_store,
-                    intended=speaker,
+                    intended=requested_speaker,
                     title=speech.title,
                     channel=speech.channel,
                     transcript=excerpt_text or source_text,
@@ -3400,10 +3466,12 @@ def main() -> int:
                 )
             finally:
                 _speaker_store.close()
-            if resolved_speaker:
-                if resolved_speaker != speaker:
-                    print(f"Speaker resolved: {speaker} -> {resolved_speaker} (from clip metadata)")
-                speaker = resolved_speaker
+            if resolved_speaker and resolved_speaker != requested_speaker:
+                print(
+                    f"Speaker registration note: keeping requested {requested_speaker!r} "
+                    f"(metadata hint: {speaker_resolution.get('speaker_mismatch_hint')!r})"
+                )
+            speaker = requested_speaker
         except Exception as exc:  # noqa: BLE001 — registration still proceeds
             print(f"Speaker resolution skipped: {exc}")
         segment_length = resolve_segment_length(duration, args.segment_length)
@@ -3478,6 +3546,10 @@ def main() -> int:
     except SpeechReviewReady as exc:
         print(exc)
         return 0
+    except SpeechSpeakerMismatchError as exc:
+        print(f"SPEAKER_MISMATCH: {exc}", file=sys.stderr)
+        montage_timer().emit()
+        return 1
     except MotivationJobError as exc:
         print(exc, file=sys.stderr)
         montage_timer().emit()
