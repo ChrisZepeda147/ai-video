@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
+
+from montage_timing import montage_timer
 
 GATE_VERSION = "broll_gate_v2"
 
@@ -35,7 +38,9 @@ def _load_cache(path: Path) -> dict[str, Any]:
 
 def _save_cache(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def lookup_gate_result(
@@ -51,12 +56,17 @@ def lookup_gate_result(
     key = _clip_identity(clip)
     entry = cache["entries"].get(key)
     if not isinstance(entry, dict):
+        if key not in cache["entries"]:
+            montage_timer().stats.gate_cache_misses += 1
         return None
     if entry.get("gate_version") != GATE_VERSION:
+        montage_timer().stats.gate_cache_misses += 1
         return None
     cached_slug = str(entry.get("subject_slug") or "")
     if subject_slug and cached_slug and cached_slug != subject_slug:
+        montage_timer().stats.gate_cache_misses += 1
         return None
+    montage_timer().stats.gate_cache_hits += 1
     return entry
 
 

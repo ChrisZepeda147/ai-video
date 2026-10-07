@@ -72,6 +72,8 @@ from broll_search_query import (
     gate_subject_for_query,
 )
 from broll_usable import BrollInventory, log_broll_progress, measure_usable_broll
+from broll_usable_manifest import verify_manifest, write_manifest
+from montage_timing import montage_timer
 from montage_telemetry import (
     MontageFailure,
     MontageFailureError,
@@ -2040,78 +2042,85 @@ def filter_broll_clip_list(
             if delete_rejects:
                 clip.unlink(missing_ok=True)
             continue
+        import time as _time
+
+        gate_start = _time.perf_counter()
+        montage_timer().stats.gate_rescan_clips += 1
         try:
-            duration = probe_duration(clip)
-        except (subprocess.CalledProcessError, ValueError):
-            print(f"  drop {clip.name}: unreadable")
-            store_gate_result(
-                jobs_root,
-                clip,
-                subject_slug=subject_slug,
-                passed=False,
-                reason="unreadable",
-                source_id=source_id,
-            )
-            if delete_rejects:
-                clip.unlink(missing_ok=True)
-            continue
-        samples = scan_clip_local(clip, duration=duration, subject=subject)
-        span = longest_clean_span(samples, min_length=min(MIN_CLEAN_SPAN, duration))
-        if span is None:
-            print(f"  drop {clip.name}: no subject span")
-            store_gate_result(
-                jobs_root,
-                clip,
-                subject_slug=subject_slug,
-                passed=False,
-                reason="no subject span",
-                source_id=source_id,
-            )
-            if delete_rejects:
-                clip.unlink(missing_ok=True)
-            continue
-        start, end = span
-        if use_vision and not confirm_span_subject(
-            clip, start=start, end=end, subject=subject
-        ):
-            print(f"  drop {clip.name}: missing-subject / out-of-context")
-            store_gate_result(
-                jobs_root,
-                clip,
-                subject_slug=subject_slug,
-                passed=False,
-                reason="vision reject",
-                source_id=source_id,
-            )
-            if delete_rejects:
-                clip.unlink(missing_ok=True)
-            continue
-        if start > 0.35 or end < duration - 0.35:
-            print(f"  trim {clip.name}: {start:.1f}-{end:.1f}s")
             try:
-                _trim_clip_to_span(clip, start, end)
-            except subprocess.CalledProcessError:
-                print(f"  drop {clip.name}: trim failed")
+                duration = probe_duration(clip)
+            except (subprocess.CalledProcessError, ValueError):
+                print(f"  drop {clip.name}: unreadable")
                 store_gate_result(
                     jobs_root,
                     clip,
                     subject_slug=subject_slug,
                     passed=False,
-                    reason="trim failed",
+                    reason="unreadable",
                     source_id=source_id,
                 )
                 if delete_rejects:
                     clip.unlink(missing_ok=True)
                 continue
-        store_gate_result(
-            jobs_root,
-            clip,
-            subject_slug=subject_slug,
-            passed=True,
-            reason="ok",
-            source_id=source_id,
-        )
-        kept.append(clip)
+            samples = scan_clip_local(clip, duration=duration, subject=subject)
+            span = longest_clean_span(samples, min_length=min(MIN_CLEAN_SPAN, duration))
+            if span is None:
+                print(f"  drop {clip.name}: no subject span")
+                store_gate_result(
+                    jobs_root,
+                    clip,
+                    subject_slug=subject_slug,
+                    passed=False,
+                    reason="no subject span",
+                    source_id=source_id,
+                )
+                if delete_rejects:
+                    clip.unlink(missing_ok=True)
+                continue
+            start, end = span
+            if use_vision and not confirm_span_subject(
+                clip, start=start, end=end, subject=subject
+            ):
+                print(f"  drop {clip.name}: missing-subject / out-of-context")
+                store_gate_result(
+                    jobs_root,
+                    clip,
+                    subject_slug=subject_slug,
+                    passed=False,
+                    reason="vision reject",
+                    source_id=source_id,
+                )
+                if delete_rejects:
+                    clip.unlink(missing_ok=True)
+                continue
+            if start > 0.35 or end < duration - 0.35:
+                print(f"  trim {clip.name}: {start:.1f}-{end:.1f}s")
+                try:
+                    _trim_clip_to_span(clip, start, end)
+                except subprocess.CalledProcessError:
+                    print(f"  drop {clip.name}: trim failed")
+                    store_gate_result(
+                        jobs_root,
+                        clip,
+                        subject_slug=subject_slug,
+                        passed=False,
+                        reason="trim failed",
+                        source_id=source_id,
+                    )
+                    if delete_rejects:
+                        clip.unlink(missing_ok=True)
+                    continue
+            store_gate_result(
+                jobs_root,
+                clip,
+                subject_slug=subject_slug,
+                passed=True,
+                reason="ok",
+                source_id=source_id,
+            )
+            kept.append(clip)
+        finally:
+            montage_timer().add_stage("frame_gate", _time.perf_counter() - gate_start)
     if all_clips:
         print(f"  frame gate: kept {len(kept)}/{len(all_clips)} clip(s)")
     return kept
@@ -2311,21 +2320,27 @@ def _try_diversity_download(
     if reuse_policy == "require_new":
         emit_warning("BROLL_LOW_DIVERSITY", sources=inv.distinct_sources)
         return inv
-    ladder = broaden_broll_query_ladder(query)
-    for search_query in ladder:
-        candidates = _discover_candidates_for_query(
-            search_query,
-            limit=clips_limit,
-            subject=subject,
-            min_views=min_views,
-            min_duration=min_duration,
-            reuse_policy=reuse_policy,
-            exclude_source_ids=exclude_source_ids,
-        )
-        if not candidates:
-            continue
-        try:
-            download_broll_candidates(
+    candidates: list[VideoCandidate] = []
+    for search_query in broaden_broll_query_ladder(query)[:2]:
+        with montage_timer().stage("youtube_search"):
+            candidates = _discover_candidates_for_query(
+                search_query,
+                limit=1,
+                subject=subject,
+                min_views=min_views,
+                min_duration=min_duration,
+                reuse_policy=reuse_policy,
+                exclude_source_ids=exclude_source_ids,
+            )
+        if candidates:
+            break
+    if not candidates:
+        emit_warning("BROLL_LOW_DIVERSITY", sources=inv.distinct_sources)
+        return inv
+    montage_timer().stats.downloads_attempted += 1
+    try:
+        with montage_timer().stage("broll_download"):
+            ids = download_broll_candidates(
                 clips_dir,
                 candidates[:1],
                 clip_length=clip_length,
@@ -2341,20 +2356,33 @@ def _try_diversity_download(
                 exclude_source_ids=exclude_source_ids,
                 raise_if_empty=False,
             )
-        except RuntimeError:
-            continue
-        inv = _inventory(
-            clips_dir,
-            required=inv.required,
-            subject=subject,
-            use_vision=use_vision,
-            frame_gate=frame_gate,
-            jobs_root=jobs_root,
-        )
-        if inv.distinct_sources >= 2:
-            return inv
-    emit_warning("BROLL_LOW_DIVERSITY", sources=inv.distinct_sources)
+        if ids:
+            montage_timer().stats.downloads_successful += 1
+    except RuntimeError:
+        pass
+    inv = _inventory(
+        clips_dir,
+        required=inv.required,
+        subject=subject,
+        use_vision=use_vision,
+        frame_gate=frame_gate,
+        jobs_root=jobs_root,
+    )
+    if inv.distinct_sources < 2:
+        emit_warning("BROLL_LOW_DIVERSITY", sources=inv.distinct_sources)
     return inv
+
+
+def _persist_broll_success(job_dir: Path, inv: BrollInventory) -> None:
+    write_manifest(
+        job_dir,
+        clip_names=[clip.name for clip in inv.usable],
+        required=inv.required,
+    )
+    stats = montage_timer().stats
+    stats.clips_raw = inv.raw
+    stats.clips_usable = inv.usable_count
+    stats.distinct_sources = inv.distinct_sources
 
 
 def ensure_broll_clips(
@@ -2419,16 +2447,18 @@ def ensure_broll_clips(
             inv=inv,
         )
         log_broll_progress("ensure_broll", inv, status="ok")
+        _persist_broll_success(job_dir, inv)
         return collected_ids
 
     missing = max(0, needed_clips - inv.usable_count)
-    broll_pool.take_from_pool(
-        jobs_root,
-        subject=subject,
-        clips_dir=clips_dir,
-        count=missing,
-        copy=True,
-    )
+    with montage_timer().stage("pool_lookup"):
+        broll_pool.take_from_pool(
+            jobs_root,
+            subject=subject,
+            clips_dir=clips_dir,
+            count=missing,
+            copy=True,
+        )
     inv = _inventory(
         clips_dir,
         required=needed_clips,
@@ -2459,6 +2489,7 @@ def ensure_broll_clips(
             inv=inv,
         )
         log_broll_progress("ensure_broll", inv, status="ok")
+        _persist_broll_success(job_dir, inv)
         return collected_ids
 
     if broll_ids:
@@ -2480,6 +2511,7 @@ def ensure_broll_clips(
         log_broll_progress("ensure_broll", inv, status="progress")
         if inv.satisfies_count():
             log_broll_progress("ensure_broll", inv, status="ok")
+            _persist_broll_success(job_dir, inv)
             return broll_ids
 
     ladder = broaden_broll_query_ladder(query)
@@ -2495,39 +2527,43 @@ def ensure_broll_clips(
         search_query = ladder[q_idx]
         record_query_attempt(job_dir, search_query)
         bump_query_index(job_dir, q_idx)
-        candidates = _discover_candidates_for_query(
-            search_query,
-            limit=clips_limit,
-            subject=subject,
-            min_views=min_views,
-            min_duration=min_duration,
-            reuse_policy=reuse_policy,
-            exclude_source_ids=exclude,
-        )
+        with montage_timer().stage("youtube_search"):
+            candidates = _discover_candidates_for_query(
+                search_query,
+                limit=clips_limit,
+                subject=subject,
+                min_views=min_views,
+                min_duration=min_duration,
+                reuse_policy=reuse_policy,
+                exclude_source_ids=exclude,
+            )
         if not candidates:
             attempt += 1
             continue
         candidate = candidates[0]
         downloads_attempted += 1
+        montage_timer().stats.downloads_attempted += 1
         try:
-            ids = download_broll_candidates(
-                clips_dir,
-                [candidate],
-                clip_length=clip_length,
-                max_parts=max_parts,
-                start_offset=start_offset,
-                subject=subject,
-                use_vision=use_vision,
-                frame_gate=frame_gate,
-                jobs_root=jobs_root,
-                split_full_source=split_full_source,
-                job_dir=job_dir,
-                exclude_source_ids=exclude,
-                max_sources=1,
-                raise_if_empty=False,
-            )
+            with montage_timer().stage("broll_download"):
+                ids = download_broll_candidates(
+                    clips_dir,
+                    [candidate],
+                    clip_length=clip_length,
+                    max_parts=max_parts,
+                    start_offset=start_offset,
+                    subject=subject,
+                    use_vision=use_vision,
+                    frame_gate=frame_gate,
+                    jobs_root=jobs_root,
+                    split_full_source=split_full_source,
+                    job_dir=job_dir,
+                    exclude_source_ids=exclude,
+                    max_sources=1,
+                    raise_if_empty=False,
+                )
             if ids:
                 downloads_ok += 1
+                montage_timer().stats.downloads_successful += 1
                 collected_ids = list(dict.fromkeys([*collected_ids, *ids]))
             else:
                 record_failed_source(job_dir, candidate.video_id)
@@ -2575,6 +2611,15 @@ def ensure_broll_clips(
         inv=inv,
     )
     log_broll_progress("ensure_broll", inv, status="ok")
+    _persist_broll_success(job_dir, inv)
+    montage_timer().stats.downloads_attempted = max(
+        montage_timer().stats.downloads_attempted,
+        downloads_attempted,
+    )
+    montage_timer().stats.downloads_successful = max(
+        montage_timer().stats.downloads_successful,
+        downloads_ok,
+    )
     return list(dict.fromkeys([*collected_ids])) if collected_ids else []
 
 
@@ -2608,13 +2653,7 @@ def render_job(
         )
         duration = actual_duration
     temp_output = output.with_suffix(".nocap.mp4")
-    usable = filter_broll_clips(
-        clips_dir,
-        subject=subject,
-        use_vision=use_vision,
-        frame_gate=frame_gate,
-        jobs_root=jobs_root,
-    )
+    job_dir = clips_dir.parent
     min_files = unique_clips_required(
         target_duration=duration,
         segment_length=segment_length,
@@ -2622,74 +2661,98 @@ def render_job(
         driven_pacing=driven_pacing,
         subject=subject,
     )
-    if len(usable) < min_files:
-        emit_stage_line(
-            "pre_render",
-            "fail",
-            needed=min_files,
-            have=len(usable),
-        )
-        raise RuntimeError(
-            f"Pre-render B-roll check: need {min_files} usable clips, have {len(usable)}."
-        )
-    emit_stage_line(
-        "pre_render",
-        "ok",
-        usable=len(usable),
-        required=min_files,
-        sources=len(
-            {
-                broll_pool._youtube_id_from_clip_name(c.name) or c.stem
-                for c in usable
-            }
-        ),
-    )
+    with montage_timer().stage("pre_render"):
+        manifest_ok, present, required = verify_manifest(job_dir, clips_dir)
+        if manifest_ok and present >= min_files:
+            usable_count = present
+            sources = montage_timer().stats.distinct_sources or 0
+            emit_stage_line(
+                "pre_render",
+                "ok",
+                usable=usable_count,
+                required=min_files,
+                sources=sources,
+                manifest=1,
+            )
+        else:
+            usable = filter_broll_clips(
+                clips_dir,
+                subject=subject,
+                use_vision=use_vision,
+                frame_gate=frame_gate,
+                jobs_root=jobs_root,
+            )
+            usable_count = len(usable)
+            if usable_count < min_files:
+                emit_stage_line(
+                    "pre_render",
+                    "fail",
+                    needed=min_files,
+                    have=usable_count,
+                )
+                raise RuntimeError(
+                    f"Pre-render B-roll check: need {min_files} usable clips, have {usable_count}."
+                )
+            emit_stage_line(
+                "pre_render",
+                "ok",
+                usable=usable_count,
+                required=min_files,
+                sources=len(
+                    {
+                        broll_pool._youtube_id_from_clip_name(c.name) or c.stem
+                        for c in usable
+                    }
+                ),
+                manifest=0,
+            )
     grade_note = "charcoal grade" if grade else "no grade"
     print(
-        f"Rendering montage: {len(usable)} usable clip(s), {duration:.0f}s speech, "
+        f"Rendering montage: {usable_count} usable clip(s), {duration:.0f}s speech, "
         f"{segment_length:.1f}s beats, {playback_speed:.0%} speed, {grade_note}"
     )
-    used_clips = build_montage(
-        clips_dir=clips_dir,
-        audio=audio,
-        output=temp_output,
-        segment_length=segment_length,
-        layout="single",
-        grade=grade,
-        seed=seed,
-        width=1080,
-        height=1920,
-        audio_start=0.0,
-        audio_duration=duration,
-        subject=subject,
-        playback_speed=playback_speed,
-        use_vision=use_vision,
-        driven_pacing=driven_pacing,
-        segment_gate=segment_gate,
-    )
-    if len(used_clips) != len(set(used_clips)):
-        raise RuntimeError("Montage reused a B-roll clip file in one render")
-    print(f"  montage used {len(used_clips)} unique clip file(s)")
-    caption_label = "phrase" if caption_mode == "phrase" else "word"
-    align = normalize_caption_align(caption_align, caption_mode=caption_mode)
-    print(f"Burning {caption_label} captions ({align})...")
-    captioned = output.with_suffix(".captioned.mp4")
-    burn_captions(
-        temp_output,
-        captions,
-        captioned,
-        width=1080,
-        height=1920,
-        audio_start=0.0,
-        audio_duration=duration,
-        caption_mode=caption_mode,
-        hook_text=hook_text,
-        caption_align=align,
-        keep_video_audio=False,
-    )
-    temp_output.unlink(missing_ok=True)
-    remux_speech_over_video(captioned, audio, output, audio_start=0.0)
-    captioned.unlink(missing_ok=True)
+    with montage_timer().stage("render"):
+        used_clips = build_montage(
+            clips_dir=clips_dir,
+            audio=audio,
+            output=temp_output,
+            segment_length=segment_length,
+            layout="single",
+            grade=grade,
+            seed=seed,
+            width=1080,
+            height=1920,
+            audio_start=0.0,
+            audio_duration=duration,
+            subject=subject,
+            playback_speed=playback_speed,
+            use_vision=use_vision,
+            driven_pacing=driven_pacing,
+            segment_gate=segment_gate,
+        )
+        if len(used_clips) != len(set(used_clips)):
+            raise RuntimeError("Montage reused a B-roll clip file in one render")
+        print(f"  montage used {len(used_clips)} unique clip file(s)")
+        caption_label = "phrase" if caption_mode == "phrase" else "word"
+        align = normalize_caption_align(caption_align, caption_mode=caption_mode)
+        print(f"Burning {caption_label} captions ({align})...")
+        captioned = output.with_suffix(".captioned.mp4")
+        burn_captions(
+            temp_output,
+            captions,
+            captioned,
+            width=1080,
+            height=1920,
+            audio_start=0.0,
+            audio_duration=duration,
+            caption_mode=caption_mode,
+            hook_text=hook_text,
+            caption_align=align,
+            keep_video_audio=False,
+        )
+        temp_output.unlink(missing_ok=True)
+        remux_speech_over_video(captioned, audio, output, audio_start=0.0)
+        captioned.unlink(missing_ok=True)
     duration = probe_duration(output)
     if quality_gate:
         from discovery.render_quality_gate import check_render_quality
@@ -3164,23 +3227,25 @@ def main() -> int:
         print("Speech review did not stop early — check logs.", file=sys.stderr)
         return 1
 
+    montage_timer().reset()
     try:
-        speech, start, duration, excerpt_text, source_text = prepare_speech(
-            jobs_root=jobs_root,
-            audio_dir=audio_dir,
-            url_file=job_dir / "url.txt",
-            speaker=speaker,
-            speech_query=speech_query,
-            speech_url=args.speech_url,
-            min_seconds=args.min_seconds,
-            max_seconds=args.max_seconds,
-            reuse_policy=reuse_policy,
-            speech_start=args.speech_start,
-            speech_duration=args.speech_duration,
-            speech_option=args.speech_option,
-            agent_speech_vet=gate_flags.speech_vet,
-            review_out_dir=job_dir / "cursor-review",
-        )
+        with montage_timer().stage("prepare_speech"):
+            speech, start, duration, excerpt_text, source_text = prepare_speech(
+                jobs_root=jobs_root,
+                audio_dir=audio_dir,
+                url_file=job_dir / "url.txt",
+                speaker=speaker,
+                speech_query=speech_query,
+                speech_url=args.speech_url,
+                min_seconds=args.min_seconds,
+                max_seconds=args.max_seconds,
+                reuse_policy=reuse_policy,
+                speech_start=args.speech_start,
+                speech_duration=args.speech_duration,
+                speech_option=args.speech_option,
+                agent_speech_vet=gate_flags.speech_vet,
+                review_out_dir=job_dir / "cursor-review",
+            )
         speaker_resolution: dict[str, object] = {}
         try:
             from discovery.config import default_db_path, load_env
@@ -3233,23 +3298,24 @@ def main() -> int:
             driven_pacing=driven_pacing,
             subject=args.broll_query,
         )
-        broll_ids = ensure_broll_clips(
-            jobs_root=jobs_root,
-            clips_dir=clips_dir,
-            subject=args.broll_query,
-            query=args.broll_query,
-            needed_clips=needed_clips,
-            clips_limit=clips_limit,
-            clip_length=clip_length,
-            max_parts=max_parts,
-            min_views=args.min_views,
-            min_duration=args.min_duration,
-            start_offset=args.intro_skip,
-            use_vision=gate_flags.use_vision,
-            frame_gate=gate_flags.frame_gate,
-            reuse_policy=reuse_policy,
-            slug=args.slug,
-        )
+        with montage_timer().stage("ensure_broll"):
+            broll_ids = ensure_broll_clips(
+                jobs_root=jobs_root,
+                clips_dir=clips_dir,
+                subject=args.broll_query,
+                query=args.broll_query,
+                needed_clips=needed_clips,
+                clips_limit=clips_limit,
+                clip_length=clip_length,
+                max_parts=max_parts,
+                min_views=args.min_views,
+                min_duration=args.min_duration,
+                start_offset=args.intro_skip,
+                use_vision=gate_flags.use_vision,
+                frame_gate=gate_flags.frame_gate,
+                reuse_policy=reuse_policy,
+                slug=args.slug,
+            )
         caption_mode = "phrase" if args.phrase_captions else caption_mode_default()
         caption_align = normalize_caption_align(args.caption_align, caption_mode=caption_mode)
         render_job(
@@ -3278,14 +3344,17 @@ def main() -> int:
         return 0
     except MotivationJobError as exc:
         print(exc, file=sys.stderr)
+        montage_timer().emit()
         return 1
     except MontageFailureError as exc:
         print(exc.failure.emit_json_line())
         print(exc, file=sys.stderr)
+        montage_timer().emit()
         return 1
     except (FileNotFoundError, RuntimeError, ValueError, subprocess.CalledProcessError) as exc:
         code = classify_download_error(exc)
         print(f"{code}: {exc}", file=sys.stderr)
+        montage_timer().emit()
         return 1
 
     if gate_flags.cursor_review:
@@ -3333,20 +3402,22 @@ def main() -> int:
     if not args.no_cleanup:
         removed = cleanup_job_dir(job_dir, keep_work=args.keep_work)
         print(f"Cleaned {len(removed)} leftover file(s).")
-    try:
-        from discovery.auto_register import sync_register_best_effort
+    with montage_timer().stage("register"):
+        try:
+            from discovery.auto_register import sync_register_best_effort
 
-        reg = sync_register_best_effort(slug=args.slug, visual_style=args.broll_query)
-        if reg:
-            print(f"Production library: Video {reg.get('id')} ({reg.get('video_key')})")
-    except Exception as exc:
-        print(f"Library register skipped: {exc}", file=sys.stderr)
-    try:
-        from discovery.site_videos import sync_legacy_renders_to_site
+            reg = sync_register_best_effort(slug=args.slug, visual_style=args.broll_query)
+            if reg:
+                print(f"Production library: Video {reg.get('id')} ({reg.get('video_key')})")
+        except Exception as exc:
+            print(f"Library register skipped: {exc}", file=sys.stderr)
+        try:
+            from discovery.site_videos import sync_legacy_renders_to_site
 
-        sync_legacy_renders_to_site(slugs=[args.slug], rebuild_catalog=False)
-    except Exception:
-        pass
+            sync_legacy_renders_to_site(slugs=[args.slug], rebuild_catalog=False)
+        except Exception:
+            pass
+    montage_timer().emit()
     print(f"Saved: {output}")
     return 0
 
