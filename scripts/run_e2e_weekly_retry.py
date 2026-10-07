@@ -30,7 +30,7 @@ def migration_status(store: DiscoveryStore) -> dict:
 def find_slot(store: DiscoveryStore, *, week_start: str, owner: str, day: str, slot: int):
     return store._conn.execute(
         """
-        SELECT s.id, s.status, s.error_message, s.job_key, s.speaker, s.visual, s.slot
+        SELECT s.id, s.status, s.error_message, s.job_key, s.speaker, s.visual_direction, s.brief_text, s.slot
         FROM weekly_slots s
         JOIN weekly_plans p ON p.id = s.plan_id
         WHERE p.week_start = ? AND p.owner = ? AND s.day = ? AND s.slot = ?
