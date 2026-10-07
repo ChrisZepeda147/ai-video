@@ -27,6 +27,7 @@ def acquire_broll_source(
     candidate: VideoCandidate,
     clip_length: int,
     parts_needed: int,
+    start_part_num: int = 1,
     start_offset: float,
     split_full_source: bool,
     subject: str,
@@ -66,6 +67,7 @@ def acquire_broll_source(
                 aspect_ratio="9:16",
                 max_height=1080,
                 start_offset=start_offset,
+                start_part_num=start_part_num,
                 preflight_format=fmt_meta,
             )
             if record.get("status") != "ok":
@@ -99,6 +101,7 @@ def main(argv: list[str] | None = None) -> int:
         candidate=candidate,
         clip_length=int(payload["clip_length"]),
         parts_needed=int(payload["parts_needed"]),
+        start_part_num=int(payload.get("start_part_num") or 1),
         start_offset=float(payload.get("start_offset") or 0),
         split_full_source=bool(payload.get("split_full_source")),
         subject=str(payload.get("subject") or ""),

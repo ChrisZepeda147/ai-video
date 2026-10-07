@@ -2074,12 +2074,16 @@ def download_broll_candidates(
     split_parts = None if split_full_source else max_parts
     blocked = exclude_source_ids or set()
     ok_ids: list[str] = []
-    to_download: list[VideoCandidate] = []
+    DownloadPlan = tuple[VideoCandidate, int, int]
+    to_download: list[DownloadPlan] = []
     for candidate in candidates:
         if candidate.video_id in blocked:
             continue
         video_id = candidate.video_id
         existing = sorted(clips_dir.glob(f"{video_id}_part*.mp4"))
+        part_start = 1
+        parts_for_source = parts_needed if parts_needed is not None else (max_parts or 3)
+        parts_for_source = max(1, min(8, int(parts_for_source)))
         if existing:
             kept = filter_broll_clip_list(
                 existing,
@@ -2089,17 +2093,30 @@ def download_broll_candidates(
                 jobs_root=jobs_root,
             )
             if kept:
-                print(f"  skip download {video_id}: {len(kept)} cached part(s) in job")
-                ok_ids.append(video_id)
-                if jobs_root and kept:
-                    broll_pool.add_gated_clips_to_pool(jobs_root, subject=subject, clips=kept)
-                if usable_ok and usable_ok():
-                    return ok_ids
-                continue
-        to_download.append(candidate)
+                clip_cap = min(int(needed_clips), 8) if needed_clips else 8
+                if len(kept) >= clip_cap:
+                    print(f"  skip download {video_id}: {len(kept)} cached part(s) in job")
+                    ok_ids.append(video_id)
+                    if jobs_root and kept:
+                        broll_pool.add_gated_clips_to_pool(jobs_root, subject=subject, clips=kept)
+                    if usable_ok and usable_ok():
+                        return ok_ids
+                    continue
+                part_start = len(kept) + 1
+                if needed_clips is not None:
+                    parts_for_source = max(
+                        1, min(8 - len(kept), int(needed_clips) - len(kept), parts_for_source)
+                    )
+                else:
+                    parts_for_source = max(1, parts_for_source - len(kept))
+                print(
+                    f"  extend {video_id}: have {len(kept)} part(s), "
+                    f"fetch {parts_for_source} more (from part {part_start:02d})"
+                )
+        to_download.append((candidate, part_start, parts_for_source))
     search_query = query or subject
-    filtered: list[tuple[VideoCandidate, dict[str, Any]]] = []
-    for candidate in to_download:
+    filtered: list[tuple[VideoCandidate, dict[str, Any], int, int]] = []
+    for candidate, part_start, parts_for_source in to_download:
         ok_fmt, skip_reason, fmt_meta = inspect_usable_formats(candidate.url)
         reject = hard_reject_reason(
             candidate,
@@ -2134,12 +2151,12 @@ def download_broll_candidates(
             )
         except ImportError:
             pass
-        filtered.append((candidate, fmt_meta or {}))
-    to_download = [c for c, _ in filtered]
-    preflight_by_id = {c.video_id: meta for c, meta in filtered}
-    if max_sources is not None and len(to_download) > max_sources:
-        to_download = to_download[:max_sources]
-    if not to_download:
+        filtered.append((candidate, fmt_meta or {}, part_start, parts_for_source))
+    download_plans = filtered
+    preflight_by_id = {c.video_id: meta for c, meta, _, _ in download_plans}
+    if max_sources is not None and len(download_plans) > max_sources:
+        download_plans = download_plans[:max_sources]
+    if not download_plans:
         if raise_if_empty and not ok_ids and not list(clips_dir.glob("*_part*.mp4")):
             msg = (
                 "B-roll download produced no clips that passed the subject/frame gate."
@@ -2148,7 +2165,7 @@ def download_broll_candidates(
             )
             raise RuntimeError(msg)
         return ok_ids
-    batch_size = len(to_download)
+    batch_size = len(download_plans)
 
     def _parts_for_this_source(source_index: int) -> int:
         if parts_needed is not None:
@@ -2162,9 +2179,15 @@ def download_broll_candidates(
             return max(1, split_parts)
         return max(1, max_parts or 3)
 
-    def _process_candidate(candidate: VideoCandidate, *, source_index: int = 0) -> str | None:
+    def _process_candidate(
+        candidate: VideoCandidate,
+        *,
+        source_index: int = 0,
+        part_start: int = 1,
+        parts_count: int | None = None,
+    ) -> str | None:
         video_id = candidate.video_id
-        request_parts = _parts_for_this_source(source_index)
+        request_parts = parts_count if parts_count is not None else _parts_for_this_source(source_index)
         fmt_meta = preflight_by_id.get(video_id) or {}
         if job_dir is None:
             workspace = clips_dir / f".workspace_{video_id}"
@@ -2196,6 +2219,7 @@ def download_broll_candidates(
                         aspect_ratio="9:16",
                         max_height=1080,
                         start_offset=start_offset,
+                        start_part_num=part_start,
                         preflight_format=fmt_meta,
                     )
                     if record.get("status") != "ok":
@@ -2211,6 +2235,7 @@ def download_broll_candidates(
                 candidate=candidate,
                 clip_length=clip_length,
                 parts_needed=request_parts,
+                start_part_num=part_start,
                 start_offset=start_offset,
                 split_full_source=split_full_source,
                 subject=subject,
@@ -2253,7 +2278,7 @@ def download_broll_candidates(
             if job_dir is not None:
                 cleanup_workspace(workspace)
 
-    print(f"Downloading {len(to_download)} B-roll source(s)...")
+    print(f"Downloading {len(download_plans)} B-roll source(s)...")
     seen_ids: set[str] = set()
 
     def _after_source(video_id: str | None) -> bool:
@@ -2283,19 +2308,25 @@ def download_broll_candidates(
                 return True
         return False
 
-    batch = [c for c in to_download if c.video_id not in seen_ids]
+    batch = [plan for plan in download_plans if plan[0].video_id not in seen_ids]
     if allow_parallel and len(batch) >= 2 and job_dir is not None:
         import threading
 
         parallel_results: list[str | None] = [None, None]
         threads: list[threading.Thread] = []
 
-        def _run(idx: int, cand: VideoCandidate) -> None:
-            parallel_results[idx] = _process_candidate(cand, source_index=idx)
+        def _run(idx: int, cand: VideoCandidate, pstart: int, pcount: int) -> None:
+            parallel_results[idx] = _process_candidate(
+                cand, source_index=idx, part_start=pstart, parts_count=pcount
+            )
 
-        for idx, candidate in enumerate(batch[:2]):
+        for idx, (candidate, _meta, part_start, parts_count) in enumerate(batch[:2]):
             seen_ids.add(candidate.video_id)
-            t = threading.Thread(target=_run, args=(idx, candidate), daemon=True)
+            t = threading.Thread(
+                target=_run,
+                args=(idx, candidate, part_start, parts_count),
+                daemon=True,
+            )
             threads.append(t)
             t.start()
         for t in threads:
@@ -2304,11 +2335,16 @@ def download_broll_candidates(
             if vid and _after_source(vid):
                 break
     else:
-        for idx, candidate in enumerate(batch):
+        for idx, (candidate, _meta, part_start, parts_count) in enumerate(batch):
             if candidate.video_id in seen_ids:
                 continue
             seen_ids.add(candidate.video_id)
-            vid = _process_candidate(candidate, source_index=idx)
+            vid = _process_candidate(
+                candidate,
+                source_index=idx,
+                part_start=part_start,
+                parts_count=parts_count,
+            )
             if _after_source(vid):
                 break
     failed = len([c for c in candidates if c.video_id not in ok_ids and c.video_id not in blocked])

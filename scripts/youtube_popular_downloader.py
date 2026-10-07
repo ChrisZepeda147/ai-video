@@ -891,6 +891,7 @@ def download_broll_source_parts(
     max_height: int = 1080,
     prefer_stream_height: int = 1440,
     start_offset: float = 0.0,
+    start_part_num: int = 1,
     quiet: bool = False,
     preflight_format: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -978,7 +979,8 @@ def download_broll_source_parts(
             usable_span = max((duration or 0) - start_offset - clip_length, 0.0)
             fracs = section_start_fractions(parts_request)
             part_entries: list[dict[str, Any]] = []
-            for idx, frac in enumerate(fracs[:parts_request], start=1):
+            part_start = max(1, int(start_part_num))
+            for idx, frac in enumerate(fracs[:parts_request], start=part_start):
                 start = start_offset + usable_span * frac
                 part_path = _download_broll_section_to_part(
                     candidate,
