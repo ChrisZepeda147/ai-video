@@ -604,6 +604,63 @@ def export_clip(
     subprocess.run(cmd, check=True, capture_output=True)
 
 
+def broll_format_selector(*, prefer_height: int = 1440) -> str:
+    """Prefer 1440p/1080p high-FPS streams; 4K only as fallback."""
+    min_fps = int(max(MIN_USABLE_FPS, 50))
+    h1440 = max(720, min(prefer_height, 1440))
+    return (
+        f"bestvideo[fps>={min_fps}][height<={h1440}]+bestaudio/"
+        f"bestvideo[fps>={min_fps}][height<=1080]+bestaudio/"
+        f"bestvideo[fps>={min_fps}][height<=2160]+bestaudio/"
+        f"bestvideo[fps>={min_fps}]+bestaudio/"
+        f"best[fps>={min_fps}]"
+    )
+
+
+def _format_bytes(num: int | float | None) -> str:
+    if num is None:
+        return "?"
+    value = float(num)
+    if value >= 1_000_000_000:
+        return f"{value / 1_000_000_000:.2f}GB"
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.1f}MB"
+    if value >= 1_000:
+        return f"{value / 1_000:.0f}KB"
+    return f"{value:.0f}B"
+
+
+def _extract_info_light(url: str) -> dict[str, Any] | None:
+    opts = {"quiet": True, "no_warnings": True, "skip_download": True, **_toolchain_opts()}
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            return info if isinstance(info, dict) else None
+    except Exception:
+        return None
+
+
+def _log_broll_source_selection(
+    candidate: VideoCandidate,
+    *,
+    info: dict[str, Any] | None,
+    height: int | None,
+    fps: float | None,
+    filesize: int | None,
+) -> None:
+    dur = candidate.duration_seconds
+    if info and dur is None:
+        dur = info.get("duration")
+    print(
+        "BROLL_SOURCE "
+        f"id={candidate.video_id} "
+        f"duration={_format_duration(float(dur) if dur else None)} "
+        f"resolution={height or '?'}p "
+        f"fps={fps if fps is not None else '?'} "
+        f"size={_format_bytes(filesize)}"
+    )
+
+
 def split_into_parts(
     source: Path,
     *,
@@ -615,6 +672,7 @@ def split_into_parts(
     aspect_ratio: str,
     max_height: int,
     start_offset: float = 0.0,
+    spaced: bool = False,
 ) -> list[dict[str, Any]]:
     try:
         source_fps = probe_fps(source)
@@ -635,8 +693,20 @@ def split_into_parts(
         print(f"    Cropping/scaling parts to {aspect_ratio} ({size[0]}x{size[1]})")
 
     parts: list[dict[str, Any]] = []
+    if spaced and part_count > 1 and usable > clip_length:
+        try:
+            from broll_candidate_rank import section_start_fractions
+        except ImportError:
+            section_start_fractions = None  # type: ignore[assignment]
+        fracs = section_start_fractions(part_count) if section_start_fractions else []
+    else:
+        fracs = []
     for part_num in range(1, part_count + 1):
-        start = start_offset + (part_num - 1) * clip_length
+        if fracs and part_num <= len(fracs):
+            span = max(usable - clip_length, 0.0)
+            start = start_offset + span * fracs[part_num - 1]
+        else:
+            start = start_offset + (part_num - 1) * clip_length
         segment_duration = min(float(clip_length), max(duration - start, 0))
         if segment_duration <= 0:
             break
@@ -666,6 +736,198 @@ def split_into_parts(
         print(f"    Removed source file: {source.name}")
 
     return parts
+
+
+def _download_broll_section_to_part(
+    candidate: VideoCandidate,
+    *,
+    output_dir: Path,
+    part_num: int,
+    start: float,
+    duration: float,
+    aspect_ratio: str,
+    max_height: int,
+    format_selector: str,
+    quiet: bool,
+) -> Path | None:
+    from yt_dlp.utils import download_range_func
+
+    part_path = output_dir / f"{candidate.video_id}_part{part_num:02d}.mp4"
+    tmp_stem = output_dir / f".tmp_{candidate.video_id}_p{part_num:02d}"
+    end = start + duration
+    ydl_opts = {
+        "outtmpl": str(tmp_stem) + ".%(ext)s",
+        "format": format_selector,
+        "merge_output_format": "mp4",
+        "noplaylist": True,
+        "quiet": True,
+        "noprogress": True,
+        "no_warnings": True,
+        "overwrites": True,
+        "retries": 1,
+        "fragment_retries": 2,
+        "socket_timeout": 30,
+        "download_ranges": download_range_func(None, [(start, end)]),
+        **_toolchain_opts(),
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(candidate.url, download=True)
+        if not info:
+            return None
+        filepath = Path(ydl.prepare_filename(info))
+        if filepath.suffix.lower() != ".mp4":
+            merged = filepath.with_suffix(".mp4")
+            if merged.exists():
+                filepath = merged
+        if not filepath.exists():
+            return None
+        try:
+            clip_fps = probe_fps(filepath)
+        except (OSError, ValueError, subprocess.CalledProcessError):
+            clip_fps = None
+        if clip_fps is not None and not is_usable_fps(clip_fps):
+            filepath.unlink(missing_ok=True)
+            return None
+        seg_dur = min(duration, probe_duration(filepath))
+        export_clip(
+            filepath,
+            part_path,
+            start=0.0,
+            duration=seg_dur,
+            aspect_ratio=aspect_ratio,
+            max_height=max_height,
+        )
+        filepath.unlink(missing_ok=True)
+        _safe_print(f"    Part {part_num}: {part_path.name} (section @ {start:.0f}s)", quiet=quiet)
+        return part_path
+
+
+def download_broll_source_parts(
+    candidate: VideoCandidate,
+    *,
+    output_dir: Path,
+    clip_length: int,
+    parts_needed: int,
+    aspect_ratio: str = "9:16",
+    max_height: int = 1080,
+    prefer_stream_height: int = 1440,
+    start_offset: float = 0.0,
+    quiet: bool = False,
+) -> dict[str, Any]:
+    """Download only the B-roll windows needed for this source (sections or capped full)."""
+    from broll_candidate_rank import section_start_fractions
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    parts_request = max(1, parts_needed + 1)
+    info = _extract_info_light(candidate.url)
+    duration = candidate.duration_seconds
+    if info and duration is None:
+        duration = info.get("duration")
+    if duration is not None:
+        duration = float(duration)
+
+    height = None
+    fps = candidate.fps
+    filesize = None
+    if info:
+        filesize = info.get("filesize") or info.get("filesize_approx")
+        fmt = info.get("format") or ""
+        if isinstance(fmt, str) and "x" in fmt:
+            try:
+                height = int(fmt.split("x")[-1].split()[0])
+            except ValueError:
+                height = info.get("height")
+        else:
+            height = info.get("height")
+        if fps is None:
+            fps = info.get("fps")
+    _log_broll_source_selection(
+        candidate,
+        info=info,
+        height=int(height) if height else None,
+        fps=float(fps) if fps is not None else None,
+        filesize=int(filesize) if filesize else None,
+    )
+
+    format_selector = broll_format_selector(prefer_height=prefer_stream_height)
+    record: dict[str, Any] = {
+        **asdict(candidate),
+        "status": "pending",
+        "parts": [],
+        "download_mode": "full",
+    }
+
+    section_threshold = 20 * 60.0
+    use_sections = duration is not None and duration > section_threshold and parts_request >= 1
+    if use_sections:
+        try:
+            usable_span = max((duration or 0) - start_offset - clip_length, 0.0)
+            fracs = section_start_fractions(parts_request)
+            part_entries: list[dict[str, Any]] = []
+            for idx, frac in enumerate(fracs[:parts_request], start=1):
+                start = start_offset + usable_span * frac
+                part_path = _download_broll_section_to_part(
+                    candidate,
+                    output_dir=output_dir,
+                    part_num=idx,
+                    start=start,
+                    duration=float(clip_length),
+                    aspect_ratio=aspect_ratio,
+                    max_height=max_height,
+                    format_selector=format_selector,
+                    quiet=quiet,
+                )
+                if part_path:
+                    part_entries.append(
+                        {
+                            "part": idx,
+                            "file_path": str(part_path),
+                            "start_seconds": start,
+                            "duration_seconds": clip_length,
+                        }
+                    )
+            if part_entries:
+                record["parts"] = part_entries
+                record["status"] = "ok"
+                record["download_mode"] = "sections"
+                print("BROLL_DOWNLOAD_MODE=sections")
+                return record
+        except Exception as exc:
+            print(f"BROLL_DOWNLOAD_MODE=full_fallback reason={exc}")
+
+    spaced = bool(duration and duration > clip_length * 2)
+    results = download_videos(
+        [candidate],
+        output_dir=output_dir,
+        max_height=max_height,
+        audio_only=False,
+        clip_length=clip_length,
+        max_parts=parts_request,
+        split_parts=True,
+        keep_source=False,
+        aspect_ratio=aspect_ratio,
+        quiet=quiet,
+        start_offset=start_offset,
+        format_selector=format_selector,
+        spaced_parts=spaced,
+    )
+    if results and results[0].get("status") == "ok":
+        record.update(results[0])
+        record["download_mode"] = "full_fallback" if use_sections else "full"
+        print(
+            "BROLL_DOWNLOAD_MODE=full_fallback"
+            if use_sections
+            else "BROLL_DOWNLOAD_MODE=full"
+        )
+        return record
+    record["status"] = "error"
+    record["download_mode"] = "full_fallback" if use_sections else "full"
+    print(
+        "BROLL_DOWNLOAD_MODE=full_fallback"
+        if use_sections
+        else "BROLL_DOWNLOAD_MODE=full"
+    )
+    return record
 
 
 def filter_unwanted(
@@ -802,6 +1064,8 @@ def download_videos(
     quiet: bool = False,
     id_only_filenames: bool = False,
     start_offset: float = 0.0,
+    format_selector: str | None = None,
+    spaced_parts: bool = False,
 ) -> list[dict[str, Any]]:
     _configure_stdout()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -813,13 +1077,14 @@ def download_videos(
         outtmpl = str(output_dir / name_tpl)
         postprocessors = [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}]
     else:
-        min_fps = int(MIN_USABLE_FPS)
-        format_selector = (
-            f"bestvideo[fps>={min_fps}][height<={max_height}]+bestaudio/"
-            f"bestvideo[fps>={min_fps}]+bestaudio/"
-            f"best[fps>={min_fps}][height<={max_height}]/"
-            f"best[fps>={min_fps}]"
-        )
+        if format_selector is None:
+            min_fps = int(MIN_USABLE_FPS)
+            format_selector = (
+                f"bestvideo[fps>={min_fps}][height<={max_height}]+bestaudio/"
+                f"bestvideo[fps>={min_fps}]+bestaudio/"
+                f"best[fps>={min_fps}][height<={max_height}]/"
+                f"best[fps>={min_fps}]"
+            )
         outtmpl = str(output_dir / "%(id)s_source.%(ext)s")
         postprocessors = []
 
@@ -928,6 +1193,7 @@ def download_videos(
                         aspect_ratio=aspect_ratio,
                         max_height=max_height,
                         start_offset=start_offset,
+                        spaced=spaced_parts,
                     )
                     record["parts"] = parts
                     record["status"] = "ok" if parts else "error"

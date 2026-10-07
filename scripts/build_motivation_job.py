@@ -14,7 +14,8 @@ import math
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any, Callable
 
@@ -71,6 +72,8 @@ from broll_search_query import (
     expand_broll_search_queries,
     gate_subject_for_query,
 )
+from broll_candidate_rank import rank_broll_candidates
+from broll_search_cache import get_cached_candidates, store_cached_candidates
 from broll_usable import BrollInventory, log_broll_progress, measure_usable_broll
 from broll_usable_manifest import verify_manifest, write_manifest
 from montage_timing import montage_timer
@@ -85,12 +88,15 @@ from youtube_popular_downloader import (
     VideoCandidate,
     discover_search,
     discover_urls,
+    download_broll_source_parts,
     download_videos,
     filter_unwanted,
     is_cabin_titled,
     pick_usable_fps_candidates,
     title_suggests_usable_fps,
 )
+
+_VIDEO_CANDIDATE_KEYS = {field.name for field in fields(VideoCandidate)}
 
 KEEP_AUDIO = frozenset({"speech.mp3", "subs.en.json3"})
 KEEP_TOP = frozenset({"url.txt", "job.json", "config.json"})
@@ -1747,7 +1753,7 @@ def _discover_broll_candidates_for_search(
     candidates = pick_usable_fps_candidates(candidates, limit=limit)
     if reuse_policy == "prefer_new":
         candidates.sort(key=lambda item: item.video_id in used)
-    return candidates
+    return rank_broll_candidates(candidates)
 
 
 def prepare_broll(
@@ -1856,11 +1862,13 @@ def download_broll_candidates(
     jobs_root: Path | None = None,
     split_full_source: bool = False,
     needed_clips: int | None = None,
+    parts_needed: int | None = None,
     exclude_source_ids: set[str] | None = None,
     max_sources: int | None = None,
     job_dir: Path | None = None,
     usable_ok: Callable[[], bool] | None = None,
     raise_if_empty: bool = True,
+    allow_parallel: bool = False,
 ) -> list[str]:
     split_parts = None if split_full_source else max_parts
     blocked = exclude_source_ids or set()
@@ -1899,26 +1907,49 @@ def download_broll_candidates(
             )
             raise RuntimeError(msg)
         return ok_ids
-    print(f"Downloading {len(to_download)} B-roll source(s)...")
-    for candidate in to_download:
-        results = download_videos(
-            [candidate],
-            output_dir=clips_dir,
-            max_height=1080,
-            audio_only=False,
-            clip_length=clip_length,
-            max_parts=split_parts,
-            split_parts=True,
-            keep_source=False,
-            aspect_ratio="9:16",
-            start_offset=start_offset,
-        )
+    def _parts_for_this_source() -> int:
+        if parts_needed is not None:
+            return max(1, min(parts_needed, 8))
+        if split_parts is not None:
+            return max(1, split_parts)
+        return max(1, max_parts or 3)
+
+    def _process_candidate(candidate: VideoCandidate) -> str | None:
         video_id = candidate.video_id
-        if not results or results[0].get("status") != "ok":
-            if job_dir:
-                record_failed_source(job_dir, video_id)
-            continue
-        video_id = str(results[0].get("video_id") or candidate.video_id)
+        request_parts = _parts_for_this_source()
+        if split_full_source:
+            results = download_videos(
+                [candidate],
+                output_dir=clips_dir,
+                max_height=1080,
+                audio_only=False,
+                clip_length=clip_length,
+                max_parts=None,
+                split_parts=True,
+                keep_source=False,
+                aspect_ratio="9:16",
+                start_offset=start_offset,
+                spaced_parts=True,
+            )
+            if not results or results[0].get("status") != "ok":
+                if job_dir:
+                    record_failed_source(job_dir, video_id)
+                return None
+        else:
+            record = download_broll_source_parts(
+                candidate,
+                output_dir=clips_dir,
+                clip_length=clip_length,
+                parts_needed=request_parts,
+                aspect_ratio="9:16",
+                max_height=1080,
+                start_offset=start_offset,
+            )
+            if record.get("status") != "ok":
+                if job_dir:
+                    record_failed_source(job_dir, video_id)
+                return None
+            video_id = str(record.get("video_id") or candidate.video_id)
         source_clips = sorted(clips_dir.glob(f"{video_id}_part*.mp4"))
         kept = filter_broll_clip_list(
             source_clips,
@@ -1930,13 +1961,21 @@ def download_broll_candidates(
         if not kept:
             if job_dir:
                 record_failed_source(job_dir, video_id)
-            continue
-        ok_ids.append(video_id)
+            return None
         if jobs_root and kept:
             broll_pool.add_gated_clips_to_pool(jobs_root, subject=subject, clips=kept)
+        return video_id
+
+    print(f"Downloading {len(to_download)} B-roll source(s)...")
+    seen_ids: set[str] = set()
+
+    def _after_source(video_id: str | None) -> bool:
+        if not video_id:
+            return False
+        ok_ids.append(video_id)
         if usable_ok and usable_ok():
             print(f"  B-roll: usable target met after {len(ok_ids)} source(s)")
-            break
+            return True
         if needed_clips and usable_ok is None:
             inv = measure_usable_broll(
                 clips_dir,
@@ -1954,6 +1993,35 @@ def download_broll_candidates(
                     f"  B-roll: stopping early — {inv.usable_count} usable clip(s) "
                     f"(need {needed_clips}) after {len(ok_ids)} source(s)"
                 )
+                return True
+        return False
+
+    batch = [c for c in to_download if c.video_id not in seen_ids]
+    if allow_parallel and len(batch) >= 2:
+        workers = min(2, len(batch))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(_process_candidate, candidate): candidate
+                for candidate in batch[:workers]
+            }
+            for future in as_completed(futures):
+                candidate = futures[future]
+                seen_ids.add(candidate.video_id)
+                try:
+                    vid = future.result()
+                except Exception:
+                    if job_dir:
+                        record_failed_source(job_dir, candidate.video_id)
+                    continue
+                if _after_source(vid):
+                    break
+    else:
+        for candidate in batch:
+            if candidate.video_id in seen_ids:
+                continue
+            seen_ids.add(candidate.video_id)
+            vid = _process_candidate(candidate)
+            if _after_source(vid):
                 break
     failed = len([c for c in candidates if c.video_id not in ok_ids and c.video_id not in blocked])
     if failed:
@@ -2120,7 +2188,7 @@ def filter_broll_clip_list(
             )
             kept.append(clip)
         finally:
-            montage_timer().add_stage("frame_gate", _time.perf_counter() - gate_start)
+            montage_timer().add_child("frame_gate", _time.perf_counter() - gate_start)
     if all_clips:
         print(f"  frame gate: kept {len(kept)}/{len(all_clips)} clip(s)")
     return kept
@@ -2220,16 +2288,17 @@ def _inventory(
     frame_gate: bool,
     jobs_root: Path | None,
 ) -> BrollInventory:
-    return measure_usable_broll(
-        clips_dir,
-        required=required,
-        gate_fn=_broll_gate_fn(
-            subject=subject,
-            use_vision=use_vision,
-            frame_gate=frame_gate,
-            jobs_root=jobs_root,
-        ),
-    )
+    with montage_timer().stage_child("inventory_gate"):
+        return measure_usable_broll(
+            clips_dir,
+            required=required,
+            gate_fn=_broll_gate_fn(
+                subject=subject,
+                use_vision=use_vision,
+                frame_gate=frame_gate,
+                jobs_root=jobs_root,
+            ),
+        )
 
 
 def _raise_broll_insufficient(
@@ -2272,6 +2341,11 @@ def _raise_broll_insufficient(
     raise MontageFailureError(failure)
 
 
+def _candidate_from_cache(item: dict[str, Any]) -> VideoCandidate:
+    payload = {key: item[key] for key in _VIDEO_CANDIDATE_KEYS if key in item}
+    return VideoCandidate(**payload)
+
+
 def _discover_candidates_for_query(
     search_query: str,
     *,
@@ -2281,18 +2355,45 @@ def _discover_candidates_for_query(
     min_duration: int,
     reuse_policy: str,
     exclude_source_ids: set[str],
+    jobs_root: Path | None = None,
+    force_search: bool = False,
 ) -> list[VideoCandidate]:
     gate_subject = gate_subject_for_query(search_query, subject)
     gate = gate_subject or subject or search_query
-    batch = _discover_broll_candidates_for_search(
-        search_query,
-        limit=limit,
-        subject=gate,
-        min_views=min_views,
-        min_duration=min_duration,
-        reuse_policy=reuse_policy,
-    )
-    return [item for item in batch if item.video_id not in exclude_source_ids]
+    batch: list[VideoCandidate] = []
+    if not force_search:
+        cached = get_cached_candidates(
+            jobs_root,
+            query=search_query,
+            min_views=min_views,
+            min_duration=min_duration,
+        )
+        if cached:
+            montage_timer().stats.search_cache_hit = True
+            print(
+                f"BROLL_SEARCH cache_hit query={search_query!r} candidates={len(cached)}"
+            )
+            batch = [_candidate_from_cache(item) for item in cached]
+    if not batch:
+        print(f"BROLL_SEARCH cache_miss query={search_query!r}")
+        batch = _discover_broll_candidates_for_search(
+            search_query,
+            limit=max(limit, 12),
+            subject=gate,
+            min_views=min_views,
+            min_duration=min_duration,
+            reuse_policy=reuse_policy,
+        )
+        if jobs_root and batch:
+            store_cached_candidates(
+                jobs_root,
+                query=search_query,
+                min_views=min_views,
+                min_duration=min_duration,
+                candidates=[asdict(item) for item in batch],
+            )
+    filtered = [item for item in batch if item.video_id not in exclude_source_ids]
+    return filtered[:limit] if limit else filtered
 
 
 def _try_diversity_download(
@@ -2322,7 +2423,7 @@ def _try_diversity_download(
         return inv
     candidates: list[VideoCandidate] = []
     for search_query in broaden_broll_query_ladder(query)[:2]:
-        with montage_timer().stage("youtube_search"):
+        with montage_timer().stage_child("youtube_search"):
             candidates = _discover_candidates_for_query(
                 search_query,
                 limit=1,
@@ -2331,6 +2432,7 @@ def _try_diversity_download(
                 min_duration=min_duration,
                 reuse_policy=reuse_policy,
                 exclude_source_ids=exclude_source_ids,
+                jobs_root=jobs_root,
             )
         if candidates:
             break
@@ -2339,7 +2441,7 @@ def _try_diversity_download(
         return inv
     montage_timer().stats.downloads_attempted += 1
     try:
-        with montage_timer().stage("broll_download"):
+        with montage_timer().stage_child("broll_download"):
             ids = download_broll_candidates(
                 clips_dir,
                 candidates[:1],
@@ -2354,6 +2456,7 @@ def _try_diversity_download(
                 max_sources=1,
                 job_dir=job_dir,
                 exclude_source_ids=exclude_source_ids,
+                parts_needed=max(1, inv.required - inv.usable_count),
                 raise_if_empty=False,
             )
         if ids:
@@ -2424,6 +2527,8 @@ def ensure_broll_clips(
         frame_gate=frame_gate,
         jobs_root=jobs_root,
     )
+    montage_timer().stats.starting_usable = inv.usable_count
+    montage_timer().stats.required_clips = needed_clips
     log_broll_progress("ensure_broll", inv, status="progress")
 
     if inv.satisfies_count():
@@ -2451,7 +2556,7 @@ def ensure_broll_clips(
         return collected_ids
 
     missing = max(0, needed_clips - inv.usable_count)
-    with montage_timer().stage("pool_lookup"):
+    with montage_timer().stage_child("pool_lookup"):
         broll_pool.take_from_pool(
             jobs_root,
             subject=subject,
@@ -2518,6 +2623,35 @@ def ensure_broll_clips(
     start_idx = min(acquire["query_index"], max(0, len(ladder) - 1))
     source_cap = 3 if not split_full_source else 4
     max_attempts = source_cap * len(ladder)
+    ranked_queues: dict[str, list[VideoCandidate]] = {}
+    queue_cursors: dict[str, int] = {}
+
+    def _pop_candidate(search_query: str) -> VideoCandidate | None:
+        if search_query not in ranked_queues:
+            with montage_timer().stage_child("youtube_search"):
+                ranked_queues[search_query] = _discover_candidates_for_query(
+                    search_query,
+                    limit=max(clips_limit, 12),
+                    subject=subject,
+                    min_views=min_views,
+                    min_duration=min_duration,
+                    reuse_policy=reuse_policy,
+                    exclude_source_ids=exclude,
+                    jobs_root=jobs_root,
+                )
+            queue_cursors[search_query] = 0
+            if ranked_queues[search_query]:
+                record_query_attempt(job_dir, search_query)
+        cursor = queue_cursors.get(search_query, 0)
+        queue = ranked_queues.get(search_query) or []
+        while cursor < len(queue):
+            candidate = queue[cursor]
+            queue_cursors[search_query] = cursor + 1
+            cursor += 1
+            if candidate.video_id in exclude:
+                continue
+            return candidate
+        return None
 
     attempt = 0
     while not inv.satisfies_count() and attempt < max_attempts:
@@ -2525,29 +2659,24 @@ def ensure_broll_clips(
         if q_idx >= len(ladder):
             break
         search_query = ladder[q_idx]
-        record_query_attempt(job_dir, search_query)
         bump_query_index(job_dir, q_idx)
-        with montage_timer().stage("youtube_search"):
-            candidates = _discover_candidates_for_query(
-                search_query,
-                limit=clips_limit,
-                subject=subject,
-                min_views=min_views,
-                min_duration=min_duration,
-                reuse_policy=reuse_policy,
-                exclude_source_ids=exclude,
-            )
-        if not candidates:
+        missing_now = max(0, needed_clips - inv.usable_count)
+        parallel_n = 2 if missing_now >= 4 else 1
+        batch: list[VideoCandidate] = []
+        for _ in range(parallel_n):
+            candidate = _pop_candidate(search_query)
+            if candidate:
+                batch.append(candidate)
+        if not batch:
             attempt += 1
             continue
-        candidate = candidates[0]
-        downloads_attempted += 1
-        montage_timer().stats.downloads_attempted += 1
+        downloads_attempted += len(batch)
+        montage_timer().stats.downloads_attempted += len(batch)
         try:
-            with montage_timer().stage("broll_download"):
+            with montage_timer().stage_child("broll_download"):
                 ids = download_broll_candidates(
                     clips_dir,
-                    [candidate],
+                    batch,
                     clip_length=clip_length,
                     max_parts=max_parts,
                     start_offset=start_offset,
@@ -2558,19 +2687,24 @@ def ensure_broll_clips(
                     split_full_source=split_full_source,
                     job_dir=job_dir,
                     exclude_source_ids=exclude,
-                    max_sources=1,
+                    max_sources=len(batch),
+                    parts_needed=missing_now,
+                    needed_clips=needed_clips,
+                    allow_parallel=parallel_n >= 2 and len(batch) >= 2,
                     raise_if_empty=False,
                 )
             if ids:
-                downloads_ok += 1
-                montage_timer().stats.downloads_successful += 1
+                downloads_ok += len(ids)
+                montage_timer().stats.downloads_successful += len(ids)
                 collected_ids = list(dict.fromkeys([*collected_ids, *ids]))
-            else:
+            for candidate in batch:
+                if candidate.video_id not in ids:
+                    record_failed_source(job_dir, candidate.video_id)
+                    exclude.add(candidate.video_id)
+        except RuntimeError:
+            for candidate in batch:
                 record_failed_source(job_dir, candidate.video_id)
                 exclude.add(candidate.video_id)
-        except RuntimeError:
-            record_failed_source(job_dir, candidate.video_id)
-            exclude.add(candidate.video_id)
         inv = _inventory(
             clips_dir,
             required=needed_clips,
@@ -2661,7 +2795,7 @@ def render_job(
         driven_pacing=driven_pacing,
         subject=subject,
     )
-    with montage_timer().stage("pre_render"):
+    with montage_timer().stage_top("render"):
         manifest_ok, present, required = verify_manifest(job_dir, clips_dir)
         if manifest_ok and present >= min_files:
             usable_count = present
@@ -2706,12 +2840,11 @@ def render_job(
                 ),
                 manifest=0,
             )
-    grade_note = "charcoal grade" if grade else "no grade"
-    print(
-        f"Rendering montage: {usable_count} usable clip(s), {duration:.0f}s speech, "
-        f"{segment_length:.1f}s beats, {playback_speed:.0%} speed, {grade_note}"
-    )
-    with montage_timer().stage("render"):
+        grade_note = "charcoal grade" if grade else "no grade"
+        print(
+            f"Rendering montage: {usable_count} usable clip(s), {duration:.0f}s speech, "
+            f"{segment_length:.1f}s beats, {playback_speed:.0%} speed, {grade_note}"
+        )
         used_clips = build_montage(
             clips_dir=clips_dir,
             audio=audio,
@@ -3227,9 +3360,9 @@ def main() -> int:
         print("Speech review did not stop early — check logs.", file=sys.stderr)
         return 1
 
-    montage_timer().reset()
+    montage_timer().reset(slug=args.slug)
     try:
-        with montage_timer().stage("prepare_speech"):
+        with montage_timer().stage_top("prepare_speech"):
             speech, start, duration, excerpt_text, source_text = prepare_speech(
                 jobs_root=jobs_root,
                 audio_dir=audio_dir,
@@ -3298,7 +3431,8 @@ def main() -> int:
             driven_pacing=driven_pacing,
             subject=args.broll_query,
         )
-        with montage_timer().stage("ensure_broll"):
+        montage_timer().stats.required_clips = needed_clips
+        with montage_timer().stage_top("ensure_broll"):
             broll_ids = ensure_broll_clips(
                 jobs_root=jobs_root,
                 clips_dir=clips_dir,
@@ -3402,7 +3536,7 @@ def main() -> int:
     if not args.no_cleanup:
         removed = cleanup_job_dir(job_dir, keep_work=args.keep_work)
         print(f"Cleaned {len(removed)} leftover file(s).")
-    with montage_timer().stage("register"):
+    with montage_timer().stage_top("register"):
         try:
             from discovery.auto_register import sync_register_best_effort
 

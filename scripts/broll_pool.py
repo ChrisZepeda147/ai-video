@@ -51,6 +51,30 @@ def _write_pool_meta(path: Path, *, subject: str) -> None:
     meta_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+SCENIC_CATEGORY_TOKENS = frozenset(
+    {
+        "autumn",
+        "beach",
+        "coast",
+        "desert",
+        "fall",
+        "forest",
+        "lake",
+        "mountain",
+        "mountains",
+        "mountainous",
+        "ocean",
+        "river",
+        "snow",
+        "sunrise",
+        "sunset",
+        "valley",
+        "waterfall",
+        "woods",
+    }
+)
+
+
 _MODEL_HINTS = frozenset(
     {
         "488",
@@ -81,6 +105,25 @@ def _model_tokens(tokens: list[str]) -> set[str]:
     return {item for item in tokens if item in _MODEL_HINTS}
 
 
+def _scenic_normalize(token: str) -> str | None:
+    if token.endswith("s"):
+        singular = token[:-1]
+        if singular in SCENIC_CATEGORY_TOKENS:
+            return singular
+    if token in SCENIC_CATEGORY_TOKENS:
+        return token
+    return None
+
+
+def _scenic_token_set(tokens: list[str]) -> set[str]:
+    out: set[str] = set()
+    for item in tokens:
+        norm = _scenic_normalize(item)
+        if norm:
+            out.add(norm)
+    return out
+
+
 def subjects_match(left: str, right_tokens: list[str]) -> bool:
     """Same brand may share a pool. Named models (488 vs SF90) stay separate."""
     want = subject_tokens(left)
@@ -95,10 +138,18 @@ def subjects_match(left: str, right_tokens: list[str]) -> bool:
         return False
     if want[0] == have[0]:
         return True
+    want_scenic = _scenic_token_set(want)
+    have_scenic = _scenic_token_set(have)
+    if want_scenic and have_scenic:
+        scenic_shared = want_scenic & have_scenic
+        if len(scenic_shared) >= 2:
+            return True
+        if len(scenic_shared) == 1 and min(len(want_scenic), len(have_scenic)) == 1:
+            return True
     shared = set(want) & set(have)
-    if not shared:
-        return False
-    return len(shared) >= min(len(set(want)), len(set(have)))
+    if shared:
+        return len(shared) >= min(len(set(want)), len(set(have)))
+    return False
 
 
 def find_matching_pools(jobs_root: Path, subject: str) -> list[Path]:

@@ -20,7 +20,7 @@ from montage_telemetry import MontageFailure, resolve_actionable_error
 
 class MontageReliabilityTests(unittest.TestCase):
     def test_driven_pacing_does_not_require_beat_count_files(self) -> None:
-        for duration in (60.0, 90.0):
+        for duration in (60.0, 76.0, 90.0):
             needed = montage.unique_clips_required(
                 target_duration=duration,
                 segment_length=montage.segment_length_for_duration(duration),
@@ -35,7 +35,7 @@ class MontageReliabilityTests(unittest.TestCase):
                 subject="Porsche 911 exterior cinematic 60fps",
             )
             self.assertGreaterEqual(needed, 3)
-            self.assertLessEqual(needed, 12)
+            self.assertLessEqual(needed, 8)
             self.assertGreater(beats, needed)
             self.assertLess(needed, 20)
 
