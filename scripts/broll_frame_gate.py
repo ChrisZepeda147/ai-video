@@ -164,6 +164,41 @@ VIEW_ONLY_WORDS = frozenset(
         "window",
     }
 )
+NATURAL_SCENERY_WORDS = frozenset(
+    {
+        "alpine",
+        "autumn",
+        "beach",
+        "canyon",
+        "cliff",
+        "coast",
+        "desert",
+        "fall",
+        "fog",
+        "foggy",
+        "forest",
+        "golden",
+        "lake",
+        "landscape",
+        "meadow",
+        "mist",
+        "mountain",
+        "mountains",
+        "nature",
+        "ocean",
+        "overlook",
+        "rain",
+        "rainy",
+        "river",
+        "scenic",
+        "sunrise",
+        "sunset",
+        "valley",
+        "waterfall",
+        "wilderness",
+        "woods",
+    }
+)
 PEOPLE_OK_RE = re.compile(
     r"\b(person|people|crowd|model|athlete|workers?|host|realtor|interview|"
     r"portrait|talking|facecam|couple|family|vlog|walking|runner|gym)\b",
@@ -347,7 +382,11 @@ def prefers_no_people(subject: str) -> bool:
         tokens.update(SUBJECT_ALIASES.get(token, ()))
     if tokens & VIEW_ONLY_WORDS:
         return True
-    return wants_scene(text)
+    if tokens & NATURAL_SCENERY_WORDS:
+        return True
+    if wants_scene(text):
+        return True
+    return False
 
 
 def _luma_var(png_bytes: bytes, *, x0: float, x1: float, y0: float, y1: float) -> float:
