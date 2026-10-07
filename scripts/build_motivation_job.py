@@ -59,7 +59,26 @@ from toolchain_env import (
     subprocess_env,
 )
 from build_stills_slideshow import burn_captions, normalize_caption_align, parse_json3_words
-from broll_search_query import expand_broll_search_queries, gate_subject_for_query
+from broll_acquire_state import (
+    bump_query_index,
+    load_state,
+    record_failed_source,
+    record_query_attempt,
+)
+from broll_gate_cache import lookup_gate_result, store_gate_result
+from broll_search_query import (
+    broaden_broll_query_ladder,
+    expand_broll_search_queries,
+    gate_subject_for_query,
+)
+from broll_usable import BrollInventory, log_broll_progress, measure_usable_broll
+from montage_telemetry import (
+    MontageFailure,
+    MontageFailureError,
+    emit_stage_line,
+    emit_warning,
+    extract_log_tail,
+)
 from youtube_popular_downloader import (
     VideoCandidate,
     discover_search,
@@ -1835,11 +1854,19 @@ def download_broll_candidates(
     jobs_root: Path | None = None,
     split_full_source: bool = False,
     needed_clips: int | None = None,
+    exclude_source_ids: set[str] | None = None,
+    max_sources: int | None = None,
+    job_dir: Path | None = None,
+    usable_ok: Callable[[], bool] | None = None,
+    raise_if_empty: bool = True,
 ) -> list[str]:
     split_parts = None if split_full_source else max_parts
+    blocked = exclude_source_ids or set()
     ok_ids: list[str] = []
     to_download: list[VideoCandidate] = []
     for candidate in candidates:
+        if candidate.video_id in blocked:
+            continue
         video_id = candidate.video_id
         existing = sorted(clips_dir.glob(f"{video_id}_part*.mp4"))
         if existing:
@@ -1848,33 +1875,29 @@ def download_broll_candidates(
                 subject=subject,
                 use_vision=use_vision,
                 frame_gate=frame_gate,
+                jobs_root=jobs_root,
             )
             if kept:
                 print(f"  skip download {video_id}: {len(kept)} cached part(s) in job")
                 ok_ids.append(video_id)
                 if jobs_root and kept:
                     broll_pool.add_gated_clips_to_pool(jobs_root, subject=subject, clips=kept)
+                if usable_ok and usable_ok():
+                    return ok_ids
                 continue
         to_download.append(candidate)
-    if needed_clips and needed_clips > 0:
-        if split_full_source:
-            parts_each = max(1, int(max_parts or 6))
-            source_cap = 4
-        else:
-            parts_each = max(1, int(max_parts or 3))
-            source_cap = 3
-        max_sources = max(1, min(len(to_download), (needed_clips + parts_each - 1) // parts_each + 1))
-        max_sources = min(max_sources, source_cap)
-        if len(to_download) > max_sources:
-            print(
-                f"B-roll: capping downloads to {max_sources} source(s) "
-                f"(need ~{needed_clips} clip(s), {parts_each} part(s) each)"
-            )
-            to_download = to_download[:max_sources]
+    if max_sources is not None and len(to_download) > max_sources:
+        to_download = to_download[:max_sources]
     if not to_download:
-        print("B-roll: all requested sources already cached — skip download")
-    else:
-        print(f"Downloading {len(to_download)} B-roll source(s)...")
+        if raise_if_empty and not ok_ids and not list(clips_dir.glob("*_part*.mp4")):
+            msg = (
+                "B-roll download produced no clips that passed the subject/frame gate."
+                if frame_gate
+                else "B-roll download produced no clips."
+            )
+            raise RuntimeError(msg)
+        return ok_ids
+    print(f"Downloading {len(to_download)} B-roll source(s)...")
     for candidate in to_download:
         results = download_videos(
             [candidate],
@@ -1888,39 +1911,77 @@ def download_broll_candidates(
             aspect_ratio="9:16",
             start_offset=start_offset,
         )
+        video_id = candidate.video_id
         if not results or results[0].get("status") != "ok":
+            if job_dir:
+                record_failed_source(job_dir, video_id)
             continue
         video_id = str(results[0].get("video_id") or candidate.video_id)
-        ok_ids.append(video_id)
         source_clips = sorted(clips_dir.glob(f"{video_id}_part*.mp4"))
         kept = filter_broll_clip_list(
             source_clips,
             subject=subject,
             use_vision=use_vision,
             frame_gate=frame_gate,
+            jobs_root=jobs_root,
         )
+        if not kept:
+            if job_dir:
+                record_failed_source(job_dir, video_id)
+            continue
+        ok_ids.append(video_id)
         if jobs_root and kept:
             broll_pool.add_gated_clips_to_pool(jobs_root, subject=subject, clips=kept)
-        kept_all = sorted(clips_dir.glob("*_part*.mp4"))
-        if needed_clips and len(kept_all) >= needed_clips:
-            print(
-                f"  B-roll: stopping early — {len(kept_all)} clip(s) "
-                f"(need {needed_clips}) after {len(ok_ids)} source(s)"
-            )
+        if usable_ok and usable_ok():
+            print(f"  B-roll: usable target met after {len(ok_ids)} source(s)")
             break
-    failed = len(candidates) - len(ok_ids)
+        if needed_clips and usable_ok is None:
+            inv = measure_usable_broll(
+                clips_dir,
+                required=needed_clips,
+                gate_fn=lambda paths: filter_broll_clip_list(
+                    paths,
+                    subject=subject,
+                    use_vision=use_vision,
+                    frame_gate=frame_gate,
+                    jobs_root=jobs_root,
+                ),
+            )
+            if inv.satisfies_count():
+                print(
+                    f"  B-roll: stopping early — {inv.usable_count} usable clip(s) "
+                    f"(need {needed_clips}) after {len(ok_ids)} source(s)"
+                )
+                break
+    failed = len([c for c in candidates if c.video_id not in ok_ids and c.video_id not in blocked])
     if failed:
-        print(f"  download: {len(ok_ids)} ok, {failed} failed")
-    kept_all = sorted(clips_dir.glob("*_part*.mp4"))
-    if not kept_all:
-        msg = (
-            "B-roll download produced no clips that passed the subject/frame gate."
-            if frame_gate
-            else "B-roll download produced no clips."
+        print(f"  download: {len(ok_ids)} ok, {failed} not used")
+    if raise_if_empty and not ok_ids:
+        usable_now = filter_broll_clips(
+            clips_dir,
+            subject=subject,
+            use_vision=use_vision,
+            frame_gate=frame_gate,
+            jobs_root=jobs_root,
         )
-        raise RuntimeError(msg)
+        if not usable_now:
+            msg = (
+                "B-roll download produced no clips that passed the subject/frame gate."
+                if frame_gate
+                else "B-roll download produced no clips."
+            )
+            raise RuntimeError(msg)
     label = "subject/frame gate" if frame_gate else "download (fps only)"
-    print(f"  ready: {len(kept_all)} clip(s) after {label}")
+    usable_count = len(
+        filter_broll_clips(
+            clips_dir,
+            subject=subject,
+            use_vision=use_vision,
+            frame_gate=frame_gate,
+            jobs_root=jobs_root,
+        )
+    )
+    print(f"  ready: {usable_count} usable clip(s) after {label}")
     return ok_ids
 
 
@@ -1957,32 +2018,73 @@ def filter_broll_clip_list(
     subject: str,
     use_vision: bool = True,
     frame_gate: bool = True,
+    jobs_root: Path | None = None,
+    delete_rejects: bool = True,
 ) -> list[Path]:
     kept: list[Path] = []
+    subject_slug = broll_pool.subject_pool_slug(subject)
     all_clips = drop_low_fps_clips(sorted(clips), delete=True)
     if not frame_gate:
         if all_clips:
             print(f"  frame gate: skipped — kept {len(all_clips)} clip(s) (fps only)")
         return all_clips
     for clip in all_clips:
+        source_id = broll_pool._youtube_id_from_clip_name(clip.name) or clip.stem
+        cached = lookup_gate_result(jobs_root, clip, subject_slug=subject_slug)
+        if cached is not None:
+            if cached.get("pass"):
+                kept.append(clip)
+                continue
+            reason = str(cached.get("reason") or "cached fail")
+            print(f"  drop {clip.name}: cached gate ({reason})")
+            if delete_rejects:
+                clip.unlink(missing_ok=True)
+            continue
         try:
             duration = probe_duration(clip)
         except (subprocess.CalledProcessError, ValueError):
             print(f"  drop {clip.name}: unreadable")
-            clip.unlink(missing_ok=True)
+            store_gate_result(
+                jobs_root,
+                clip,
+                subject_slug=subject_slug,
+                passed=False,
+                reason="unreadable",
+                source_id=source_id,
+            )
+            if delete_rejects:
+                clip.unlink(missing_ok=True)
             continue
         samples = scan_clip_local(clip, duration=duration, subject=subject)
         span = longest_clean_span(samples, min_length=min(MIN_CLEAN_SPAN, duration))
         if span is None:
             print(f"  drop {clip.name}: no subject span")
-            clip.unlink(missing_ok=True)
+            store_gate_result(
+                jobs_root,
+                clip,
+                subject_slug=subject_slug,
+                passed=False,
+                reason="no subject span",
+                source_id=source_id,
+            )
+            if delete_rejects:
+                clip.unlink(missing_ok=True)
             continue
         start, end = span
         if use_vision and not confirm_span_subject(
             clip, start=start, end=end, subject=subject
         ):
             print(f"  drop {clip.name}: missing-subject / out-of-context")
-            clip.unlink(missing_ok=True)
+            store_gate_result(
+                jobs_root,
+                clip,
+                subject_slug=subject_slug,
+                passed=False,
+                reason="vision reject",
+                source_id=source_id,
+            )
+            if delete_rejects:
+                clip.unlink(missing_ok=True)
             continue
         if start > 0.35 or end < duration - 0.35:
             print(f"  trim {clip.name}: {start:.1f}-{end:.1f}s")
@@ -1990,8 +2092,25 @@ def filter_broll_clip_list(
                 _trim_clip_to_span(clip, start, end)
             except subprocess.CalledProcessError:
                 print(f"  drop {clip.name}: trim failed")
-                clip.unlink(missing_ok=True)
+                store_gate_result(
+                    jobs_root,
+                    clip,
+                    subject_slug=subject_slug,
+                    passed=False,
+                    reason="trim failed",
+                    source_id=source_id,
+                )
+                if delete_rejects:
+                    clip.unlink(missing_ok=True)
                 continue
+        store_gate_result(
+            jobs_root,
+            clip,
+            subject_slug=subject_slug,
+            passed=True,
+            reason="ok",
+            source_id=source_id,
+        )
         kept.append(clip)
     if all_clips:
         print(f"  frame gate: kept {len(kept)}/{len(all_clips)} clip(s)")
@@ -2019,12 +2138,15 @@ def filter_broll_clips(
     subject: str,
     use_vision: bool = True,
     frame_gate: bool = True,
+    jobs_root: Path | None = None,
 ) -> list[Path]:
     return filter_broll_clip_list(
         sorted(clips_dir.glob("*_part*.mp4")),
         subject=subject,
         use_vision=use_vision,
         frame_gate=frame_gate,
+        jobs_root=jobs_root,
+        delete_rejects=True,
     )
 
 

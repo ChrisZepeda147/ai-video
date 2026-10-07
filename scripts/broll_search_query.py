@@ -119,3 +119,64 @@ def gate_subject_for_query(query: str, subject: str = "") -> str:
     if is_storyboard_query(query):
         return ""
     return (subject or query).strip()
+
+
+_MODIFIER_WORDS = frozenset(
+    {
+        "4k",
+        "60fps",
+        "50fps",
+        "cinematic",
+        "cinematics",
+        "drone",
+        "aerial",
+        "short",
+        "video",
+        "footage",
+        "foggy",
+        "misty",
+        "moody",
+        "dark",
+        "luxury",
+        "beautiful",
+        "epic",
+        "ultra",
+        "hd",
+    }
+)
+
+
+def broaden_broll_query_ladder(query: str, *, max_steps: int = 4) -> list[str]:
+    """Deterministic broader searches that keep the core subject tokens."""
+    text = (query or "").strip()
+    if not text:
+        return []
+    storyboard = expand_broll_search_queries(text)
+    if len(storyboard) > 1:
+        return storyboard[:max_steps]
+    tokens = re.sub(r"[^a-z0-9]+", " ", text.lower()).split()
+    core = [t for t in tokens if t not in _MODIFIER_WORDS and len(t) > 2]
+    if not core:
+        core = [t for t in tokens if len(t) > 2]
+    if not core:
+        return [text]
+    ladder: list[str] = []
+    seen: set[str] = set()
+
+    def add(q: str) -> None:
+        q = " ".join(q.split()).strip()
+        if not q or q in seen:
+            return
+        seen.add(q)
+        ladder.append(q)
+
+    add(text)
+    for drop in (2, 3, 4):
+        if len(core) <= 1:
+            break
+        keep = core[: max(1, len(core) - (drop - 1))]
+        add(" ".join(keep) + " cinematic")
+    if len(core) >= 2:
+        add(" ".join(core[:2]) + " cinematic")
+    add(" ".join(core[:3]) if len(core) >= 3 else " ".join(core))
+    return ladder[:max_steps]
