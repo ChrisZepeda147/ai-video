@@ -77,6 +77,7 @@ from broll_acquire_workspace import cleanup_workspace, finalize_parts, source_wo
 from broll_candidate_rank import rank_broll_candidates
 from broll_format_preflight import inspect_usable_formats, log_candidate_skip
 from broll_search_cache import get_cached_candidates, store_cached_candidates
+from montage_speech import PreparedSpeechRejected, validate_prepared_speech_file
 from montage_speaker import SpeechSpeakerMismatchError, enforce_requested_speaker
 from broll_usable import BrollInventory, log_broll_progress, measure_usable_broll
 from broll_usable_manifest import verify_manifest, write_manifest
@@ -3026,8 +3027,8 @@ def rerender_existing_job(
                 speaker=str(payload.get("speaker") or "Andrew Tate"),
                 speech_query=str(payload.get("speech_query") or ""),
                 speech_url=speech_url,
-                min_seconds=60.0,
-                max_seconds=float(payload.get("audio_duration") or 90.0),
+                min_seconds=float(payload.get("min_seconds") or 30.0),
+                max_seconds=float(payload.get("max_seconds") or payload.get("audio_duration") or 90.0),
                 allow_reuse=True,
             )
         except (FileNotFoundError, RuntimeError, ValueError, subprocess.CalledProcessError) as exc:
@@ -3428,6 +3429,7 @@ def main() -> int:
         return 1
 
     montage_timer().reset(slug=args.slug)
+    requested_speaker = speaker
     try:
         with montage_timer().stage_top("prepare_speech"):
             speech, start, duration, excerpt_text, source_text = prepare_speech(
@@ -3446,7 +3448,14 @@ def main() -> int:
                 agent_speech_vet=gate_flags.speech_vet,
                 review_out_dir=job_dir / "cursor-review",
             )
-        requested_speaker = speaker
+            duration = validate_prepared_speech_file(
+                speech_mp3=audio_dir / "speech.mp3",
+                requested_speaker=requested_speaker,
+                source_video_id=speech.video_id,
+                excerpt=excerpt_text,
+                min_seconds=args.min_seconds,
+                probe_duration_fn=probe_duration,
+            )
         speaker_resolution: dict[str, object] = {}
         try:
             from discovery.config import default_db_path, load_env
@@ -3548,6 +3557,10 @@ def main() -> int:
         return 0
     except SpeechSpeakerMismatchError as exc:
         print(f"SPEAKER_MISMATCH: {exc}", file=sys.stderr)
+        montage_timer().emit()
+        return 1
+    except PreparedSpeechRejected as exc:
+        print(f"SPEECH_REJECT: {exc}", file=sys.stderr)
         montage_timer().emit()
         return 1
     except MotivationJobError as exc:

@@ -44,7 +44,7 @@ def compose_montage_command(
     owner: str,
     audio_query: str | None = None,
     broll_query: str,
-    min_seconds: int = 60,
+    min_seconds: int = 30,
     max_seconds: int = 90,
     extra_instructions: str | None = None,
     style_ref_paths: list[str] | None = None,

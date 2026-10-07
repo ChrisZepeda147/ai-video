@@ -100,7 +100,7 @@ def parse_montage_command(text: str) -> dict[str, Any] | None:
         source_title = re.sub(r"^Official video\s+", "", source_title.strip(), flags=re.IGNORECASE)
         source_title = source_title.strip("\"'“”")
 
-    min_sec = 60.0
+    min_sec = 30.0
     max_sec = 90.0
     length_match = re.search(
         r"Default target length:\s*(\d+)\s*[–-]\s*(\d+)",

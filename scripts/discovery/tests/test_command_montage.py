@@ -39,6 +39,17 @@ class TestCommandMontage(unittest.TestCase):
         self.assertEqual(plan["max_seconds"], 90.0)
         self.assertEqual(plan["reuse_policy"], "allow")
 
+    def test_default_length_window_30_90_when_brief_omits(self) -> None:
+        text = """
+Make a new 9:16 motivational Short using the luxury-clips-montage workflow.
+Search for audio: jordan peterson
+Visual / B-roll search: alpine lake
+"""
+        plan = parse_montage_command(text)
+        assert plan is not None
+        self.assertEqual(plan["min_seconds"], 30.0)
+        self.assertEqual(plan["max_seconds"], 90.0)
+
     def test_blank_extra_section_is_allow(self) -> None:
         text = SAMPLE.split("Extra instructions:")[0] + "Extra instructions:\n"
         plan = parse_montage_command(text)

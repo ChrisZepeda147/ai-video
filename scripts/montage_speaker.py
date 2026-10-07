@@ -18,6 +18,7 @@ class SpeechSpeakerMismatchError(Exception):
 
 
 def log_montage_speaker(*, requested: str, resolved: str, source_video_id: str) -> None:
+    """Legacy line — prefer log_montage_speech_ok after speech.mp3 probe."""
     print(
         f'MONTAGE_SPEAKER requested="{requested}" '
         f'resolved="{resolved}" source_video_id={source_video_id}'
@@ -45,9 +46,4 @@ def enforce_requested_speaker(
         resolved = requested_clean
     elif requested_clean:
         resolved = requested_clean
-    log_montage_speaker(
-        requested=requested_clean or resolved,
-        resolved=resolved,
-        source_video_id=candidate.video_id,
-    )
     return resolved
