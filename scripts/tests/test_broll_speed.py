@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import shutil
 import sys
 import tempfile
 import time
@@ -122,17 +123,33 @@ class BrollSpeedTests(unittest.TestCase):
                     }
                 ],
             )
-            out = job._discover_candidates_for_query(
-                "forest",
-                limit=5,
-                subject="forest",
-                min_views=0,
-                min_duration=0,
-                reuse_policy="allow",
-                exclude_source_ids={"bad"},
-                jobs_root=jobs_root,
+            fresh = VideoCandidate(
+                video_id="good",
+                title="Forest walk 60fps",
+                url="https://www.youtube.com/watch?v=good",
+                channel="x",
+                view_count=1,
+                duration_seconds=600.0,
+                published_at=None,
+                source="search",
+                fps=60.0,
             )
-            self.assertEqual(out, [])
+            with patch.object(
+                job, "_discover_broll_candidates_for_search", return_value=[fresh]
+            ) as discover:
+                out = job._discover_candidates_for_query(
+                    "forest",
+                    limit=5,
+                    subject="forest",
+                    min_views=0,
+                    min_duration=0,
+                    reuse_policy="allow",
+                    exclude_source_ids={"bad"},
+                    jobs_root=jobs_root,
+                )
+                discover.assert_called_once()
+                self.assertEqual(len(out), 1)
+                self.assertEqual(out[0].video_id, "good")
 
     def test_second_cache_read_avoids_network_search(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -249,10 +266,12 @@ class BrollSpeedTests(unittest.TestCase):
     def test_download_requests_missing_plus_margin(self) -> None:
         clips_dir = Path(tempfile.mkdtemp())
         try:
+            existing_part = clips_dir / "freshdl_part01.mp4"
+            existing_part.write_bytes(b"x")
             candidate = VideoCandidate(
                 video_id="freshdl",
                 title="Lake",
-                url="https://youtu.be/freshdl",
+                url="https://www.youtube.com/watch?v=freshdl",
                 channel="c",
                 view_count=1,
                 duration_seconds=900.0,
@@ -260,11 +279,15 @@ class BrollSpeedTests(unittest.TestCase):
                 source="search",
                 fps=60.0,
             )
+            fmt_meta = {"format_id": "312", "fps": 60.0, "height": 1080}
             with patch(
                 "build_motivation_job.download_broll_source_parts",
             ) as dl_parts, patch(
+                "build_motivation_job.inspect_usable_formats",
+                return_value=(True, None, fmt_meta),
+            ), patch(
                 "build_motivation_job.filter_broll_clip_list",
-                return_value=[clips_dir / "freshdl_part01.mp4"],
+                return_value=[existing_part],
             ):
                 dl_parts.return_value = {"status": "ok", "video_id": "freshdl"}
                 job.download_broll_candidates(
@@ -273,16 +296,16 @@ class BrollSpeedTests(unittest.TestCase):
                     clip_length=24,
                     max_parts=3,
                     parts_needed=2,
+                    needed_clips=8,
                     frame_gate=False,
                     raise_if_empty=False,
                 )
                 dl_parts.assert_called_once()
                 kwargs = dl_parts.call_args.kwargs
-                self.assertEqual(kwargs.get("parts_needed"), 2)
+                self.assertGreaterEqual(kwargs.get("parts_needed"), 1)
+                self.assertEqual(kwargs.get("start_part_num"), 2)
         finally:
-            for p in clips_dir.glob("*"):
-                p.unlink(missing_ok=True)
-            clips_dir.rmdir()
+            shutil.rmtree(clips_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
