@@ -508,9 +508,9 @@ def frame_fail_reasons(png_bytes: bytes, subject: str = "") -> list[str]:
         reasons.append("talking-head")
     if view_only and person_skin_score(png_bytes) >= PERSON_SKIN_LIMIT_SCENE:
         reasons.append("person")
-    if title_card_score(png_bytes) >= TITLE_CARD_LIMIT:
-        if not scene or title_card_score(png_bytes) >= max(TITLE_CARD_LIMIT, 0.72):
-            reasons.append("title-card")
+    # Night city / apartment lights look like title cards (dark + sparks). Skip that check.
+    if not scene and title_card_score(png_bytes) >= TITLE_CARD_LIMIT:
+        reasons.append("title-card")
     if empty_score(png_bytes) >= empty_limit:
         reasons.append("empty")
     if wants_vehicle(subject) and vehicle_missing(png_bytes):

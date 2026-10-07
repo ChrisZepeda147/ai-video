@@ -299,7 +299,13 @@ def copy_youtube_clips(
 ) -> list[Path]:
     """Copy cached pool parts for specific YouTube IDs (no re-download)."""
     clips_dir.mkdir(parents=True, exist_ok=True)
+    from broll_source_quality import source_id_block_reason
+
     wanted = {item.strip() for item in youtube_ids if item and item.strip()}
+    blocked = {vid for vid in wanted if source_id_block_reason(vid, jobs_root=jobs_root)}
+    if blocked:
+        print(f"  skip blocked B-roll IDs from pool: {', '.join(sorted(blocked))}")
+    wanted -= blocked
     if not wanted:
         return []
     copied: list[Path] = []
@@ -311,6 +317,8 @@ def copy_youtube_clips(
                 return copied
             yt_id = _youtube_id_from_clip_name(clip.name)
             if yt_id not in wanted:
+                continue
+            if yt_id and source_id_block_reason(yt_id, jobs_root=jobs_root):
                 continue
             fps = _clip_fps(clip)
             if not is_usable_fps(fps):
@@ -389,6 +397,14 @@ def stash_unused_clips(
         if dest.exists():
             clip.unlink(missing_ok=True)
             continue
+        source_id = _youtube_id_from_clip_name(clip.name)
+        if source_id:
+            from broll_source_quality import source_id_block_reason
+
+            if source_id_block_reason(source_id, jobs_root=jobs_root):
+                print(f"  drop {clip.name}: blocked source (not pooled)")
+                clip.unlink(missing_ok=True)
+                continue
         shutil.move(str(clip), str(dest))
         stashed.append(dest)
     if stashed:
