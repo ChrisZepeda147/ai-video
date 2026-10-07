@@ -2940,10 +2940,14 @@ def ensure_broll_clips(
 
     ladder = broaden_broll_query_ladder(query)
     # Partial job folder (retry): do not resume mid-ladder — still need more sources/parts.
+    # Zero usable + saved query_index: prior run exhausted ladder — restart acquisition.
+    saved_q_idx = int(acquire.get("query_index") or 0)
     if inv.usable_count > 0 and not inv.satisfies_count():
         start_idx = 0
+    elif inv.usable_count == 0 and saved_q_idx > 0:
+        start_idx = 0
     else:
-        start_idx = min(acquire["query_index"], max(0, len(ladder) - 1))
+        start_idx = min(saved_q_idx, max(0, len(ladder) - 1))
     source_cap = 3 if not split_full_source else 4
     max_attempts = source_cap * len(ladder)
     ranked_queues: dict[str, list[VideoCandidate]] = {}
