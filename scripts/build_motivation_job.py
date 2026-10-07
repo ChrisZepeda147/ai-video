@@ -16,7 +16,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import broll_pool
 import content_reuse
@@ -2183,22 +2183,178 @@ def prepare_broll_from_ids(
     )
 
 
-MIN_BROLL_SOURCES = 3
+def _broll_gate_fn(
+    *,
+    subject: str,
+    use_vision: bool,
+    frame_gate: bool,
+    jobs_root: Path | None,
+) -> Callable[[list[Path]], list[Path]]:
+    def _gate(paths: list[Path]) -> list[Path]:
+        return filter_broll_clip_list(
+            paths,
+            subject=subject,
+            use_vision=use_vision,
+            frame_gate=frame_gate,
+            jobs_root=jobs_root,
+        )
+
+    return _gate
 
 
-def _broll_distinct_sources(clips: list[Path]) -> int:
-    ids = {
-        broll_pool._youtube_id_from_clip_name(clip.name) or clip.stem
-        for clip in clips
-    }
-    return len(ids)
+def _inventory(
+    clips_dir: Path,
+    *,
+    required: int,
+    subject: str,
+    use_vision: bool,
+    frame_gate: bool,
+    jobs_root: Path | None,
+) -> BrollInventory:
+    return measure_usable_broll(
+        clips_dir,
+        required=required,
+        gate_fn=_broll_gate_fn(
+            subject=subject,
+            use_vision=use_vision,
+            frame_gate=frame_gate,
+            jobs_root=jobs_root,
+        ),
+    )
 
 
-def _broll_sufficient(clips: list[Path], needed_clips: int) -> bool:
-    if len(clips) < needed_clips:
-        return False
-    want_sources = min(MIN_BROLL_SOURCES, needed_clips)
-    return _broll_distinct_sources(clips) >= want_sources
+def _raise_broll_insufficient(
+    *,
+    slug: str,
+    query: str,
+    inv: BrollInventory,
+    downloads_attempted: int,
+    downloads_ok: int,
+    log_blob: str = "",
+) -> None:
+    summary = (
+        f"B-roll insufficient: need {inv.required} usable clips, "
+        f"have {inv.usable_count} after gate from {inv.distinct_sources} source(s)."
+    )
+    failure = MontageFailure(
+        slug=slug,
+        stage="ensure_broll_clips",
+        code="BROLL_INSUFFICIENT",
+        summary=summary,
+        details={
+            "broll_query": query,
+            "needed_clips": inv.required,
+            "clips_on_disk": inv.raw,
+            "clips_after_gate": inv.usable_count,
+            "distinct_sources": inv.distinct_sources,
+            "downloads_attempted": downloads_attempted,
+            "downloads_ok": downloads_ok,
+        },
+        log_tail=extract_log_tail(log_blob),
+    )
+    print(failure.emit_json_line())
+    emit_stage_line(
+        "ensure_broll",
+        "fail",
+        needed=inv.required,
+        have=inv.usable_count,
+        sources=inv.distinct_sources,
+    )
+    raise MontageFailureError(failure)
+
+
+def _discover_candidates_for_query(
+    search_query: str,
+    *,
+    limit: int,
+    subject: str,
+    min_views: int,
+    min_duration: int,
+    reuse_policy: str,
+    exclude_source_ids: set[str],
+) -> list[VideoCandidate]:
+    gate_subject = gate_subject_for_query(search_query, subject)
+    gate = gate_subject or subject or search_query
+    batch = _discover_broll_candidates_for_search(
+        search_query,
+        limit=limit,
+        subject=gate,
+        min_views=min_views,
+        min_duration=min_duration,
+        reuse_policy=reuse_policy,
+    )
+    return [item for item in batch if item.video_id not in exclude_source_ids]
+
+
+def _try_diversity_download(
+    *,
+    clips_dir: Path,
+    job_dir: Path,
+    subject: str,
+    query: str,
+    clips_limit: int,
+    clip_length: int,
+    max_parts: int | None,
+    min_views: int,
+    min_duration: int,
+    start_offset: float,
+    use_vision: bool,
+    frame_gate: bool,
+    jobs_root: Path,
+    split_full_source: bool,
+    reuse_policy: str,
+    exclude_source_ids: set[str],
+    inv: BrollInventory,
+) -> BrollInventory:
+    if inv.distinct_sources >= 2 or not inv.satisfies_count():
+        return inv
+    if reuse_policy == "require_new":
+        emit_warning("BROLL_LOW_DIVERSITY", sources=inv.distinct_sources)
+        return inv
+    ladder = broaden_broll_query_ladder(query)
+    for search_query in ladder:
+        candidates = _discover_candidates_for_query(
+            search_query,
+            limit=clips_limit,
+            subject=subject,
+            min_views=min_views,
+            min_duration=min_duration,
+            reuse_policy=reuse_policy,
+            exclude_source_ids=exclude_source_ids,
+        )
+        if not candidates:
+            continue
+        try:
+            download_broll_candidates(
+                clips_dir,
+                candidates[:1],
+                clip_length=clip_length,
+                max_parts=max_parts,
+                start_offset=start_offset,
+                subject=subject,
+                use_vision=use_vision,
+                frame_gate=frame_gate,
+                jobs_root=jobs_root,
+                split_full_source=split_full_source,
+                max_sources=1,
+                job_dir=job_dir,
+                exclude_source_ids=exclude_source_ids,
+                raise_if_empty=False,
+            )
+        except RuntimeError:
+            continue
+        inv = _inventory(
+            clips_dir,
+            required=inv.required,
+            subject=subject,
+            use_vision=use_vision,
+            frame_gate=frame_gate,
+            jobs_root=jobs_root,
+        )
+        if inv.distinct_sources >= 2:
+            return inv
+    emit_warning("BROLL_LOW_DIVERSITY", sources=inv.distinct_sources)
+    return inv
 
 
 def ensure_broll_clips(
@@ -2219,31 +2375,53 @@ def ensure_broll_clips(
     broll_ids: list[str] | None = None,
     reuse_policy: str = "allow",
     split_full_source: bool | None = None,
+    slug: str = "",
 ) -> list[str]:
-    """Job clips → shared pool cache → known IDs → YouTube search (last resort)."""
+    """Incremental ladder: pool → one source at a time → broadened query fallbacks."""
     if split_full_source is None:
         split_full_source = bool(frame_gate and use_vision)
     clips_dir.mkdir(parents=True, exist_ok=True)
+    job_dir = clips_dir.parent
+    acquire = load_state(job_dir)
+    exclude = set(acquire["failed_source_ids"])
+    downloads_attempted = 0
+    downloads_ok = 0
+    collected_ids: list[str] = list(broll_ids or [])
 
-    def ready() -> list[Path]:
-        return filter_broll_clips(
-            clips_dir,
+    inv = _inventory(
+        clips_dir,
+        required=needed_clips,
+        subject=subject,
+        use_vision=use_vision,
+        frame_gate=frame_gate,
+        jobs_root=jobs_root,
+    )
+    log_broll_progress("ensure_broll", inv, status="progress")
+
+    if inv.satisfies_count():
+        inv = _try_diversity_download(
+            clips_dir=clips_dir,
+            job_dir=job_dir,
             subject=subject,
+            query=query,
+            clips_limit=clips_limit,
+            clip_length=clip_length,
+            max_parts=max_parts,
+            min_views=min_views,
+            min_duration=min_duration,
+            start_offset=start_offset,
             use_vision=use_vision,
             frame_gate=frame_gate,
+            jobs_root=jobs_root,
+            split_full_source=split_full_source,
+            reuse_policy=reuse_policy,
+            exclude_source_ids=exclude,
+            inv=inv,
         )
+        log_broll_progress("ensure_broll", inv, status="ok")
+        return collected_ids
 
-    kept = ready()
-    if _broll_sufficient(kept, needed_clips):
-        print(f"B-roll: {len(kept)} clip(s) ready (need {needed_clips}) — using job cache")
-        return broll_ids or []
-    if len(kept) >= needed_clips:
-        print(
-            f"B-roll: {len(kept)} clip(s) but only {_broll_distinct_sources(kept)} source(s) "
-            f"— fetching more for variety"
-        )
-
-    missing = max(0, needed_clips - len(kept))
+    missing = max(0, needed_clips - inv.usable_count)
     broll_pool.take_from_pool(
         jobs_root,
         subject=subject,
@@ -2251,32 +2429,90 @@ def ensure_broll_clips(
         count=missing,
         copy=True,
     )
-    kept = ready()
-    if _broll_sufficient(kept, needed_clips):
-        print(f"B-roll: {len(kept)} clip(s) ready (need {needed_clips}) — pool cache")
-        return broll_ids or []
+    inv = _inventory(
+        clips_dir,
+        required=needed_clips,
+        subject=subject,
+        use_vision=use_vision,
+        frame_gate=frame_gate,
+        jobs_root=jobs_root,
+    )
+    log_broll_progress("ensure_broll", inv, status="progress")
+    if inv.satisfies_count():
+        inv = _try_diversity_download(
+            clips_dir=clips_dir,
+            job_dir=job_dir,
+            subject=subject,
+            query=query,
+            clips_limit=clips_limit,
+            clip_length=clip_length,
+            max_parts=max_parts,
+            min_views=min_views,
+            min_duration=min_duration,
+            start_offset=start_offset,
+            use_vision=use_vision,
+            frame_gate=frame_gate,
+            jobs_root=jobs_root,
+            split_full_source=split_full_source,
+            reuse_policy=reuse_policy,
+            exclude_source_ids=exclude,
+            inv=inv,
+        )
+        log_broll_progress("ensure_broll", inv, status="ok")
+        return collected_ids
 
     if broll_ids:
-        missing = max(0, needed_clips - len(kept))
         broll_pool.copy_youtube_clips(
             jobs_root,
             clips_dir=clips_dir,
-            youtube_ids=broll_ids,
+            youtube_ids=[vid for vid in broll_ids if vid not in exclude],
             subject=subject,
             count=missing,
         )
-        kept = ready()
-        if _broll_sufficient(kept, needed_clips):
-            print(f"B-roll: {len(kept)} clip(s) ready (need {needed_clips}) — known ID cache")
+        inv = _inventory(
+            clips_dir,
+            required=needed_clips,
+            subject=subject,
+            use_vision=use_vision,
+            frame_gate=frame_gate,
+            jobs_root=jobs_root,
+        )
+        log_broll_progress("ensure_broll", inv, status="progress")
+        if inv.satisfies_count():
+            log_broll_progress("ensure_broll", inv, status="ok")
             return broll_ids
 
-        candidates = discover_urls(
-            [f"https://www.youtube.com/watch?v={video_id}" for video_id in broll_ids]
+    ladder = broaden_broll_query_ladder(query)
+    start_idx = min(acquire["query_index"], max(0, len(ladder) - 1))
+    source_cap = 3 if not split_full_source else 4
+    max_attempts = source_cap * len(ladder)
+
+    attempt = 0
+    while not inv.satisfies_count() and attempt < max_attempts:
+        q_idx = start_idx + (attempt // source_cap)
+        if q_idx >= len(ladder):
+            break
+        search_query = ladder[q_idx]
+        record_query_attempt(job_dir, search_query)
+        bump_query_index(job_dir, q_idx)
+        candidates = _discover_candidates_for_query(
+            search_query,
+            limit=clips_limit,
+            subject=subject,
+            min_views=min_views,
+            min_duration=min_duration,
+            reuse_policy=reuse_policy,
+            exclude_source_ids=exclude,
         )
-        if candidates:
-            download_broll_candidates(
+        if not candidates:
+            attempt += 1
+            continue
+        candidate = candidates[0]
+        downloads_attempted += 1
+        try:
+            ids = download_broll_candidates(
                 clips_dir,
-                candidates,
+                [candidate],
                 clip_length=clip_length,
                 max_parts=max_parts,
                 start_offset=start_offset,
@@ -2285,43 +2521,61 @@ def ensure_broll_clips(
                 frame_gate=frame_gate,
                 jobs_root=jobs_root,
                 split_full_source=split_full_source,
-                needed_clips=needed_clips,
+                job_dir=job_dir,
+                exclude_source_ids=exclude,
+                max_sources=1,
+                raise_if_empty=False,
             )
-            kept = ready()
-            if _broll_sufficient(kept, needed_clips):
-                return broll_ids
-    downloaded = prepare_broll(
+            if ids:
+                downloads_ok += 1
+                collected_ids = list(dict.fromkeys([*collected_ids, *ids]))
+            else:
+                record_failed_source(job_dir, candidate.video_id)
+                exclude.add(candidate.video_id)
+        except RuntimeError:
+            record_failed_source(job_dir, candidate.video_id)
+            exclude.add(candidate.video_id)
+        inv = _inventory(
+            clips_dir,
+            required=needed_clips,
+            subject=subject,
+            use_vision=use_vision,
+            frame_gate=frame_gate,
+            jobs_root=jobs_root,
+        )
+        log_broll_progress("ensure_broll", inv, status="progress")
+        attempt += 1
+
+    if not inv.satisfies_count():
+        _raise_broll_insufficient(
+            slug=slug,
+            query=query,
+            inv=inv,
+            downloads_attempted=downloads_attempted,
+            downloads_ok=downloads_ok,
+        )
+
+    inv = _try_diversity_download(
         clips_dir=clips_dir,
+        job_dir=job_dir,
+        subject=subject,
         query=query,
-        limit=min(clips_limit, max(needed_clips + 2, 3)),
+        clips_limit=clips_limit,
         clip_length=clip_length,
         max_parts=max_parts,
         min_views=min_views,
         min_duration=min_duration,
         start_offset=start_offset,
-        subject=subject,
         use_vision=use_vision,
         frame_gate=frame_gate,
-        reuse_policy=reuse_policy,
         jobs_root=jobs_root,
         split_full_source=split_full_source,
-        needed_clips=needed_clips,
+        reuse_policy=reuse_policy,
+        exclude_source_ids=exclude,
+        inv=inv,
     )
-    have = len(list(clips_dir.glob("*_part*.mp4")))
-    if have < needed_clips:
-        raise RuntimeError(
-            f"Need {needed_clips} B-roll clips after subject gate, have {have}. "
-            "Use a shorter --max-seconds or a broader --broll-query."
-        )
-    kept = ready()
-    if not _broll_sufficient(kept, needed_clips) and _broll_distinct_sources(kept) < 2:
-        raise RuntimeError(
-            f"B-roll needs clips from at least 2 YouTube sources; have {_broll_distinct_sources(kept)}. "
-            "Broaden --broll-query or clear one-source pool cache for this subject."
-        )
-    if broll_ids:
-        return list(dict.fromkeys([*broll_ids, *downloaded]))
-    return downloaded
+    log_broll_progress("ensure_broll", inv, status="ok")
+    return list(dict.fromkeys([*collected_ids])) if collected_ids else []
 
 
 def render_job(
@@ -2343,6 +2597,7 @@ def render_job(
     hook_text: str | None = None,
     quality_gate: bool = True,
     segment_gate: bool = True,
+    frame_gate: bool = True,
     caption_align: str | None = None,
 ) -> set[Path]:
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -2353,10 +2608,45 @@ def render_job(
         )
         duration = actual_duration
     temp_output = output.with_suffix(".nocap.mp4")
-    clip_count = len(list(clips_dir.glob("*_part*.mp4")))
+    usable = filter_broll_clips(
+        clips_dir,
+        subject=subject,
+        use_vision=use_vision,
+        frame_gate=frame_gate,
+        jobs_root=jobs_root,
+    )
+    min_files = unique_clips_required(
+        target_duration=duration,
+        segment_length=segment_length,
+        layout="single",
+        driven_pacing=driven_pacing,
+        subject=subject,
+    )
+    if len(usable) < min_files:
+        emit_stage_line(
+            "pre_render",
+            "fail",
+            needed=min_files,
+            have=len(usable),
+        )
+        raise RuntimeError(
+            f"Pre-render B-roll check: need {min_files} usable clips, have {len(usable)}."
+        )
+    emit_stage_line(
+        "pre_render",
+        "ok",
+        usable=len(usable),
+        required=min_files,
+        sources=len(
+            {
+                broll_pool._youtube_id_from_clip_name(c.name) or c.stem
+                for c in usable
+            }
+        ),
+    )
     grade_note = "charcoal grade" if grade else "no grade"
     print(
-        f"Rendering montage: {clip_count} clip(s), {duration:.0f}s speech, "
+        f"Rendering montage: {len(usable)} usable clip(s), {duration:.0f}s speech, "
         f"{segment_length:.1f}s beats, {playback_speed:.0%} speed, {grade_note}"
     )
     used_clips = build_montage(
@@ -2538,6 +2828,7 @@ def rerender_existing_job(
             use_vision=use_vision,
             frame_gate=frame_gate,
             broll_ids=broll_ids,
+            slug=slug,
         )
         render_job(
             jobs_root=jobs_root,
@@ -2557,8 +2848,13 @@ def rerender_existing_job(
             hook_text=str(payload.get("hook") or "") or None,
             quality_gate=quality_gate,
             segment_gate=segment_gate,
+            frame_gate=frame_gate,
             caption_align=str(caption_align or payload.get("caption_align") or "") or None,
         )
+    except MontageFailureError as exc:
+        print(exc.failure.emit_json_line())
+        print(exc, file=sys.stderr)
+        return 1
     except (FileNotFoundError, RuntimeError, ValueError, subprocess.CalledProcessError) as exc:
         print(exc, file=sys.stderr)
         return 1
@@ -2952,6 +3248,7 @@ def main() -> int:
             use_vision=gate_flags.use_vision,
             frame_gate=gate_flags.frame_gate,
             reuse_policy=reuse_policy,
+            slug=args.slug,
         )
         caption_mode = "phrase" if args.phrase_captions else caption_mode_default()
         caption_align = normalize_caption_align(args.caption_align, caption_mode=caption_mode)
@@ -2973,12 +3270,17 @@ def main() -> int:
             hook_text=args.hook,
             quality_gate=gate_flags.quality_gate,
             segment_gate=gate_flags.segment_gate,
+            frame_gate=gate_flags.frame_gate,
             caption_align=caption_align,
         )
     except SpeechReviewReady as exc:
         print(exc)
         return 0
     except MotivationJobError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    except MontageFailureError as exc:
+        print(exc.failure.emit_json_line())
         print(exc, file=sys.stderr)
         return 1
     except (FileNotFoundError, RuntimeError, ValueError, subprocess.CalledProcessError) as exc:

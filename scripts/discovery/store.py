@@ -146,6 +146,13 @@ class DiscoveryStore:
             if not self._column_exists(table, column):
                 self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
 
+        command_migrations = [
+            ("cursor_command_jobs", "error_summary", "TEXT"),
+        ]
+        for table, column, col_type in command_migrations:
+            if not self._column_exists(table, column):
+                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+
         self._migrate_visual_assets_nullable()
 
     def _migrate_visual_assets_nullable(self) -> None:

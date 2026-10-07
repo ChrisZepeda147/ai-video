@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from discovery.config import project_root
+from discovery.montage_job_errors import command_job_error_summary
 
 OWNERS = ("chris", "stephen")
 DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
@@ -520,7 +521,10 @@ def reconcile_slots(store) -> dict[str, int]:
     plan_ids: set[int] = set()
     for row in rows:
         job = store._conn.execute(
-            "SELECT status, production_video_id, error_message FROM cursor_command_jobs WHERE job_key = ?",
+            """
+            SELECT status, production_video_id, error_message, error_summary, stdout_log, stderr_log
+            FROM cursor_command_jobs WHERE job_key = ?
+            """,
             (row["job_key"],),
         ).fetchone()
         if not job:
@@ -537,7 +541,12 @@ def reconcile_slots(store) -> dict[str, int]:
             done += 1
             plan_ids.add(int(row["plan_id"]))
         elif status in {"failed", "cancelled"}:
-            mark_slot(store, int(row["id"]), status="failed", error=str(job["error_message"] or "")[:500])
+            mark_slot(
+                store,
+                int(row["id"]),
+                status="failed",
+                error=command_job_error_summary(dict(job)),
+            )
             failed += 1
             plan_ids.add(int(row["plan_id"]))
     for pid in plan_ids:
@@ -1048,7 +1057,7 @@ def _sync_slot_from_job(store, slot_id: int, job_key: str) -> None:
             slot_id,
             status="failed",
             job_key=job_key,
-            error=str(job.get("error_message") or "Job failed")[:500],
+            error=command_job_error_summary(job),
         )
     else:
         mark_slot(store, slot_id, status="running", job_key=job_key, error="")

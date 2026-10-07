@@ -476,7 +476,7 @@ export function WeeklyWorkspace() {
         </div>
         {uiStatus === "failed" && meta?.error_message ? (
           <p className="mt-1 text-xs text-red-400" title={meta.error_message}>
-            {meta.error_message.length > 120 ? `${meta.error_message.slice(0, 120)}…` : meta.error_message}
+            {meta.error_message}
           </p>
         ) : null}
         <input

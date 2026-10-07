@@ -39,6 +39,21 @@ except ImportError:
         return ""
 
 
+def _montage_actionable_error(
+    stdout: str,
+    stderr: str,
+    *,
+    exit_code: int | None = None,
+):
+    scripts = project_root() / "scripts"
+    path = str(scripts)
+    if path not in sys.path:
+        sys.path.insert(0, path)
+    from montage_telemetry import resolve_actionable_error
+
+    return resolve_actionable_error(stdout, stderr, exit_code=exit_code)
+
+
 def is_direct_montage_command(text: str) -> bool:
     lower = (text or "").lower()
     return "luxury-clips-montage" in lower or "build_motivation_job.py" in lower
@@ -300,17 +315,23 @@ def run_direct_montage_command(
                     logs.append(f"=== build {index + 1}/{video_count} ({slug}) ===\n{part_log}")
                 if result.returncode != 0:
                     truncated = "\n\n".join(logs)[-120_000:]
+                    summary, _failure = _montage_actionable_error(
+                        truncated,
+                        "",
+                        exit_code=result.returncode,
+                    )
                     thread_store._conn.execute(
                         """
                         UPDATE cursor_command_jobs
                         SET status = 'failed', stdout_log = ?, stderr_log = ?, error_message = ?,
-                            completed_at = ?
+                            error_summary = ?, completed_at = ?
                         WHERE job_key = ?
                         """,
                         (
                             truncated,
                             "",
                             truncated or f"exit {result.returncode} on video {index + 1}",
+                            summary,
                             _now_iso(),
                             job_key,
                         ),
