@@ -144,8 +144,6 @@ def subjects_match(left: str, right_tokens: list[str]) -> bool:
         scenic_shared = want_scenic & have_scenic
         if len(scenic_shared) >= 2:
             return True
-        if len(scenic_shared) == 1 and min(len(want_scenic), len(have_scenic)) == 1:
-            return True
     shared = set(want) & set(have)
     if shared:
         return len(shared) >= min(len(set(want)), len(set(have)))
@@ -181,10 +179,12 @@ def list_pool_clips(pool_dir: Path) -> list[Path]:
     return sorted(pool_dir.glob(CLIP_GLOB))
 
 
-def _eligible_pool_clips(pool_dir: Path) -> list[Path]:
+def _eligible_pool_clips(pool_dir: Path, *, jobs_root: Path | None = None) -> list[Path]:
     from build_clips_montage import MIN_USABLE_FPS, is_usable_fps
+    from broll_source_quality import source_id_block_reason
 
     pool_min_fps = max(MIN_USABLE_FPS, 50.0)
+    root = jobs_root or pool_dir.parent.parent
     kept: list[Path] = []
     for clip in list_pool_clips(pool_dir):
         fps = _clip_fps(clip)
@@ -192,6 +192,13 @@ def _eligible_pool_clips(pool_dir: Path) -> list[Path]:
             print(f"  drop pool {clip.name}: {fps:.1f} fps")
             clip.unlink(missing_ok=True)
             continue
+        source_id = _youtube_id_from_clip_name(clip.name)
+        if source_id:
+            reason = source_id_block_reason(source_id, jobs_root=root)
+            if reason:
+                print(f"  drop pool {clip.name}: blocked source ({reason})")
+                clip.unlink(missing_ok=True)
+                continue
         kept.append(clip)
     return kept
 
@@ -219,7 +226,7 @@ def take_from_pool(
     taken: list[Path] = []
     pending: list[Path] = []
     for pool_dir in find_matching_pools(jobs_root, subject):
-        pending.extend(_eligible_pool_clips(pool_dir))
+        pending.extend(_eligible_pool_clips(pool_dir, jobs_root=jobs_root))
     if not pending:
         return taken
 
@@ -332,11 +339,16 @@ def add_gated_clips_to_pool(
     pool_dir = pool_dir_for_subject(jobs_root, subject)
     pool_dir.mkdir(parents=True, exist_ok=True)
     added: list[Path] = []
+    from broll_source_quality import remember_source_title, source_id_block_reason
+
     for clip in clips:
         if not clip.is_file():
             continue
         fps = _clip_fps(clip)
         if not is_usable_fps(fps):
+            continue
+        source_id = _youtube_id_from_clip_name(clip.name)
+        if source_id and source_id_block_reason(source_id, jobs_root=jobs_root):
             continue
         dest = pool_dir / clip.name
         if dest.exists() and dest.stat().st_size == clip.stat().st_size:

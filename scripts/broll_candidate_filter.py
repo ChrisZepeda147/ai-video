@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from broll_candidate_rank import LONG_AMBIENT_RE
 from broll_relevance import is_low_relevance
+from broll_source_quality import unwanted_broll_candidate
 
 if TYPE_CHECKING:
     from youtube_popular_downloader import VideoCandidate
@@ -31,6 +32,9 @@ def hard_reject_reason(
         return "duration_too_long"
     if not format_ok:
         return "no_50fps_format"
+    blocked = unwanted_broll_candidate(candidate)
+    if blocked:
+        return blocked
     if query.strip() and is_low_relevance(query=query, subject=subject, candidate=candidate):
         return "low_relevance"
     return None

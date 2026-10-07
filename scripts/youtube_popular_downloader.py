@@ -1093,6 +1093,15 @@ def filter_unwanted(
         if exclude_sim_footage and is_sim_game_footage(video):
             skipped_sim += 1
             continue
+        try:
+            from broll_source_quality import unwanted_broll_candidate
+
+            blocked = unwanted_broll_candidate(video)
+            if blocked:
+                skipped_other += 1
+                continue
+        except ImportError:
+            pass
         if is_commentary_heavy(video):
             skipped_commentary += 1
             continue

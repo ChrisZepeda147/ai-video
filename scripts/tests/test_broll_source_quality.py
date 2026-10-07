@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import sys
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from broll_source_quality import unwanted_broll_title_reason
+from youtube_popular_downloader import VideoCandidate
+
+
+class BrollSourceQualityTests(unittest.TestCase):
+    def test_minecraft_longplay_blocked(self) -> None:
+        title = "Rainy Lake House - Minecraft Relaxing Longplay (No Commentary) 1.20"
+        self.assertEqual(unwanted_broll_title_reason(title), "minecraft")
+
+    def test_scenic_relaxation_autumn_blocked(self) -> None:
+        title = "AUTUMN - Scenic Relaxation Film With Inspiring Cinematic Music - 4K"
+        self.assertEqual(unwanted_broll_title_reason(title), "scenic_overlay_film")
+
+    def test_real_forest_ok(self) -> None:
+        title = "Pacific Northwest Rain Forest Drone 4K 60fps"
+        self.assertIsNone(unwanted_broll_title_reason(title))
+
+
+if __name__ == "__main__":
+    unittest.main()

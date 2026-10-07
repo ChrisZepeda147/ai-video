@@ -1986,6 +1986,16 @@ def download_broll_candidates(
                 metadata_fps=float(candidate.fps) if candidate.fps is not None else None,
                 selected=fmt_meta,
             )
+        try:
+            from broll_source_quality import remember_source_title
+
+            remember_source_title(
+                jobs_root,
+                video_id=candidate.video_id,
+                title=candidate.title or "",
+            )
+        except ImportError:
+            pass
         filtered.append((candidate, fmt_meta or {}))
     to_download = [c for c, _ in filtered]
     preflight_by_id = {c.video_id: meta for c, meta in filtered}
@@ -2240,6 +2250,17 @@ def filter_broll_clip_list(
         return all_clips
     for clip in all_clips:
         source_id = broll_pool._youtube_id_from_clip_name(clip.name) or clip.stem
+        try:
+            from broll_source_quality import source_id_block_reason
+
+            block = source_id_block_reason(source_id, jobs_root=jobs_root)
+            if block:
+                print(f"  drop {clip.name}: blocked source ({block})")
+                if delete_rejects:
+                    clip.unlink(missing_ok=True)
+                continue
+        except ImportError:
+            pass
         cached = lookup_gate_result(jobs_root, clip, subject_slug=subject_slug)
         if cached is not None:
             if cached.get("pass"):
