@@ -95,6 +95,13 @@ def broll_pool_files_required(
         segment_length=plan,
         layout=layout,
     )
+    if target_duration <= 90.0:
+        cap = 8
+        floor = 3
+        target = max(floor, min(base, cap))
+        if target_duration >= 60.0:
+            target = max(target, min(6, cap))
+        return min(target, cap)
     return max(3, min(base, 12))
 
 
