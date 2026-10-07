@@ -3005,60 +3005,67 @@ def ensure_broll_clips(
         parallel_n = 2 if missing_now >= 4 else 1
         # Section cuts from long sources; reject is for full-file normal pass only.
         allow_long = (not split_full_source) or attempt >= max(1, max_attempts - 2)
-        batch: list[VideoCandidate] = []
-        for _ in range(parallel_n):
-            candidate = _pop_candidate(search_query)
-            if candidate:
-                batch.append(candidate)
-        if not batch:
-            attempt += 1
-            continue
-        downloads_attempted += len(batch)
-        montage_timer().stats.downloads_attempted += len(batch)
-        try:
-            with montage_timer().stage_child("broll_download"):
-                ids = download_broll_candidates(
-                    clips_dir,
-                    batch,
-                    clip_length=clip_length,
-                    max_parts=max_parts,
-                    start_offset=start_offset,
-                    subject=subject,
-                    query=search_query,
-                    use_vision=use_vision,
-                    frame_gate=frame_gate,
-                    jobs_root=jobs_root,
-                    split_full_source=split_full_source,
-                    job_dir=job_dir,
-                    exclude_source_ids=exclude,
-                    max_sources=len(batch),
-                    parts_needed=parts_budget,
-                    needed_clips=needed_clips,
-                    allow_parallel=parallel_n >= 2 and len(batch) >= 2,
-                    allow_long_fallback=allow_long,
-                    raise_if_empty=False,
-                )
-            if ids:
-                downloads_ok += len(ids)
-                montage_timer().stats.downloads_successful += len(ids)
-                collected_ids = list(dict.fromkeys([*collected_ids, *ids]))
-            for candidate in batch:
-                if candidate.video_id not in ids:
+        stagnant_pops = 0
+        while not inv.satisfies_count() and stagnant_pops < 8:
+            batch: list[VideoCandidate] = []
+            for _ in range(parallel_n):
+                candidate = _pop_candidate(search_query)
+                if candidate:
+                    batch.append(candidate)
+            if not batch:
+                break
+            before_usable = inv.usable_count
+            downloads_attempted += len(batch)
+            montage_timer().stats.downloads_attempted += len(batch)
+            try:
+                with montage_timer().stage_child("broll_download"):
+                    ids = download_broll_candidates(
+                        clips_dir,
+                        batch,
+                        clip_length=clip_length,
+                        max_parts=max_parts,
+                        start_offset=start_offset,
+                        subject=subject,
+                        query=search_query,
+                        use_vision=use_vision,
+                        frame_gate=frame_gate,
+                        jobs_root=jobs_root,
+                        split_full_source=split_full_source,
+                        job_dir=job_dir,
+                        exclude_source_ids=exclude,
+                        max_sources=len(batch),
+                        parts_needed=parts_budget,
+                        needed_clips=needed_clips,
+                        allow_parallel=parallel_n >= 2 and len(batch) >= 2,
+                        allow_long_fallback=allow_long,
+                        raise_if_empty=False,
+                    )
+                if ids:
+                    downloads_ok += len(ids)
+                    montage_timer().stats.downloads_successful += len(ids)
+                    collected_ids = list(dict.fromkeys([*collected_ids, *ids]))
+                for candidate in batch:
+                    if candidate.video_id not in ids:
+                        record_failed_source(job_dir, candidate.video_id)
+                        exclude.add(candidate.video_id)
+            except RuntimeError:
+                for candidate in batch:
                     record_failed_source(job_dir, candidate.video_id)
                     exclude.add(candidate.video_id)
-        except RuntimeError:
-            for candidate in batch:
-                record_failed_source(job_dir, candidate.video_id)
-                exclude.add(candidate.video_id)
-        inv = _inventory(
-            clips_dir,
-            required=needed_clips,
-            subject=subject,
-            use_vision=use_vision,
-            frame_gate=frame_gate,
-            jobs_root=jobs_root,
-        )
-        log_broll_progress("ensure_broll", inv, status="progress")
+            inv = _inventory(
+                clips_dir,
+                required=needed_clips,
+                subject=subject,
+                use_vision=use_vision,
+                frame_gate=frame_gate,
+                jobs_root=jobs_root,
+            )
+            log_broll_progress("ensure_broll", inv, status="progress")
+            if inv.usable_count > before_usable:
+                stagnant_pops = 0
+                parts_budget = min(8, max(0, needed_clips - inv.usable_count) + 1)
+            else:
+                stagnant_pops += 1
         attempt += 1
 
     if not inv.satisfies_count():

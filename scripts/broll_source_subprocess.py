@@ -34,10 +34,11 @@ def run_broll_source_subprocess(
     timeout_sec: float,
 ) -> dict[str, Any]:
     video_id = candidate.video_id
+    job_dir = job_dir.resolve()
     workspace = source_workspace(job_dir, video_id)
     cleanup_workspace(workspace)
     workspace.mkdir(parents=True, exist_ok=True)
-    req_path = workspace / "acquire_request.json"
+    req_path = (workspace / "acquire_request.json").resolve()
     payload = {
         "candidate": asdict(candidate),
         "job_dir": str(job_dir),
@@ -48,7 +49,7 @@ def run_broll_source_subprocess(
         "subject": subject,
         "use_vision": use_vision,
         "frame_gate": frame_gate,
-        "jobs_root": str(jobs_root) if jobs_root else None,
+        "jobs_root": str(jobs_root.resolve()) if jobs_root else None,
         "preflight": preflight,
     }
     req_path.write_text(json.dumps(payload), encoding="utf-8")
