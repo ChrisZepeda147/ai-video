@@ -2692,6 +2692,18 @@ def _discover_candidates_for_query(
                 candidates=[asdict(item) for item in batch],
             )
     filtered = [item for item in batch if item.video_id not in exclude_source_ids]
+    if not filtered and batch and not force_search:
+        return _discover_candidates_for_query(
+            search_query,
+            limit=limit,
+            subject=subject,
+            min_views=min_views,
+            min_duration=min_duration,
+            reuse_policy=reuse_policy,
+            exclude_source_ids=exclude_source_ids,
+            jobs_root=jobs_root,
+            force_search=True,
+        )
     return filtered[:limit] if limit else filtered
 
 
@@ -2958,7 +2970,7 @@ def ensure_broll_clips(
             with montage_timer().stage_child("youtube_search"):
                 ranked_queues[search_query] = _discover_candidates_for_query(
                     search_query,
-                    limit=max(clips_limit, 12),
+                    limit=max(clips_limit, 12, needed_clips * 2),
                     subject=subject,
                     min_views=min_views,
                     min_duration=min_duration,
@@ -2991,7 +3003,8 @@ def ensure_broll_clips(
         missing_now = max(0, needed_clips - inv.usable_count)
         parts_budget = min(8, missing_now + 1)
         parallel_n = 2 if missing_now >= 4 else 1
-        allow_long = attempt >= max(1, max_attempts - 2)
+        # Section cuts from long sources; reject is for full-file normal pass only.
+        allow_long = (not split_full_source) or attempt >= max(1, max_attempts - 2)
         batch: list[VideoCandidate] = []
         for _ in range(parallel_n):
             candidate = _pop_candidate(search_query)
