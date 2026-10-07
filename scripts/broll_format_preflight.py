@@ -15,8 +15,10 @@ MAX_HEIGHT = 2160  # no 8K acquisition
 
 
 def _height_score(height: int) -> int:
+    if height == 1080:
+        return 295
     if height <= 1440:
-        return 300 - abs(height - 1440)
+        return 280 - abs(height - 1440) // 2
     if height <= 1080:
         return 250 - abs(height - 1080)
     if height <= 2160:

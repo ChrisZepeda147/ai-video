@@ -2009,7 +2009,7 @@ def download_broll_candidates(
                 base = total // batch_size
                 extra = total % batch_size
                 return max(1, min(4, base + (1 if source_index < extra else 0)))
-            return max(1, min(4, total))
+            return max(1, min(2, total))
         if split_parts is not None:
             return max(1, split_parts)
         return max(1, max_parts or 3)

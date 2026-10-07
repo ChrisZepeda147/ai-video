@@ -99,13 +99,23 @@ class BrollParallelIsolationTests(unittest.TestCase):
                 (output_dir / f"{_candidate.video_id}_part01.mp4").write_bytes(b"x")
                 return {"status": "ok", "video_id": _candidate.video_id}
 
+            def _fake_worker(**kwargs):
+                ws = source_workspace(job_dir, candidate.video_id)
+                ws.mkdir(parents=True, exist_ok=True)
+                (ws / f"{candidate.video_id}_part01.mp4").write_bytes(b"x")
+                return {
+                    "ok": True,
+                    "video_id": candidate.video_id,
+                    "workspace": str(ws),
+                }
+
             with patch(
                 "build_motivation_job.inspect_usable_formats",
                 return_value=(True, None, {"height": 1080, "fps": 60.0}),
             ), patch(
-                "build_motivation_job.download_broll_source_parts",
-                side_effect=_fake_dl,
-            ) as dl_parts, patch(
+                "build_motivation_job.run_broll_source_subprocess",
+                side_effect=_fake_worker,
+            ) as worker, patch(
                 "build_motivation_job.filter_broll_clip_list",
                 side_effect=lambda paths, **_: paths,
             ):
@@ -118,7 +128,7 @@ class BrollParallelIsolationTests(unittest.TestCase):
                     frame_gate=False,
                     raise_if_empty=False,
                 )
-                self.assertEqual(dl_parts.call_args.kwargs.get("output_dir"), workspace)
+                self.assertTrue(worker.called)
                 self.assertTrue((clips_dir / f"{candidate.video_id}_part01.mp4").is_file())
             cleanup_workspace(workspace)
 

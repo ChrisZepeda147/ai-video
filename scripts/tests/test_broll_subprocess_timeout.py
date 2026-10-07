@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -32,15 +33,17 @@ class BrollSubprocessTimeoutTests(unittest.TestCase):
     def test_timeout_kills_tree_and_cleans_workspace(self) -> None:
         job_dir = Path("/tmp/job")
         proc = MagicMock()
-        proc.poll.side_effect = [None, None, 1]
         proc.pid = 4242
-        proc.stdout = iter([])
+        proc.stdout = MagicMock()
+        proc.wait.side_effect = [
+            subprocess.TimeoutExpired(cmd="worker", timeout=105),
+            0,
+            0,
+        ]
 
         with patch("broll_source_subprocess.subprocess.Popen", return_value=proc):
             with patch("broll_source_subprocess.kill_process_tree") as kill:
                 with patch("broll_source_subprocess.cleanup_workspace") as cleanup:
-                    with patch("broll_source_subprocess.time.perf_counter") as perf:
-                        perf.side_effect = [0.0, 0.0, 200.0]
                         result = run_broll_source_subprocess(
                             job_dir=job_dir,
                             candidate=_candidate(),

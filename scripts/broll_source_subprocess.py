@@ -81,8 +81,11 @@ def run_broll_source_subprocess(
             line = line.rstrip()
             if line:
                 print(line)
-    elif proc.stdout and timed_out:
-        proc.stdout.close()
+    elif timed_out and proc.stdout:
+        try:
+            proc.stdout.close()
+        except OSError:
+            pass
 
     if timed_out:
         cleanup_workspace(workspace)
