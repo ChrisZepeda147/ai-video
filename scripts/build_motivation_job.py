@@ -1434,6 +1434,9 @@ def _take_pooled_speech(
             f"  skip pooled speech: {item.title!r} does not match requested speaker {speaker!r}"
         )
         return None
+    if excerpt_looks_incomplete(excerpt):
+        print("  skip pooled speech: excerpt incoherent — will search fresh")
+        return None
     url_file.write_text(f"{item.url}\n", encoding="utf-8")
     content_reuse.register_video(
         youtube_id=item.youtube_id,
@@ -2005,8 +2008,8 @@ def download_broll_candidates(
             if batch_size > 1:
                 base = total // batch_size
                 extra = total % batch_size
-                return max(1, min(8, base + (1 if source_index < extra else 0)))
-            return total
+                return max(1, min(4, base + (1 if source_index < extra else 0)))
+            return max(1, min(4, total))
         if split_parts is not None:
             return max(1, split_parts)
         return max(1, max_parts or 3)
