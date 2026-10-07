@@ -15,7 +15,6 @@ import os
 import shutil
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any, Callable
@@ -75,10 +74,16 @@ from broll_search_query import (
 )
 from broll_acquire_workspace import cleanup_workspace, finalize_parts, source_workspace
 from broll_candidate_rank import rank_broll_candidates
-from broll_format_preflight import inspect_usable_formats, log_candidate_skip
+from broll_candidate_filter import hard_reject_reason
+from broll_format_preflight import inspect_usable_formats, log_candidate_skip, log_selected_format
+from broll_source_subprocess import run_broll_source_subprocess
 from broll_search_cache import get_cached_candidates, store_cached_candidates
 from montage_speech import PreparedSpeechRejected, validate_prepared_speech_file
-from montage_speaker import SpeechSpeakerMismatchError, enforce_requested_speaker
+from montage_speaker import (
+    SpeechSpeakerMismatchError,
+    enforce_requested_speaker,
+    log_montage_speaker,
+)
 from broll_usable import BrollInventory, log_broll_progress, measure_usable_broll
 from broll_usable_manifest import verify_manifest, write_manifest
 from montage_timing import montage_timer
@@ -1433,11 +1438,16 @@ def _take_pooled_speech(
         role="speech",
         record_id=speech_record_id(item.youtube_id, item.start),
     )
-    enforce_requested_speaker(
+    resolved = enforce_requested_speaker(
         requested=speaker,
         candidate=candidate,
         excerpt=excerpt,
         title_match_fn=speaker_matches,
+    )
+    log_montage_speaker(
+        requested=speaker,
+        resolved=resolved,
+        source_video_id=candidate.video_id,
     )
     return candidate, item.start, duration, excerpt, excerpt
 
@@ -1646,11 +1656,16 @@ def prepare_speech(
     print(f"Speech picked: {chosen.title} ({chosen.video_id})")
     print(f"Excerpt: start={start:.2f}s duration={duration:.2f}s")
     print(f"  preview: {_preview(excerpt_text)}")
-    enforce_requested_speaker(
+    resolved = enforce_requested_speaker(
         requested=speaker,
         candidate=chosen,
         excerpt=excerpt_text,
         title_match_fn=speaker_matches,
+    )
+    log_montage_speaker(
+        requested=speaker,
+        resolved=resolved,
+        source_video_id=chosen.video_id,
     )
     _stash_speech_leftovers(
         jobs_root=jobs_root,
@@ -1869,6 +1884,7 @@ def prepare_broll(
         max_parts=max_parts,
         start_offset=start_offset,
         subject=subject or query,
+        query=query,
         use_vision=use_vision,
         frame_gate=frame_gate,
         jobs_root=jobs_root,
@@ -1885,6 +1901,7 @@ def download_broll_candidates(
     max_parts: int | None,
     start_offset: float = 0.0,
     subject: str = "",
+    query: str = "",
     use_vision: bool = True,
     frame_gate: bool = True,
     jobs_root: Path | None = None,
@@ -1897,6 +1914,7 @@ def download_broll_candidates(
     usable_ok: Callable[[], bool] | None = None,
     raise_if_empty: bool = True,
     allow_parallel: bool = False,
+    allow_long_fallback: bool = False,
 ) -> list[str]:
     split_parts = None if split_full_source else max_parts
     blocked = exclude_source_ids or set()
@@ -1924,6 +1942,36 @@ def download_broll_candidates(
                     return ok_ids
                 continue
         to_download.append(candidate)
+    search_query = query or subject
+    filtered: list[tuple[VideoCandidate, dict[str, Any]]] = []
+    for candidate in to_download:
+        ok_fmt, skip_reason, fmt_meta = inspect_usable_formats(candidate.url)
+        reject = hard_reject_reason(
+            candidate,
+            query=search_query,
+            subject=subject,
+            allow_long_fallback=allow_long_fallback,
+            format_ok=ok_fmt,
+        )
+        if reject:
+            log_candidate_skip(candidate.video_id, reject)
+            if job_dir:
+                record_failed_source(job_dir, candidate.video_id)
+            continue
+        if not ok_fmt:
+            log_candidate_skip(candidate.video_id, skip_reason or "no_50fps_format")
+            if job_dir:
+                record_failed_source(job_dir, candidate.video_id)
+            continue
+        if fmt_meta:
+            log_selected_format(
+                candidate.video_id,
+                metadata_fps=float(candidate.fps) if candidate.fps is not None else None,
+                selected=fmt_meta,
+            )
+        filtered.append((candidate, fmt_meta or {}))
+    to_download = [c for c, _ in filtered]
+    preflight_by_id = {c.video_id: meta for c, meta in filtered}
     if max_sources is not None and len(to_download) > max_sources:
         to_download = to_download[:max_sources]
     if not to_download:
@@ -1935,64 +1983,88 @@ def download_broll_candidates(
             )
             raise RuntimeError(msg)
         return ok_ids
-    def _parts_for_this_source() -> int:
+    batch_size = len(to_download)
+
+    def _parts_for_this_source(source_index: int) -> int:
         if parts_needed is not None:
-            return max(1, min(parts_needed, 8))
+            total = max(1, min(int(parts_needed), 8))
+            if batch_size > 1:
+                base = total // batch_size
+                extra = total % batch_size
+                return max(1, min(8, base + (1 if source_index < extra else 0)))
+            return total
         if split_parts is not None:
             return max(1, split_parts)
         return max(1, max_parts or 3)
 
-    def _process_candidate(candidate: VideoCandidate) -> str | None:
+    def _process_candidate(candidate: VideoCandidate, *, source_index: int = 0) -> str | None:
         video_id = candidate.video_id
-        request_parts = _parts_for_this_source()
-        ok_fmt, skip_reason, fmt_meta = inspect_usable_formats(candidate.url)
-        if not ok_fmt:
-            log_candidate_skip(video_id, skip_reason or "no_50fps_format")
-            if job_dir:
-                record_failed_source(job_dir, video_id)
-            return None
-        workspace = (
-            source_workspace(job_dir, video_id)
-            if job_dir is not None
-            else clips_dir / f".workspace_{video_id}"
-        )
-        cleanup_workspace(workspace)
-        workspace.mkdir(parents=True, exist_ok=True)
+        request_parts = _parts_for_this_source(source_index)
+        fmt_meta = preflight_by_id.get(video_id) or {}
+        if job_dir is None:
+            workspace = clips_dir / f".workspace_{video_id}"
+            cleanup_workspace(workspace)
+            workspace.mkdir(parents=True, exist_ok=True)
+            try:
+                if split_full_source:
+                    results = download_videos(
+                        [candidate],
+                        output_dir=workspace,
+                        max_height=1080,
+                        audio_only=False,
+                        clip_length=clip_length,
+                        max_parts=None,
+                        split_parts=True,
+                        keep_source=False,
+                        aspect_ratio="9:16",
+                        start_offset=start_offset,
+                        spaced_parts=True,
+                    )
+                    if not results or results[0].get("status") != "ok":
+                        return None
+                else:
+                    record = download_broll_source_parts(
+                        candidate,
+                        output_dir=workspace,
+                        clip_length=clip_length,
+                        parts_needed=request_parts,
+                        aspect_ratio="9:16",
+                        max_height=1080,
+                        start_offset=start_offset,
+                        preflight_format=fmt_meta,
+                    )
+                    if record.get("status") != "ok":
+                        return None
+                    video_id = str(record.get("video_id") or candidate.video_id)
+                worker_result = {"ok": True, "video_id": video_id, "workspace": str(workspace)}
+            except Exception:
+                cleanup_workspace(workspace)
+                return None
+        else:
+            worker_result = run_broll_source_subprocess(
+                job_dir=job_dir,
+                candidate=candidate,
+                clip_length=clip_length,
+                parts_needed=request_parts,
+                start_offset=start_offset,
+                split_full_source=split_full_source,
+                subject=subject,
+                use_vision=use_vision,
+                frame_gate=frame_gate,
+                jobs_root=jobs_root,
+                preflight=fmt_meta,
+                timeout_sec=BROLL_SOURCE_TIMEOUT_SEC,
+            )
+            if worker_result.get("timeout"):
+                record_failed_source(job_dir, candidate.video_id)
+                return None
+            if not worker_result.get("ok"):
+                record_failed_source(job_dir, candidate.video_id)
+                return None
+            video_id = str(worker_result.get("video_id") or candidate.video_id)
+            workspace = Path(str(worker_result.get("workspace") or source_workspace(job_dir, video_id)))
+
         try:
-            if split_full_source:
-                results = download_videos(
-                    [candidate],
-                    output_dir=workspace,
-                    max_height=1080,
-                    audio_only=False,
-                    clip_length=clip_length,
-                    max_parts=None,
-                    split_parts=True,
-                    keep_source=False,
-                    aspect_ratio="9:16",
-                    start_offset=start_offset,
-                    spaced_parts=True,
-                )
-                if not results or results[0].get("status") != "ok":
-                    if job_dir:
-                        record_failed_source(job_dir, video_id)
-                    return None
-            else:
-                record = download_broll_source_parts(
-                    candidate,
-                    output_dir=workspace,
-                    clip_length=clip_length,
-                    parts_needed=request_parts,
-                    aspect_ratio="9:16",
-                    max_height=1080,
-                    start_offset=start_offset,
-                    preflight_format=fmt_meta,
-                )
-                if record.get("status") != "ok":
-                    if job_dir:
-                        record_failed_source(job_dir, video_id)
-                    return None
-                video_id = str(record.get("video_id") or candidate.video_id)
             source_clips = sorted(workspace.glob(f"{video_id}_part*.mp4"))
             kept = filter_broll_clip_list(
                 source_clips,
@@ -2013,24 +2085,8 @@ def download_broll_candidates(
                 broll_pool.add_gated_clips_to_pool(jobs_root, subject=subject, clips=kept)
             return video_id
         finally:
-            cleanup_workspace(workspace)
-
-    def _process_candidate_timed(candidate: VideoCandidate) -> str | None:
-        if BROLL_SOURCE_TIMEOUT_SEC <= 0:
-            return _process_candidate(candidate)
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(_process_candidate, candidate)
-            try:
-                return future.result(timeout=BROLL_SOURCE_TIMEOUT_SEC)
-            except FuturesTimeoutError:
-                print(
-                    f"BROLL_SOURCE_TIMEOUT id={candidate.video_id} "
-                    f"seconds={BROLL_SOURCE_TIMEOUT_SEC:.0f}"
-                )
-                if job_dir:
-                    record_failed_source(job_dir, candidate.video_id)
-                    cleanup_workspace(source_workspace(job_dir, candidate.video_id))
-                return None
+            if job_dir is not None:
+                cleanup_workspace(workspace)
 
     print(f"Downloading {len(to_download)} B-roll source(s)...")
     seen_ids: set[str] = set()
@@ -2063,32 +2119,31 @@ def download_broll_candidates(
         return False
 
     batch = [c for c in to_download if c.video_id not in seen_ids]
-    if allow_parallel and len(batch) >= 2:
-        workers = min(2, len(batch))
-        parallel_results: list[str | None] = []
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {
-                pool.submit(_process_candidate_timed, candidate): candidate
-                for candidate in batch[:workers]
-            }
-            for future in as_completed(futures):
-                candidate = futures[future]
-                seen_ids.add(candidate.video_id)
-                try:
-                    parallel_results.append(future.result())
-                except Exception:
-                    if job_dir:
-                        record_failed_source(job_dir, candidate.video_id)
-                    parallel_results.append(None)
+    if allow_parallel and len(batch) >= 2 and job_dir is not None:
+        import threading
+
+        parallel_results: list[str | None] = [None, None]
+        threads: list[threading.Thread] = []
+
+        def _run(idx: int, cand: VideoCandidate) -> None:
+            parallel_results[idx] = _process_candidate(cand, source_index=idx)
+
+        for idx, candidate in enumerate(batch[:2]):
+            seen_ids.add(candidate.video_id)
+            t = threading.Thread(target=_run, args=(idx, candidate), daemon=True)
+            threads.append(t)
+            t.start()
+        for t in threads:
+            t.join()
         for vid in parallel_results:
-            if _after_source(vid):
+            if vid and _after_source(vid):
                 break
     else:
-        for candidate in batch:
+        for idx, candidate in enumerate(batch):
             if candidate.video_id in seen_ids:
                 continue
             seen_ids.add(candidate.video_id)
-            vid = _process_candidate_timed(candidate)
+            vid = _process_candidate(candidate, source_index=idx)
             if _after_source(vid):
                 break
     failed = len([c for c in candidates if c.video_id not in ok_ids and c.video_id not in blocked])
@@ -2517,6 +2572,7 @@ def _try_diversity_download(
                 max_parts=max_parts,
                 start_offset=start_offset,
                 subject=subject,
+                query=query,
                 use_vision=use_vision,
                 frame_gate=frame_gate,
                 jobs_root=jobs_root,
@@ -2524,7 +2580,7 @@ def _try_diversity_download(
                 max_sources=1,
                 job_dir=job_dir,
                 exclude_source_ids=exclude_source_ids,
-                parts_needed=max(1, inv.required - inv.usable_count),
+                parts_needed=min(8, max(1, inv.required - inv.usable_count) + 1),
                 raise_if_empty=False,
             )
         if ids:
@@ -2575,6 +2631,8 @@ def ensure_broll_clips(
     reuse_policy: str = "allow",
     split_full_source: bool | None = None,
     slug: str = "",
+    skip_broll_pool: bool = False,
+    skip_broll_search_cache: bool = False,
 ) -> list[str]:
     """Incremental ladder: pool → one source at a time → broadened query fallbacks."""
     if split_full_source is None:
@@ -2624,14 +2682,17 @@ def ensure_broll_clips(
         return collected_ids
 
     missing = max(0, needed_clips - inv.usable_count)
-    with montage_timer().stage_child("pool_lookup"):
-        broll_pool.take_from_pool(
-            jobs_root,
-            subject=subject,
-            clips_dir=clips_dir,
-            count=missing,
-            copy=True,
-        )
+    if not skip_broll_pool:
+        with montage_timer().stage_child("pool_lookup"):
+            broll_pool.take_from_pool(
+                jobs_root,
+                subject=subject,
+                clips_dir=clips_dir,
+                count=missing,
+                copy=True,
+            )
+    elif missing:
+        print("BROLL_POOL skip=1 reason=benchmark_flag")
     inv = _inventory(
         clips_dir,
         required=needed_clips,
@@ -2706,6 +2767,7 @@ def ensure_broll_clips(
                     reuse_policy=reuse_policy,
                     exclude_source_ids=exclude,
                     jobs_root=jobs_root,
+                    force_search=skip_broll_search_cache,
                 )
             queue_cursors[search_query] = 0
             if ranked_queues[search_query]:
@@ -2729,7 +2791,9 @@ def ensure_broll_clips(
         search_query = ladder[q_idx]
         bump_query_index(job_dir, q_idx)
         missing_now = max(0, needed_clips - inv.usable_count)
+        parts_budget = min(8, missing_now + 1)
         parallel_n = 2 if missing_now >= 4 else 1
+        allow_long = attempt >= max(1, max_attempts - 2)
         batch: list[VideoCandidate] = []
         for _ in range(parallel_n):
             candidate = _pop_candidate(search_query)
@@ -2749,6 +2813,7 @@ def ensure_broll_clips(
                     max_parts=max_parts,
                     start_offset=start_offset,
                     subject=subject,
+                    query=search_query,
                     use_vision=use_vision,
                     frame_gate=frame_gate,
                     jobs_root=jobs_root,
@@ -2756,9 +2821,10 @@ def ensure_broll_clips(
                     job_dir=job_dir,
                     exclude_source_ids=exclude,
                     max_sources=len(batch),
-                    parts_needed=missing_now,
+                    parts_needed=parts_budget,
                     needed_clips=needed_clips,
                     allow_parallel=parallel_n >= 2 and len(batch) >= 2,
+                    allow_long_fallback=allow_long,
                     raise_if_empty=False,
                 )
             if ids:
@@ -3257,6 +3323,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip pre-ship render quality checks.",
     )
+    parser.add_argument(
+        "--skip-broll-pool",
+        action="store_true",
+        help="Development/benchmark: skip reusable scenic B-roll pool (not for Weekly default).",
+    )
+    parser.add_argument(
+        "--skip-broll-search-cache",
+        action="store_true",
+        help="Development/benchmark: force fresh YouTube search (bypass search cache).",
+    )
     parser.add_argument("--no-vision", action="store_true", help="Skip optional vision subject check")
     parser.add_argument(
         "--no-frame-gate",
@@ -3451,6 +3527,7 @@ def main() -> int:
             duration = validate_prepared_speech_file(
                 speech_mp3=audio_dir / "speech.mp3",
                 requested_speaker=requested_speaker,
+                resolved_speaker=speaker,
                 source_video_id=speech.video_id,
                 excerpt=excerpt_text,
                 min_seconds=args.min_seconds,
@@ -3528,6 +3605,8 @@ def main() -> int:
                 frame_gate=gate_flags.frame_gate,
                 reuse_policy=reuse_policy,
                 slug=args.slug,
+                skip_broll_pool=args.skip_broll_pool,
+                skip_broll_search_cache=args.skip_broll_search_cache,
             )
         caption_mode = "phrase" if args.phrase_captions else caption_mode_default()
         caption_align = normalize_caption_align(args.caption_align, caption_mode=caption_mode)

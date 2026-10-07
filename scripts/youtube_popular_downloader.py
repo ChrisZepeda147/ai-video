@@ -580,7 +580,16 @@ def export_clip(
     duration: float,
     aspect_ratio: str,
     max_height: int,
+    preserve_fps: bool = True,
 ) -> None:
+    out_rate: float | None = None
+    if preserve_fps:
+        try:
+            src_fps = probe_fps(source)
+            if is_usable_fps(src_fps):
+                out_rate = src_fps
+        except (OSError, ValueError, subprocess.CalledProcessError):
+            out_rate = None
     cmd = [
         _resolve_tool("ffmpeg"),
         "-y",
@@ -597,11 +606,10 @@ def export_clip(
         "fast",
         "-crf",
         "23",
-        "-an",
-        "-movflags",
-        "+faststart",
-        str(output),
     ]
+    if out_rate is not None:
+        cmd.extend(["-r", f"{out_rate:.3f}"])
+    cmd.extend(["-an", "-movflags", "+faststart", str(output)])
     subprocess.run(cmd, check=True, capture_output=True)
 
 
@@ -727,6 +735,21 @@ def split_into_parts(
             aspect_ratio=aspect_ratio,
             max_height=max_height,
         )
+        try:
+            from broll_part_log import log_broll_part, probe_part_usable
+
+            out_fps, usable, reason = probe_part_usable(part_path, source_fps=source_fps)
+            log_broll_part(
+                video_id=video_id,
+                part=part_num,
+                source_fps=source_fps,
+                output_fps=out_fps,
+                duration=segment_duration,
+                usable=usable,
+                reason=reason,
+            )
+        except ImportError:
+            pass
         parts.append(
             {
                 "part": part_num,
@@ -855,7 +878,8 @@ def download_broll_source_parts(
     preflight_format: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Download only the B-roll windows needed for this source (sections or capped full)."""
-    from broll_candidate_rank import section_start_fractions
+    from broll_candidate_rank import section_start_fractions, should_prefer_section_download
+    from broll_format_preflight import log_selected_format
 
     wall_start = time.perf_counter()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -900,6 +924,12 @@ def download_broll_source_parts(
     }
     sel_height = int(preflight_format.get("height") or height or 0) if preflight_format else height
     sel_fps = float(preflight_format.get("fps") or fps or 0) if preflight_format else fps
+    if preflight_format:
+        log_selected_format(
+            candidate.video_id,
+            metadata_fps=float(fps) if fps is not None else None,
+            selected=preflight_format,
+        )
 
     def _done() -> dict[str, Any]:
         record["seconds"] = time.perf_counter() - wall_start
@@ -915,8 +945,15 @@ def download_broll_source_parts(
             )
         return record
 
-    section_threshold = 20 * 60.0
-    use_sections = duration is not None and duration > section_threshold and parts_request >= 1
+    use_sections = should_prefer_section_download(
+        source_duration=duration,
+        clip_length=clip_length,
+        parts_needed=parts_needed,
+        start_offset=start_offset,
+    )
+    allow_expensive_full = True
+    if duration and duration > 180 and parts_request * clip_length < duration * 0.4:
+        allow_expensive_full = False
     if use_sections:
         try:
             usable_span = max((duration or 0) - start_offset - clip_length, 0.0)
@@ -951,7 +988,12 @@ def download_broll_source_parts(
                 print("BROLL_DOWNLOAD_MODE=sections")
                 return _done()
         except Exception as exc:
-            print(f"BROLL_DOWNLOAD_MODE=full_fallback reason={exc}")
+            print(f"BROLL_DOWNLOAD_MODE=section_failed reason={exc}")
+            if not allow_expensive_full:
+                record["status"] = "error"
+                record["download_mode"] = "section_failed_skip_full"
+                print("BROLL_DOWNLOAD_MODE=skip_full reason=expensive_candidate")
+                return _done()
 
     spaced = bool(duration and duration > clip_length * 2)
     results = download_videos(

@@ -22,11 +22,10 @@ class BrollFormatPreflightTests(unittest.TestCase):
                 {"vcodec": "avc1", "height": 1080, "fps": 24.0},
             ]
         }
-        fake_ydl = unittest.mock.MagicMock()
-        fake_ydl.YoutubeDL.return_value.__enter__.return_value.extract_info.return_value = (
-            fake_info
-        )
-        with patch("broll_format_preflight.yt_dlp", fake_ydl):
+        with patch("broll_format_preflight.yt_dlp.YoutubeDL") as mock_ydl:
+            mock_ydl.return_value.__enter__.return_value.extract_info.return_value = (
+                fake_info
+            )
             ok, reason, _meta = inspect_usable_formats("https://youtu.be/x")
         self.assertFalse(ok)
         self.assertEqual(reason, "no_50fps_format")
@@ -37,11 +36,10 @@ class BrollFormatPreflightTests(unittest.TestCase):
                 {"vcodec": "avc1", "height": 1440, "fps": 60.0, "format_id": "248"},
             ]
         }
-        fake_ydl = unittest.mock.MagicMock()
-        fake_ydl.YoutubeDL.return_value.__enter__.return_value.extract_info.return_value = (
-            fake_info
-        )
-        with patch("broll_format_preflight.yt_dlp", fake_ydl):
+        with patch("broll_format_preflight.yt_dlp.YoutubeDL") as mock_ydl:
+            mock_ydl.return_value.__enter__.return_value.extract_info.return_value = (
+                fake_info
+            )
             ok, reason, meta = inspect_usable_formats("https://youtu.be/x")
         self.assertTrue(ok)
         self.assertIsNone(reason)

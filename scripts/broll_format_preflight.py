@@ -40,7 +40,7 @@ def inspect_usable_formats(url: str) -> tuple[bool, str | None, dict[str, Any]]:
     except Exception:
         return False, "format_probe_failed", {}
     if not isinstance(info, dict):
-        return True, None, {}
+        return False, "format_probe_failed", {}
     formats = info.get("formats") or []
     best: dict[str, Any] | None = None
     best_score = -10_000
@@ -72,3 +72,18 @@ def inspect_usable_formats(url: str) -> tuple[bool, str | None, dict[str, Any]]:
 
 def log_candidate_skip(video_id: str, reason: str) -> None:
     print(f"BROLL_CANDIDATE_SKIP id={video_id} reason={reason}")
+
+
+def log_selected_format(
+    video_id: str,
+    *,
+    metadata_fps: float | None,
+    selected: dict[str, Any],
+) -> None:
+    height = selected.get("height") or "?"
+    fps = selected.get("fps") or "?"
+    fmt_id = selected.get("format_id") or "?"
+    print(
+        f"BROLL_FORMAT id={video_id} metadata_fps={metadata_fps if metadata_fps is not None else '?'} "
+        f"selected_format={fmt_id} selected_fps={fps} resolution={height}p"
+    )

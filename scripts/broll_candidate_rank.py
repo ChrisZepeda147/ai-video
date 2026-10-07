@@ -57,6 +57,25 @@ def rank_broll_candidates(candidates: list[VideoCandidate]) -> list[VideoCandida
     return sorted(candidates, key=score, reverse=True)
 
 
+def should_prefer_section_download(
+    *,
+    source_duration: float | None,
+    clip_length: int,
+    parts_needed: int,
+    start_offset: float = 0.0,
+) -> bool:
+    if source_duration is None or source_duration <= 0:
+        return False
+    parts_request = max(1, parts_needed + 1)
+    material = parts_request * clip_length
+    usable = max(source_duration - start_offset, 0.0)
+    if usable <= clip_length * 1.5:
+        return False
+    if material < usable * 0.85:
+        return True
+    return usable > 20 * 60.0
+
+
 def section_start_fractions(count: int) -> list[float]:
     if count <= 0:
         return []

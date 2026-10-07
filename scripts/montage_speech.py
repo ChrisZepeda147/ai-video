@@ -17,10 +17,16 @@ class PreparedSpeechRejected(Exception):
         super().__init__(f"Speech rejected ({reason}): {source} {duration:.1f}s")
 
 
-def log_montage_speech_ok(*, requested_speaker: str, duration: float) -> None:
+def log_montage_speech_ok(
+    *,
+    requested_speaker: str,
+    duration: float,
+    resolved_speaker: str | None = None,
+) -> None:
+    resolved = (resolved_speaker or requested_speaker).strip() or requested_speaker
     print(
         f'MONTAGE_SPEECH requested_speaker="{requested_speaker}" '
-        f"duration={duration:.1f} status=ok"
+        f'resolved_speaker="{resolved}" duration={duration:.1f} status=ok'
     )
 
 
@@ -47,6 +53,7 @@ def validate_prepared_speech_file(
     excerpt: str,
     min_seconds: float,
     probe_duration_fn,
+    resolved_speaker: str | None = None,
 ) -> float:
     source = source_video_id or "unknown"
     if not speech_mp3.is_file():
@@ -72,5 +79,9 @@ def validate_prepared_speech_file(
         raise PreparedSpeechRejected(
             source=source, duration=duration, reason="incoherent_excerpt"
         )
-    log_montage_speech_ok(requested_speaker=requested_speaker, duration=duration)
+    log_montage_speech_ok(
+        requested_speaker=requested_speaker,
+        resolved_speaker=resolved_speaker,
+        duration=duration,
+    )
     return duration
