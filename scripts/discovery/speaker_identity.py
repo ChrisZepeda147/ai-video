@@ -144,8 +144,9 @@ def resolve_registration_speaker(
         if intended_clean and inferred.lower() != intended_clean.lower():
             meta["search_intent"] = intended_clean
             meta["speaker_inferred_from"] = "media_metadata"
-            meta["speaker_source"] = "inferred"
-            return inferred, meta
+            meta["speaker_mismatch_hint"] = inferred
+            meta["speaker_source"] = "intended"
+            return intended_clean, meta
         meta["speaker_source"] = "inferred" if not intended_clean else "intended"
         return inferred, meta
 
