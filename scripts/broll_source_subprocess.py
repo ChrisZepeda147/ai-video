@@ -63,28 +63,26 @@ def run_broll_source_subprocess(
         encoding="utf-8",
         errors="replace",
     )
-    deadline = time.perf_counter() + max(timeout_sec, 1.0)
     timed_out = False
-    while proc.poll() is None:
-        if time.perf_counter() >= deadline:
-            timed_out = True
-            print(
-                f"BROLL_SOURCE_TIMEOUT id={video_id} seconds={timeout_sec:.0f}"
-            )
+    try:
+        proc.wait(timeout=max(timeout_sec, 1.0))
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        print(f"BROLL_SOURCE_TIMEOUT id={video_id} seconds={timeout_sec:.0f}")
+        kill_process_tree(proc.pid)
+        try:
+            proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
             kill_process_tree(proc.pid)
-            try:
-                proc.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                kill_process_tree(proc.pid)
-                proc.wait(timeout=10)
-            break
-        time.sleep(0.25)
+            proc.wait(timeout=10)
 
-    if proc.stdout:
+    if proc.stdout and not timed_out:
         for line in proc.stdout:
             line = line.rstrip()
             if line:
                 print(line)
+    elif proc.stdout and timed_out:
+        proc.stdout.close()
 
     if timed_out:
         cleanup_workspace(workspace)

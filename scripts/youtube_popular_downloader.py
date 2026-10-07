@@ -915,7 +915,9 @@ def download_broll_source_parts(
     )
 
     format_selector = broll_format_selector(prefer_height=prefer_stream_height)
-    format_relaxed = broll_format_selector(prefer_height=prefer_stream_height, strict_fps=False)
+    if preflight_format and preflight_format.get("format_id"):
+        fmt_id = str(preflight_format["format_id"])
+        format_selector = fmt_id
     record: dict[str, Any] = {
         **asdict(candidate),
         "status": "pending",
@@ -1011,23 +1013,6 @@ def download_broll_source_parts(
         format_selector=format_selector,
         spaced_parts=spaced,
     )
-    if (not results or results[0].get("status") != "ok") and format_relaxed != format_selector:
-        print("BROLL_FORMAT fallback=relaxed_height (post-download fps gate)")
-        results = download_videos(
-            [candidate],
-            output_dir=output_dir,
-            max_height=max_height,
-            audio_only=False,
-            clip_length=clip_length,
-            max_parts=parts_request,
-            split_parts=True,
-            keep_source=False,
-            aspect_ratio=aspect_ratio,
-            quiet=quiet,
-            start_offset=start_offset,
-            format_selector=format_relaxed,
-            spaced_parts=spaced,
-        )
     if results and results[0].get("status") == "ok":
         record.update(results[0])
         record["download_mode"] = "full_fallback" if use_sections else "full"
