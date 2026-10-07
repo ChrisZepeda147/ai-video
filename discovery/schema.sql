@@ -660,6 +660,7 @@ CREATE TABLE IF NOT EXISTS cursor_command_jobs (
     agent_messages_json TEXT,
     agent_result TEXT,
     error_message TEXT,
+    error_summary TEXT,
     final_output_path TEXT,
     created_at TEXT NOT NULL,
     started_at TEXT,

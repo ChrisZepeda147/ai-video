@@ -15,7 +15,7 @@ Loader/helpers: `scripts/discovery/driven_visuals.py`
 1. **Opener (1–2s)** — movement, strong subject, speech starts immediately. No black/static open. **Cars override:** full exterior of the car for **≥5s** first — never cabin/interior. See `car-exterior-frames.mdc`.
 2. **B-roll clips** — any readable fps. 4K not required. No car interiors. See `broll-clip-quality.mdc`.
 3. **Hook** — 4–7 words when it matches the speech; show within ~1s; stronger caption style.
-4. **Captions** — phrase blocks (2–5 words), not single-word karaoke default.
+4. **Captions** — one word at a time (centered). Use `--phrase-captions` only when brief asks for phrase blocks.
 5. **Pacing** — fast beats first ~6s (0.8–1.8s), then ~2–3.5s; speech beats win over math.
 6. **Pattern interrupts** — vary shot type/mood; no cheesy transitions.
 7. **Three daily videos** — distinct visual direction per slot.
@@ -28,8 +28,8 @@ Loader/helpers: `scripts/discovery/driven_visuals.py`
 python scripts/build_motivation_job.py --slug ... --broll-query "..." --hook "FOUR TO SEVEN WORD HOOK"
 ```
 
-- Phrase captions + driven pacing: **on by default**
-- Revert: `--classic-captions`, `--uniform-pacing`
+- One-word captions + driven pacing: **on by default**
+- Phrase captions: `--phrase-captions`; uniform beats: `--uniform-pacing`
 - Pre-ship check: `python scripts/check_render_quality.py --video path/to/final.mp4`
 
 ## Daily batch

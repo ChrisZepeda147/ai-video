@@ -8,7 +8,7 @@
       "slow establishing shots",
       "nearly black opening frames",
       "static visuals for several seconds",
-      "tiny one-word captions",
+      "phrase captions with bad timing",
       "long visual fade-ins"
     ],
     "prefer": [
@@ -32,7 +32,7 @@
     "must_match_speech": true
   },
   "captions": {
-    "mode": "phrase",
+    "mode": "word",
     "words_per_phrase_min": 2,
     "words_per_phrase_max": 5,
     "font_size_phrase": 46,
