@@ -1999,6 +1999,7 @@ def download_broll_candidates(
     batch = [c for c in to_download if c.video_id not in seen_ids]
     if allow_parallel and len(batch) >= 2:
         workers = min(2, len(batch))
+        parallel_results: list[str | None] = []
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {
                 pool.submit(_process_candidate, candidate): candidate
@@ -2008,13 +2009,14 @@ def download_broll_candidates(
                 candidate = futures[future]
                 seen_ids.add(candidate.video_id)
                 try:
-                    vid = future.result()
+                    parallel_results.append(future.result())
                 except Exception:
                     if job_dir:
                         record_failed_source(job_dir, candidate.video_id)
-                    continue
-                if _after_source(vid):
-                    break
+                    parallel_results.append(None)
+        for vid in parallel_results:
+            if _after_source(vid):
+                break
     else:
         for candidate in batch:
             if candidate.video_id in seen_ids:
