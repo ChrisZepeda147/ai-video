@@ -2860,13 +2860,27 @@ def ensure_broll_clips(
     missing = max(0, needed_clips - inv.usable_count)
     if not skip_broll_pool:
         with montage_timer().stage_child("pool_lookup"):
-            broll_pool.take_from_pool(
+            pool_dirs = broll_pool.find_matching_pools(jobs_root, subject)
+            pool_pending = 0
+            for pool_dir in pool_dirs:
+                pool_pending += len(
+                    broll_pool._eligible_pool_clips(pool_dir, jobs_root=jobs_root)
+                )
+            print(
+                f"POOL_MATCH candidates={pool_pending} subject={broll_pool.subject_pool_slug(subject)}"
+            )
+            taken_pool = broll_pool.take_from_pool(
                 jobs_root,
                 subject=subject,
                 clips_dir=clips_dir,
                 count=missing,
                 copy=True,
             )
+            if taken_pool:
+                print(
+                    f"POOL_MATCH accepted={len(taken_pool)} sources="
+                    f"{len({broll_pool._youtube_id_from_clip_name(p.name) for p in taken_pool})}"
+                )
     elif missing:
         print("BROLL_POOL skip=1 reason=benchmark_flag")
     inv = _inventory(
@@ -2925,7 +2939,11 @@ def ensure_broll_clips(
             return broll_ids
 
     ladder = broaden_broll_query_ladder(query)
-    start_idx = min(acquire["query_index"], max(0, len(ladder) - 1))
+    # Partial job folder (retry): do not resume mid-ladder — still need more sources/parts.
+    if inv.usable_count > 0 and not inv.satisfies_count():
+        start_idx = 0
+    else:
+        start_idx = min(acquire["query_index"], max(0, len(ladder) - 1))
     source_cap = 3 if not split_full_source else 4
     max_attempts = source_cap * len(ladder)
     ranked_queues: dict[str, list[VideoCandidate]] = {}
