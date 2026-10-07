@@ -604,16 +604,23 @@ def export_clip(
     subprocess.run(cmd, check=True, capture_output=True)
 
 
-def broll_format_selector(*, prefer_height: int = 1440) -> str:
+def broll_format_selector(*, prefer_height: int = 1440, strict_fps: bool = True) -> str:
     """Prefer 1440p/1080p high-FPS streams; 4K only as fallback."""
     min_fps = int(max(MIN_USABLE_FPS, 50))
     h1440 = max(720, min(prefer_height, 1440))
+    if strict_fps:
+        return (
+            f"bestvideo[fps>={min_fps}][height<={h1440}]+bestaudio/"
+            f"bestvideo[fps>={min_fps}][height<=1080]+bestaudio/"
+            f"bestvideo[fps>={min_fps}][height<=2160]+bestaudio/"
+            f"bestvideo[fps>={min_fps}]+bestaudio/"
+            f"best[fps>={min_fps}]"
+        )
     return (
-        f"bestvideo[fps>={min_fps}][height<={h1440}]+bestaudio/"
-        f"bestvideo[fps>={min_fps}][height<=1080]+bestaudio/"
-        f"bestvideo[fps>={min_fps}][height<=2160]+bestaudio/"
-        f"bestvideo[fps>={min_fps}]+bestaudio/"
-        f"best[fps>={min_fps}]"
+        f"bestvideo[height<={h1440}]+bestaudio/"
+        f"bestvideo[height<=1080]+bestaudio/"
+        f"bestvideo[height<=2160]+bestaudio/"
+        f"bestvideo+bestaudio/best"
     )
 
 
@@ -850,6 +857,7 @@ def download_broll_source_parts(
     )
 
     format_selector = broll_format_selector(prefer_height=prefer_stream_height)
+    format_relaxed = broll_format_selector(prefer_height=prefer_stream_height, strict_fps=False)
     record: dict[str, Any] = {
         **asdict(candidate),
         "status": "pending",
@@ -911,6 +919,23 @@ def download_broll_source_parts(
         format_selector=format_selector,
         spaced_parts=spaced,
     )
+    if (not results or results[0].get("status") != "ok") and format_relaxed != format_selector:
+        print("BROLL_FORMAT fallback=relaxed_height (post-download fps gate)")
+        results = download_videos(
+            [candidate],
+            output_dir=output_dir,
+            max_height=max_height,
+            audio_only=False,
+            clip_length=clip_length,
+            max_parts=parts_request,
+            split_parts=True,
+            keep_source=False,
+            aspect_ratio=aspect_ratio,
+            quiet=quiet,
+            start_offset=start_offset,
+            format_selector=format_relaxed,
+            spaced_parts=spaced,
+        )
     if results and results[0].get("status") == "ok":
         record.update(results[0])
         record["download_mode"] = "full_fallback" if use_sections else "full"

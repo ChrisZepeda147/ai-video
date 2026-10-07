@@ -47,7 +47,9 @@ def rank_broll_candidates(candidates: list[VideoCandidate]) -> list[VideoCandida
         if item.fps is not None and item.fps >= 50:
             base += 30.0
         elif item.fps is not None and item.fps >= 30:
-            base += 5.0
+            base -= 40.0
+        elif item.fps is not None:
+            base -= 80.0
         views = item.view_count or 0
         base += min(views / 100_000.0, 20.0)
         return base
