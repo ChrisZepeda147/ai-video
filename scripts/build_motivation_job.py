@@ -78,7 +78,11 @@ from broll_candidate_filter import hard_reject_reason
 from broll_format_preflight import inspect_usable_formats, log_candidate_skip, log_selected_format
 from broll_source_subprocess import run_broll_source_subprocess
 from broll_search_cache import get_cached_candidates, store_cached_candidates
-from montage_speech import PreparedSpeechRejected, validate_prepared_speech_file
+from montage_speech import (
+    PreparedSpeechRejected,
+    excerpt_looks_incomplete,
+    validate_prepared_speech_file,
+)
 from montage_speaker import (
     SpeechSpeakerMismatchError,
     enforce_requested_speaker,
@@ -1635,6 +1639,16 @@ def prepare_speech(
             print(f"  skip repeat transcript: {_reuse_hit_detail(hits[0])}")
             if speech_url:
                 raise RuntimeError(f"Speech transcript already used: {_reuse_hit_detail(hits[0])}")
+            _clear_audio_dir(audio_dir)
+            continue
+        if duration < float(min_seconds) - 0.25:
+            print(
+                f"  skip speech window: {duration:.1f}s below min {min_seconds:.0f}s — try next candidate"
+            )
+            _clear_audio_dir(audio_dir)
+            continue
+        if excerpt_looks_incomplete(excerpt_text):
+            print("  skip speech window: excerpt ends mid-thought — try next candidate")
             _clear_audio_dir(audio_dir)
             continue
         chosen = candidate

@@ -829,6 +829,21 @@ def _download_broll_section_to_part(
             max_height=max_height,
         )
         filepath.unlink(missing_ok=True)
+        try:
+            from broll_part_log import log_broll_part, probe_part_usable
+
+            out_fps, usable, reason = probe_part_usable(part_path, source_fps=clip_fps)
+            log_broll_part(
+                video_id=candidate.video_id,
+                part=part_num,
+                source_fps=clip_fps,
+                output_fps=out_fps,
+                duration=seg_dur,
+                usable=usable,
+                reason=reason,
+            )
+        except ImportError:
+            pass
         _safe_print(f"    Part {part_num}: {part_path.name} (section @ {start:.0f}s)", quiet=quiet)
         return part_path
 
