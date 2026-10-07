@@ -1501,19 +1501,23 @@ def prepare_speech(
     if pooled is not None:
         return pooled
 
+    candidate_batches: list[tuple[str, list[VideoCandidate]]] = []
     if speech_url:
-        candidates = discover_urls([speech_url])
+        candidate_batches.append(("pinned", discover_urls([speech_url])))
         print(f"Speech URL: {speech_url}")
-    else:
-        candidates = search_speeches(
-            query=speech_query,
-            speaker=speaker,
-            limit=8,
-            reuse_policy=reuse_policy,
-            agent_vet=agent_speech_vet,
+    candidate_batches.append(
+        (
+            "search",
+            search_speeches(
+                query=speech_query,
+                speaker=speaker,
+                limit=8,
+                reuse_policy=reuse_policy,
+                agent_vet=agent_speech_vet,
+            ),
         )
-        print(f"Speech candidates: {len(candidates)} (search: {speech_query})")
-    if not candidates:
+    )
+    if not any(batch for _, batch in candidate_batches if batch):
         if reuse_policy == "require_new":
             raise MotivationJobError(
                 "REUSE_RESTRICTION",
@@ -1533,134 +1537,154 @@ def prepare_speech(
     captions: Path | None = None
     last_code: str | None = None
     skipped_reuse = 0
-    for candidate in candidates:
-        if reuse_policy == "require_new" and candidate.video_id in used_ids() and not speech_url:
-            skipped_reuse += 1
+    tried_video_ids: set[str] = set()
+    for batch_idx, (batch_name, candidates) in enumerate(candidate_batches):
+        if not candidates:
             continue
-        used_before = candidate.video_id in used_ids()
-        prior_ranges = prior_source_ranges(candidate.video_id) if used_before else []
-        if used_before:
-            print(
-                f"Trying speech (previously used source): {candidate.title} ({candidate.video_id})"
-            )
-            if prior_ranges:
-                formatted = ", ".join(f"{lo:.0f}s–{hi:.0f}s" for lo, hi in prior_ranges[:6])
-                print(f"  prior ranges: {formatted}")
-        else:
-            print(f"Trying speech: {candidate.title} ({candidate.video_id})")
-        try:
-            source_mp3, error_code = download_one_audio(candidate, audio_dir)
-            if source_mp3:
-                captions = download_subs(candidate.url, audio_dir)
-        except Exception as exc:  # noqa: BLE001 — next candidate on age-gate / download fail
-            error_code = classify_download_error(exc)
-            print(f"  skip ({error_code}): {exc}")
-            last_code = error_code
-            if error_code == "FFMPEG_NOT_FOUND":
-                break
-            continue
-        if error_code:
-            print(f"  skip ({error_code})")
-            last_code = error_code
-            if error_code == "FFMPEG_NOT_FOUND":
-                break
-            continue
-        if source_mp3 is None or captions is None:
-            continue
-        source_text = captions_text(captions)
-        avoid_ranges = prior_ranges if reuse_policy == "require_new" else None
-        try:
-            start, duration, option_index, pick_method = resolve_speech_window(
+        if batch_name == "search":
+            if batch_idx > 0 and speech_url:
+                print(f"Speech search fallback: {speech_query}")
+            elif not speech_url:
+                print(f"Speech candidates: {len(candidates)} (search: {speech_query})")
+        batch_done = False
+        for candidate in candidates:
+            if candidate.video_id in tried_video_ids:
+                continue
+            tried_video_ids.add(candidate.video_id)
+            if reuse_policy == "require_new" and candidate.video_id in used_ids() and not speech_url:
+                skipped_reuse += 1
+                continue
+            used_before = candidate.video_id in used_ids()
+            prior_ranges = prior_source_ranges(candidate.video_id) if used_before else []
+            if used_before:
+                print(
+                    f"Trying speech (previously used source): {candidate.title} ({candidate.video_id})"
+                )
+                if prior_ranges:
+                    formatted = ", ".join(f"{lo:.0f}s–{hi:.0f}s" for lo, hi in prior_ranges[:6])
+                    print(f"  prior ranges: {formatted}")
+            else:
+                print(f"Trying speech: {candidate.title} ({candidate.video_id})")
+            try:
+                source_mp3, error_code = download_one_audio(candidate, audio_dir)
+                if source_mp3:
+                    captions = download_subs(candidate.url, audio_dir)
+            except Exception as exc:  # noqa: BLE001 — next candidate on age-gate / download fail
+                error_code = classify_download_error(exc)
+                print(f"  skip ({error_code}): {exc}")
+                last_code = error_code
+                if error_code == "FFMPEG_NOT_FOUND":
+                    batch_done = True
+                    break
+                continue
+            if error_code:
+                print(f"  skip ({error_code})")
+                last_code = error_code
+                if error_code == "FFMPEG_NOT_FOUND":
+                    batch_done = True
+                    break
+                continue
+            if source_mp3 is None or captions is None:
+                continue
+            source_text = captions_text(captions)
+            avoid_ranges = prior_ranges if reuse_policy == "require_new" else None
+            try:
+                start, duration, option_index, pick_method = resolve_speech_window(
+                    captions,
+                    min_seconds=min_seconds,
+                    max_seconds=max_seconds,
+                    avoid_ranges=avoid_ranges,
+                    speech_start=speech_start,
+                    speech_duration=speech_duration,
+                    speech_option=speech_option,
+                    agent_vet=agent_speech_vet,
+                )
+            except ValueError as exc:
+                print(f"  skip speech window: {exc}")
+                _clear_audio_dir(audio_dir)
+                continue
+            if speech_review_only:
+                from prepare_cursor_montage_review import write_speech_review_pack
+
+                out = review_out_dir or (audio_dir.parent / "cursor-review")
+                path = write_speech_review_pack(
+                    out,
+                    title=candidate.title,
+                    video_id=candidate.video_id,
+                    url=candidate.url,
+                    captions=captions,
+                    min_seconds=min_seconds,
+                    max_seconds=max_seconds,
+                    avoid_ranges=avoid_ranges,
+                    chosen_start=None,
+                    chosen_duration=None,
+                    chosen_option=None,
+                    pick_method="pending-agent",
+                )
+                url_file.write_text(f"{candidate.url}\n", encoding="utf-8")
+                raise SpeechReviewReady(path)
+            try:
+                source_duration = probe_duration(source_mp3)
+            except (subprocess.CalledProcessError, ValueError):
+                source_duration = 0.0
+            duration = extend_excerpt_duration(
                 captions,
-                min_seconds=min_seconds,
+                start=start,
+                duration=duration,
                 max_seconds=max_seconds,
-                avoid_ranges=avoid_ranges,
-                speech_start=speech_start,
-                speech_duration=speech_duration,
-                speech_option=speech_option,
-                agent_vet=agent_speech_vet,
+                source_duration=source_duration,
             )
-        except ValueError as exc:
-            print(f"  skip speech window: {exc}")
-            _clear_audio_dir(audio_dir)
-            continue
-        if speech_review_only:
-            from prepare_cursor_montage_review import write_speech_review_pack
+            excerpt_text = captions_text(captions, start=start, duration=duration)
+            if agent_speech_vet or speech_option or speech_start is not None:
+                from prepare_cursor_montage_review import write_speech_review_pack
 
-            out = review_out_dir or (audio_dir.parent / "cursor-review")
-            path = write_speech_review_pack(
-                out,
-                title=candidate.title,
-                video_id=candidate.video_id,
-                url=candidate.url,
-                captions=captions,
-                min_seconds=min_seconds,
-                max_seconds=max_seconds,
-                avoid_ranges=avoid_ranges,
-                chosen_start=None,
-                chosen_duration=None,
-                chosen_option=None,
-                pick_method="pending-agent",
+                write_speech_review_pack(
+                    review_out_dir or (audio_dir.parent / "cursor-review"),
+                    title=candidate.title,
+                    video_id=candidate.video_id,
+                    url=candidate.url,
+                    captions=captions,
+                    min_seconds=min_seconds,
+                    max_seconds=max_seconds,
+                    avoid_ranges=avoid_ranges,
+                    chosen_start=start,
+                    chosen_duration=duration,
+                    chosen_option=option_index,
+                    pick_method=pick_method,
+                )
+            hits = content_reuse.find_speech_reuse(
+                excerpt_text,
+                youtube_id=candidate.video_id,
+                source_text=source_text,
             )
-            url_file.write_text(f"{candidate.url}\n", encoding="utf-8")
-            raise SpeechReviewReady(path)
-        try:
-            source_duration = probe_duration(source_mp3)
-        except (subprocess.CalledProcessError, ValueError):
-            source_duration = 0.0
-        duration = extend_excerpt_duration(
-            captions,
-            start=start,
-            duration=duration,
-            max_seconds=max_seconds,
-            source_duration=source_duration,
-        )
-        excerpt_text = captions_text(captions, start=start, duration=duration)
-        if agent_speech_vet or speech_option or speech_start is not None:
-            from prepare_cursor_montage_review import write_speech_review_pack
-
-            write_speech_review_pack(
-                review_out_dir or (audio_dir.parent / "cursor-review"),
-                title=candidate.title,
-                video_id=candidate.video_id,
-                url=candidate.url,
-                captions=captions,
-                min_seconds=min_seconds,
-                max_seconds=max_seconds,
-                avoid_ranges=avoid_ranges,
-                chosen_start=start,
-                chosen_duration=duration,
-                chosen_option=option_index,
-                pick_method=pick_method,
-            )
-        hits = content_reuse.find_speech_reuse(
-            excerpt_text,
-            youtube_id=candidate.video_id,
-            source_text=source_text,
-        )
-        if hits and not allow_reuse:
-            print(f"  skip repeat transcript: {_reuse_hit_detail(hits[0])}")
-            if speech_url:
-                raise RuntimeError(f"Speech transcript already used: {_reuse_hit_detail(hits[0])}")
-            _clear_audio_dir(audio_dir)
-            continue
-        if duration < float(min_seconds) - 0.25:
-            print(
-                f"  skip speech window: {duration:.1f}s below min {min_seconds:.0f}s — try next candidate"
-            )
-            _clear_audio_dir(audio_dir)
-            continue
-        if excerpt_looks_incomplete(excerpt_text):
-            print("  skip speech window: excerpt ends mid-thought — try next candidate")
-            _clear_audio_dir(audio_dir)
-            continue
-        chosen = candidate
-        break
+            if hits and not allow_reuse:
+                print(f"  skip repeat transcript: {_reuse_hit_detail(hits[0])}")
+                if speech_url:
+                    raise RuntimeError(f"Speech transcript already used: {_reuse_hit_detail(hits[0])}")
+                _clear_audio_dir(audio_dir)
+                continue
+            if duration < float(min_seconds) - 0.25:
+                print(
+                    f"  skip speech window: {duration:.1f}s below min {min_seconds:.0f}s — try next candidate"
+                )
+                _clear_audio_dir(audio_dir)
+                continue
+            if excerpt_looks_incomplete(excerpt_text):
+                print("  skip speech window: excerpt ends mid-thought — try next candidate")
+                _clear_audio_dir(audio_dir)
+                continue
+            chosen = candidate
+            batch_done = True
+            break
+        if batch_done and chosen is not None:
+            break
+        if batch_done and last_code == "FFMPEG_NOT_FOUND":
+            break
 
     if last_code == "FFMPEG_NOT_FOUND":
         raise MotivationJobError("FFMPEG_NOT_FOUND", format_toolchain_report())
     if chosen is None or source_mp3 is None or captions is None:
-        if skipped_reuse and skipped_reuse == len(candidates):
+        if skipped_reuse and skipped_reuse >= len(tried_video_ids):
             raise MotivationJobError(
                 "REUSE_RESTRICTION",
                 "All speech candidates were skipped by require_new reuse policy.",
@@ -3695,6 +3719,18 @@ def main() -> int:
         montage_timer().emit()
         return 1
     except MotivationJobError as exc:
+        failure = MontageFailure(
+            slug=args.slug or "",
+            stage="prepare_speech",
+            code=(
+                "SPEECH_DOWNLOAD_FAILED"
+                if exc.code in {"DOWNLOAD_FAILED", "NO_CANDIDATE_FOUND", "REUSE_RESTRICTION"}
+                else exc.code
+            ),
+            summary=str(exc),
+        )
+        print(failure.emit_json_line())
+        emit_stage_line("prepare_speech", "fail", code=failure.code)
         print(exc, file=sys.stderr)
         montage_timer().emit()
         return 1

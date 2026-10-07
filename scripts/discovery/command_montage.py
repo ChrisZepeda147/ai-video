@@ -125,9 +125,15 @@ def parse_montage_command(text: str) -> dict[str, Any] | None:
         # Prefer official source title over broad search when user named a specific video.
         speech_query = source_title
 
-    speaker: str | None = None
+    speaker: str | None = _first_match(
+        r"^Requested speaker:\s*(.+)$",
+        text,
+        flags=re.IGNORECASE | re.MULTILINE,
+    )
+    if speaker:
+        speaker = speaker.strip().strip("\"'")
     audio_hint = (speech_query or "").lower()
-    if "hormozi" in audio_hint or "alex hormozi" in (text or "").lower():
+    if not speaker and ("hormozi" in audio_hint or "alex hormozi" in (text or "").lower()):
         speaker = "Alex Hormozi"
     if not speaker and speech_query:
         try:
@@ -262,9 +268,9 @@ def run_direct_montage_command(
             )
             thread_store._conn.commit()
 
+            # Only use speech_url when the brief names a URL — do not ytsearch1-pin one video
+            # (that bypasses multi-candidate search and fails fast on 403 / bad windows).
             speech_url = plan.get("speech_url")
-            if not speech_url and plan.get("speech_query"):
-                speech_url = _resolve_speech_url(str(plan["speech_query"]), root)
 
             toolchain = check_toolchain()
             if not toolchain.get("ok"):

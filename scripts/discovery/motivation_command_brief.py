@@ -44,6 +44,7 @@ def compose_montage_command(
     owner: str,
     audio_query: str | None = None,
     broll_query: str,
+    speaker: str | None = None,
     min_seconds: int = 30,
     max_seconds: int = 90,
     extra_instructions: str | None = None,
@@ -71,6 +72,11 @@ def compose_montage_command(
 
     if job_slug:
         lines.append(f"Use job slug: `{job_slug}` for downloads under downloads/motivational/.")
+        lines.append("")
+
+    spk = (speaker or "").strip()
+    if spk:
+        lines.append(f"Requested speaker: {spk}")
         lines.append("")
 
     if audio:
@@ -143,6 +149,7 @@ def compose_from_slot(slot: dict[str, Any], *, owner: str | None = None) -> str:
         owner=own,
         audio_query=audio,
         broll_query=visual,
+        speaker=speaker or None,
         style_ref_paths=list(slot.get("image_paths") or []),
         images_to_make=str(slot.get("image_prompt") or "") or None,
         require_stills_first=bool(stills),

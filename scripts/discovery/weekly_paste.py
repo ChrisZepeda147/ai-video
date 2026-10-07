@@ -36,7 +36,7 @@ IMAGES_LINE = re.compile(
     re.I,
 )
 
-CHATGPT_FORMAT_TEMPLATE = """Plan my next week of TikTok motivation Shorts (9:16, luxury B-roll + speech clips, 60-90s).
+CHATGPT_FORMAT_TEMPLATE = """Plan my next week of TikTok motivation Shorts (9:16, luxury B-roll + speech clips, ~30-90s).
 
 I am planning on Sunday for the week that starts Monday {week_start}. Production runs each calendar day at 7am (3 videos that day). MONDAY in the format below is {week_start}.
 

@@ -63,6 +63,17 @@ Visual / B-roll search: alpine lake
         assert plan is not None
         self.assertEqual(plan["reuse_policy"], "require_new")
 
+    def test_parses_requested_speaker_from_weekly_brief(self) -> None:
+        text = """
+Make a new 9:16 motivational Short using the luxury-clips-montage workflow.
+Requested speaker: Jocko
+Search for audio: Jocko motivational speech
+Visual / B-roll search: alpine lake
+"""
+        plan = parse_montage_command(text)
+        assert plan is not None
+        self.assertEqual(plan.get("speaker"), "Jocko")
+
     def test_extra_parses_two_short_videos(self) -> None:
         text = """
 Make a new 9:16 motivational Short using the luxury-clips-montage workflow.

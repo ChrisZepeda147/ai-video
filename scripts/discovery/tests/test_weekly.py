@@ -69,6 +69,20 @@ class TestWeekly(unittest.TestCase):
         ).fetchone()
         self.assertEqual(row["status"], "done")
 
+    def test_brief_forwards_slot_speaker_and_30_90_window(self) -> None:
+        brief = weekly.build_slot_brief(
+            {
+                "speaker": "Jocko",
+                "visual_direction": "Snowy mountain ridge",
+                "owner": "chris",
+                "week_start": "2026-10-05",
+                "day": "wed",
+                "slot": 2,
+            },
+        )
+        self.assertIn("Requested speaker: Jocko", brief)
+        self.assertIn("Default target length: 30–90 seconds", brief)
+
     def test_brief_includes_style_refs(self) -> None:
         brief = weekly.build_slot_brief(
             {"speaker": "Tate", "visual_direction": "yacht", "owner": "chris"},

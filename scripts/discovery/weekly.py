@@ -350,10 +350,15 @@ def get_week(store, *, week_start: str, owner: str) -> dict[str, Any]:
             (row["id"],),
         ).fetchall()
     ]
+    plan_row = dict(row)
+    for slot in slots:
+        slot["week_start"] = plan_row["week_start"]
+        slot["owner"] = owner
+        slot["brief_text"] = build_slot_brief(slot)
     slots = enrich_slot_render_times(store, slots)
     from discovery.weekly_paste import build_week_progress
 
-    return {"plan": dict(row), "slots": slots, "progress": build_week_progress(slots)}
+    return {"plan": plan_row, "slots": slots, "progress": build_week_progress(slots)}
 
 
 def count_failed_slots_for_calendar_day(store, *, day: str, owner: str | None = None) -> int:
