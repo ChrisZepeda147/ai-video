@@ -26,6 +26,28 @@ class BrollSourceQualityTests(unittest.TestCase):
         title = "Pacific Northwest Rain Forest Drone 4K 60fps"
         self.assertIsNone(unwanted_broll_title_reason(title))
 
+    def test_golden_sparrow_video_song_blocked(self) -> None:
+        title = (
+            "Golden Sparrow - 8K Video Song | Dhanush | Priyanka Mohan | "
+            "Pavish | Anikha | GV Prakash #NEEK"
+        )
+        self.assertEqual(unwanted_broll_title_reason(title), "music_dance_video")
+
+    def test_is_music_video_detects_video_song(self) -> None:
+        from youtube_popular_downloader import VideoCandidate, is_music_video
+
+        cand = VideoCandidate(
+            video_id="ghGjlx5ZBWk",
+            title="Golden Sparrow - 8K Video Song | Dhanush",
+            url="https://youtu.be/ghGjlx5ZBWk",
+            channel="T-Series",
+            view_count=1_000_000,
+            duration_seconds=240,
+            published_at=None,
+            source="test",
+        )
+        self.assertTrue(is_music_video(cand))
+
 
 if __name__ == "__main__":
     unittest.main()

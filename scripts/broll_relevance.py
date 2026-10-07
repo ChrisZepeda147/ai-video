@@ -44,7 +44,12 @@ SCENIC_HINTS = frozenset(
 
 UNRELATED_STRONG = frozenset(
     {
+        "bollywood",
+        "choreography",
         "coaster",
+        "dance",
+        "dancing",
+        "game",
         "gameplay",
         "gaming",
         "minecraft",
@@ -53,10 +58,11 @@ UNRELATED_STRONG = frozenset(
         "pov",
         "ride",
         "roller",
+        "song",
         "subway",
         "theme",
         "tour",
-        "game",
+        "wedding",
     }
 )
 

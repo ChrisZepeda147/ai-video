@@ -29,6 +29,18 @@ VIRTUAL_WALK_RE = re.compile(
     r"\b(virtual hike|virtual walk|virtual tour)\b",
     re.IGNORECASE,
 )
+MUSIC_DANCE_RE = re.compile(
+    r"\b(video\s+song|\d+k?\s*video\s+song|music\s+video|official\s+video|"
+    r"dance\s+(video|cover|routine|performance)|choreography|"
+    r"bollywood|tollywood|kollywood|"
+    r"lyric\s+video|audio\s+launch)\b",
+    re.IGNORECASE,
+)
+PEOPLE_EVENT_RE = re.compile(
+    r"\b(wedding\s+dance|party\s+dance|flash\s+mob|dancers?\s+dancing|"
+    r"dance\s+challenge|tiktok\s+dance)\b",
+    re.IGNORECASE,
+)
 
 
 def unwanted_broll_title_reason(title: str) -> str | None:
@@ -45,6 +57,10 @@ def unwanted_broll_title_reason(title: str) -> str | None:
         r"\b(4k|8k|60fps|relax|asmr)\b", text, re.IGNORECASE
     ):
         return "virtual_walkthrough"
+    if MUSIC_DANCE_RE.search(text):
+        return "music_dance_video"
+    if PEOPLE_EVENT_RE.search(text):
+        return "people_dance_event"
     return None
 
 

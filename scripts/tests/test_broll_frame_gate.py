@@ -222,6 +222,11 @@ class BrollFrameGateTests(unittest.TestCase):
         self.assertLess(stamps[0], 1.0)
         self.assertLess(stamps[-1], 8.0)
 
+    def test_prefers_no_people_for_sunset_valley(self) -> None:
+        self.assertTrue(
+            broll_frame_gate.prefers_no_people("Golden sunset overlooking a valley")
+        )
+
     def test_prefers_no_people_for_apartment_views(self) -> None:
         subject = "expensive apartment views"
         self.assertTrue(broll_frame_gate.prefers_no_people(subject))

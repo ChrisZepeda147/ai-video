@@ -1788,7 +1788,21 @@ def _discover_broll_candidates_for_search(
         pool = list(raw)
     wanted = subject_tokens(search_query, subject)
     if wanted:
-        titled = [item for item in pool if title_matches_subject(item.title, wanted)]
+        try:
+            from broll_source_quality import unwanted_broll_title_reason
+        except ImportError:
+            unwanted_broll_title_reason = None  # type: ignore[assignment]
+
+        def _title_ok(item: VideoCandidate) -> bool:
+            if not title_matches_subject(item.title, wanted):
+                return False
+            if unwanted_broll_title_reason:
+                reason = unwanted_broll_title_reason(item.title or "")
+                if reason:
+                    return False
+            return True
+
+        titled = [item for item in pool if _title_ok(item)]
         if titled:
             print(f"Title-matched {len(titled)}/{len(pool)} B-roll hit(s) for: {', '.join(wanted)}")
             pool = titled

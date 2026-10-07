@@ -69,7 +69,9 @@ MUSIC_CATEGORY_ID = "10"
 MUSIC_TITLE_RE = re.compile(
     r"(official\s+(music\s+)?video|official\s+audio|lyric(s)?(\s+video)?|"
     r"\(\s*audio\s*\)|\[\s*audio\s*\]|music\s+video|mv\b|visualizer|"
-    r"audio\s+only)",
+    r"audio\s+only|video\s+song\b|\d+k?\s*video\s+song\b|"
+    r"\bdance\s+(video|cover|performance)|choreography|"
+    r"\b(song|track)\s*\|\s*[A-Za-z])",
     re.IGNORECASE,
 )
 MUSIC_CHANNEL_RE = re.compile(r"(vevo|\btopic\b)", re.IGNORECASE)
