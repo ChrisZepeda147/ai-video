@@ -120,6 +120,8 @@ def resolve_actionable_error(
         "path bins ->",
         "python ->",
         "WARNING: Store stub",
+        "Saved:",
+        "Production library:",
     )
     for line in reversed(lines):
         if any(line.startswith(prefix) for prefix in noise_prefixes):
