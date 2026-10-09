@@ -3318,6 +3318,7 @@ def rerender_existing_job(
     cursor_review: bool = False,
     caption_mode: str | None = None,
     caption_align: str | None = None,
+    uniform_pacing: bool = False,
 ) -> int:
     job_dir = resolve_job_dir(slug, jobs_root, job_date=job_date)
     if not job_dir:
@@ -3390,7 +3391,7 @@ def rerender_existing_job(
     if not broll_ids and not list(clips_dir.glob("*_part*.mp4")):
         print("job.json has no broll_ids and clips/ is empty", file=sys.stderr)
         return 1
-    driven_pacing = bool(payload.get("driven_pacing", True))
+    driven_pacing = False if uniform_pacing else bool(payload.get("driven_pacing", True))
     clips_limit, clip_length, max_parts = broll_download_plan(
         duration=duration,
         segment_length=segment_length,
@@ -3444,7 +3445,7 @@ def rerender_existing_job(
             subject=subject,
             playback_speed=float(payload.get("playback_speed") or playback_speed),
             use_vision=use_vision,
-            driven_pacing=bool(payload.get("driven_pacing", True)),
+            driven_pacing=driven_pacing,
             caption_mode=str(caption_mode or payload.get("caption_mode") or caption_mode_default()),
             hook_text=str(payload.get("hook") or "") or None,
             quality_gate=quality_gate,
@@ -3709,6 +3710,7 @@ def main() -> int:
             cursor_review=gate_flags.cursor_review,
             caption_mode="phrase" if args.phrase_captions else None,
             caption_align=args.caption_align,
+            uniform_pacing=bool(args.uniform_pacing),
         )
 
     if args.speech_review_only:
