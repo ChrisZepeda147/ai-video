@@ -2414,6 +2414,7 @@ def filter_broll_clip_list(
     frame_gate: bool = True,
     jobs_root: Path | None = None,
     delete_rejects: bool = True,
+    required_clips: int | None = None,
 ) -> list[Path]:
     kept: list[Path] = []
     subject_slug = broll_pool.subject_pool_slug(subject)
@@ -2465,6 +2466,72 @@ def filter_broll_clip_list(
                 if delete_rejects:
                     clip.unlink(missing_ok=True)
                 continue
+            from broll_frame_gate import (
+                apply_source_text_edge_crop,
+                assess_clip_source_text_overlay,
+                estimate_source_text_crop_percent,
+                extract_preview_frame,
+                representative_source_text_stamps,
+            )
+
+            overlay = assess_clip_source_text_overlay(
+                clip, duration=duration, subject=subject
+            )
+            if overlay.get("reject"):
+                regions = list(overlay.get("regions") or [])
+                allow_crop = required_clips is not None and len(kept) < int(required_clips)
+                cropped = False
+                if allow_crop and regions:
+                    top_pct = 0.0
+                    bottom_pct = 0.0
+                    stamps = representative_source_text_stamps(duration)
+                    open_frame = extract_preview_frame(clip, stamps[0]) if stamps else None
+                    if open_frame:
+                        if "top" in regions:
+                            est = estimate_source_text_crop_percent(open_frame, "top")
+                            if est is not None:
+                                top_pct = est
+                        if "bottom" in regions:
+                            est = estimate_source_text_crop_percent(open_frame, "bottom")
+                            if est is not None:
+                                bottom_pct = est
+                    if top_pct > 0 or bottom_pct > 0:
+                        try:
+                            apply_source_text_edge_crop(
+                                clip, top_percent=top_pct, bottom_percent=bottom_pct
+                            )
+                            for edge, pct in (("top", top_pct), ("bottom", bottom_pct)):
+                                if pct > 0:
+                                    print(
+                                        f"BROLL_TEXT_CROP clip={clip.name} edge={edge} "
+                                        f"percent={pct:.3f}"
+                                    )
+                            duration = probe_duration(clip)
+                            overlay = assess_clip_source_text_overlay(
+                                clip, duration=duration, subject=subject
+                            )
+                            cropped = not overlay.get("reject")
+                        except (subprocess.CalledProcessError, ValueError, OSError):
+                            cropped = False
+                if overlay.get("reject"):
+                    for region in regions:
+                        print(
+                            f"BROLL_REJECT clip={clip.name} reason=source_text_overlay "
+                            f"region={region}"
+                        )
+                    store_gate_result(
+                        jobs_root,
+                        clip,
+                        subject_slug=subject_slug,
+                        passed=False,
+                        reason="source_text_overlay",
+                        source_id=source_id,
+                    )
+                    if delete_rejects:
+                        clip.unlink(missing_ok=True)
+                    continue
+                if cropped:
+                    pass
             samples = scan_clip_local(clip, duration=duration, subject=subject)
             span = longest_clean_span(samples, min_length=min(MIN_CLEAN_SPAN, duration))
             if span is None:
@@ -2601,6 +2668,7 @@ def _broll_gate_fn(
     use_vision: bool,
     frame_gate: bool,
     jobs_root: Path | None,
+    required: int | None = None,
 ) -> Callable[[list[Path]], list[Path]]:
     def _gate(paths: list[Path]) -> list[Path]:
         return filter_broll_clip_list(
@@ -2609,6 +2677,7 @@ def _broll_gate_fn(
             use_vision=use_vision,
             frame_gate=frame_gate,
             jobs_root=jobs_root,
+            required_clips=required,
         )
 
     return _gate
@@ -2632,6 +2701,7 @@ def _inventory(
                 use_vision=use_vision,
                 frame_gate=frame_gate,
                 jobs_root=jobs_root,
+                required=required,
             ),
         )
 

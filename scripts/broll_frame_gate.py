@@ -94,6 +94,13 @@ TALKING_HEAD_LIMIT = 0.10
 TALKING_HEAD_LIMIT_SCENE = 0.07
 PERSON_SKIN_LIMIT_SCENE = 0.045
 TITLE_CARD_LIMIT = 0.58
+SOURCE_TEXT_TOP_BAND = (0.0, 0.25)
+SOURCE_TEXT_BOTTOM_BAND = (0.75, 1.0)
+SOURCE_TEXT_MID_BAND = (0.35, 0.65)
+SOURCE_TEXT_BAND_SCORE_MIN = 0.38
+SOURCE_TEXT_RELATIVE_MIN = 1.55
+MAX_SOURCE_TEXT_CROP = 0.08
+SOURCE_TEXT_ROW_EDGE_MIN = 14.0
 EMPTY_LIMIT = 0.86
 EMPTY_LIMIT_SCENE = 0.97
 PASS_RATIO = 0.8
@@ -403,6 +410,200 @@ def _luma_var(png_bytes: bytes, *, x0: float, x1: float, y0: float, y1: float) -
     return sum((value - mean) ** 2 for value in values) / len(values)
 
 
+def _resize_gate_frame(png_bytes: bytes) -> Image.Image:
+    img = Image.open(BytesIO(png_bytes)).convert("RGB")
+    width, height = img.size
+    if width <= 0:
+        return img
+    target_w = 320
+    target_h = max(180, int(target_w * height / width))
+    return img.resize((target_w, target_h))
+
+
+def _horizontal_text_band_score(img: Image.Image, y0_frac: float, y1_frac: float) -> float:
+    """Heuristic 0–1 score for baked-in title/branding text in a horizontal band."""
+    gray = img.convert("L")
+    width, height = gray.size
+    y0 = int(height * y0_frac)
+    y1 = max(int(height * y1_frac), y0 + 1)
+    x0 = int(width * 0.08)
+    x1 = int(width * 0.92)
+    row_scores: list[float] = []
+    for y in range(y0, y1):
+        pixels: list[int] = [gray.getpixel((x, y)) for x in range(x0, x1)]
+        if not pixels:
+            continue
+        mean_luma = sum(pixels) / len(pixels)
+        edges = [
+            abs(pixels[i + 1] - pixels[i])
+            for i in range(len(pixels) - 1)
+        ]
+        edge_mean = sum(edges) / len(edges) if edges else 0.0
+        if mean_luma > 215 and edge_mean < SOURCE_TEXT_ROW_EDGE_MIN * 0.65:
+            continue
+        pix_var = sum((p - mean_luma) ** 2 for p in pixels) / len(pixels)
+        if pix_var < 120 and edge_mean < SOURCE_TEXT_ROW_EDGE_MIN:
+            continue
+        score = (edge_mean / SOURCE_TEXT_ROW_EDGE_MIN) * min(pix_var / 900.0, 1.4)
+        row_scores.append(min(score, 1.25))
+    if not row_scores:
+        return 0.0
+    row_scores.sort(reverse=True)
+    pick = row_scores[: max(2, min(5, len(row_scores)))]
+    return min(sum(pick) / len(pick), 1.0)
+
+
+def source_text_overlay_regions(png_bytes: bytes) -> list[str]:
+    """Return top/bottom when obvious stock-video title text is in edge bands."""
+    img = _resize_gate_frame(png_bytes)
+    top = _horizontal_text_band_score(img, *SOURCE_TEXT_TOP_BAND)
+    bottom = _horizontal_text_band_score(img, *SOURCE_TEXT_BOTTOM_BAND)
+    mid = max(_horizontal_text_band_score(img, *SOURCE_TEXT_MID_BAND), 0.06)
+    regions: list[str] = []
+    if top >= SOURCE_TEXT_BAND_SCORE_MIN and top >= mid * SOURCE_TEXT_RELATIVE_MIN:
+        regions.append("top")
+    if bottom >= SOURCE_TEXT_BAND_SCORE_MIN and bottom >= mid * SOURCE_TEXT_RELATIVE_MIN:
+        regions.append("bottom")
+    return regions
+
+
+def scenic_source_text_subject(subject: str) -> bool:
+    return wants_scene(subject) or prefers_no_people(subject)
+
+
+def estimate_source_text_crop_percent(png_bytes: bytes, region: str) -> float | None:
+    """Conservative crop fraction to clear edge text; None if crop would exceed MAX."""
+    if region not in {"top", "bottom"}:
+        return None
+    img = _resize_gate_frame(png_bytes)
+    gray = img.convert("L")
+    width, height = gray.size
+    x0 = int(width * 0.08)
+    x1 = int(width * 0.92)
+    threshold = SOURCE_TEXT_BAND_SCORE_MIN * 0.55
+
+    def row_score(y: int) -> float:
+        pixels = [gray.getpixel((x, y)) for x in range(x0, x1)]
+        edges = [abs(pixels[i + 1] - pixels[i]) for i in range(len(pixels) - 1)]
+        edge_mean = sum(edges) / len(edges) if edges else 0.0
+        mean_luma = sum(pixels) / len(pixels)
+        pix_var = sum((p - mean_luma) ** 2 for p in pixels) / len(pixels)
+        return (edge_mean / SOURCE_TEXT_ROW_EDGE_MIN) * min(pix_var / 900.0, 1.4)
+
+    if region == "top":
+        y_end = int(height * SOURCE_TEXT_TOP_BAND[1])
+        last_text_row = 0
+        for y in range(0, y_end):
+            if row_score(y) >= threshold:
+                last_text_row = y
+        if last_text_row <= 0:
+            return None
+        frac = (last_text_row + 2) / height
+    else:
+        y_start = int(height * SOURCE_TEXT_BOTTOM_BAND[0])
+        first_text_row = height - 1
+        for y in range(height - 1, y_start - 1, -1):
+            if row_score(y) >= threshold:
+                first_text_row = y
+        if first_text_row >= height - 2:
+            return None
+        frac = (height - first_text_row + 2) / height
+    frac = max(0.01, min(frac, MAX_SOURCE_TEXT_CROP))
+    if frac > MAX_SOURCE_TEXT_CROP:
+        return None
+    return frac
+
+
+def representative_source_text_stamps(duration: float) -> list[float]:
+    if duration <= 0:
+        return [0.0]
+    end = max(duration - 0.35, 0.0)
+    opening = min(max(0.35, duration * 0.06), end)
+    middle = min(max(duration * 0.5, opening), end)
+    closing = min(max(duration * 0.88, opening), end)
+    return [opening, middle, closing]
+
+
+def assess_clip_source_text_overlay(
+    source: Path,
+    *,
+    duration: float,
+    subject: str,
+) -> dict[str, object]:
+    """Multi-frame check for baked-in B-roll titles (scenic subjects only)."""
+    if not scenic_source_text_subject(subject):
+        return {"reject": False, "regions": [], "frames": []}
+    stamps = representative_source_text_stamps(duration)
+    hits: list[str] = []
+    frame_reports: list[dict[str, object]] = []
+    for stamp in stamps:
+        frame = extract_preview_frame(source, stamp)
+        if not frame:
+            continue
+        regions = source_text_overlay_regions(frame)
+        frame_reports.append({"t": stamp, "regions": regions})
+        hits.extend(regions)
+    region_counts = {r: hits.count(r) for r in ("top", "bottom")}
+    opening = frame_reports[0]["regions"] if frame_reports else []
+    reject_regions: list[str] = []
+    for region in ("top", "bottom"):
+        if region in opening or region_counts.get(region, 0) >= 2:
+            reject_regions.append(region)
+    return {
+        "reject": bool(reject_regions),
+        "regions": reject_regions,
+        "frames": frame_reports,
+        "opening": list(opening) if isinstance(opening, list) else [],
+    }
+
+
+def apply_source_text_edge_crop(
+    clip: Path,
+    *,
+    top_percent: float = 0.0,
+    bottom_percent: float = 0.0,
+) -> None:
+    """Crop a small top/bottom margin to remove edge-locked title text."""
+    top_percent = max(0.0, min(top_percent, MAX_SOURCE_TEXT_CROP))
+    bottom_percent = max(0.0, min(bottom_percent, MAX_SOURCE_TEXT_CROP))
+    if top_percent + bottom_percent >= 0.35:
+        raise ValueError("refusing excessive source-text crop")
+    keep = 1.0 - top_percent - bottom_percent
+    if keep <= 0.5:
+        raise ValueError("refusing excessive source-text crop")
+    ffmpeg = "ffmpeg"
+    try:
+        from toolchain_env import resolve_tool
+
+        ffmpeg = resolve_tool("ffmpeg") or "ffmpeg"
+    except Exception:
+        pass
+    tmp = clip.with_name(f"{clip.stem}.textcrop{clip.suffix}")
+    y_off = f"ih*{top_percent:.5f}"
+    vf = f"crop=iw:ih*{keep:.5f}:0:{y_off}"
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-i",
+        str(clip),
+        "-vf",
+        vf,
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "fast",
+        "-crf",
+        "23",
+        "-movflags",
+        "+faststart",
+        str(tmp),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True)
+    clip.unlink(missing_ok=True)
+    tmp.replace(clip)
+
+
 def vehicle_missing(png_bytes: bytes) -> bool:
     mid_var = _luma_var(png_bytes, x0=0.20, x1=0.80, y0=0.35, y1=0.75)
     return mid_var < VEHICLE_MID_VAR_MIN
@@ -547,9 +748,12 @@ def frame_fail_reasons(png_bytes: bytes, subject: str = "") -> list[str]:
         reasons.append("talking-head")
     if view_only and person_skin_score(png_bytes) >= PERSON_SKIN_LIMIT_SCENE:
         reasons.append("person")
-    # Night city / apartment lights look like title cards (dark + sparks). Skip that check.
+    # Night city / apartment lights look like title cards (dark + sparks). Skip full-frame check.
     if not scene and title_card_score(png_bytes) >= TITLE_CARD_LIMIT:
         reasons.append("title-card")
+    if scene or view_only:
+        for region in source_text_overlay_regions(png_bytes):
+            reasons.append(f"source-text-{region}")
     if empty_score(png_bytes) >= empty_limit:
         reasons.append("empty")
     if wants_vehicle(subject) and vehicle_missing(png_bytes):
