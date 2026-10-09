@@ -44,6 +44,25 @@ def _write_prompt_file(job_key: str, prompt: str) -> Path:
     return path
 
 
+def _agent_cli_prompt(*, job_key: str, user_command: str, enriched: str) -> str:
+    """Keep Cursor Agent argv under Windows CreateProcess limits."""
+    # Full enriched prompts (library snapshot + rules) are written to disk already.
+    max_argv_chars = 6000
+    if len(enriched) <= max_argv_chars:
+        return enriched
+    rel = _job_dir(job_key) / "CURSOR_COMMAND_PROMPT.md"
+    try:
+        rel_path = rel.relative_to(project_root()).as_posix()
+    except ValueError:
+        rel_path = str(rel)
+    return (
+        "Execute the production task in this repo.\n\n"
+        f"Full instructions (read this file first): `{rel_path}`\n\n"
+        "User request:\n"
+        f"{user_command.strip()}\n"
+    )
+
+
 def parse_video_refs(command: str) -> list[int]:
     return [int(match) for match in re.findall(r"\bVideo\s+(\d+)\b", command, flags=re.IGNORECASE)]
 
@@ -423,12 +442,17 @@ def start_command_job(
             thread_store._conn.commit()
 
             enriched = job.get("enriched_prompt") or user_command
+            cli_prompt = _agent_cli_prompt(
+                job_key=job_key,
+                user_command=user_command,
+                enriched=enriched,
+            )
             active_session = session_id or job.get("cursor_session_id")
             if not active_session and agent_available():
                 active_session = create_chat()
 
             result = run_agent(
-                enriched,
+                cli_prompt,
                 job_id=job_key,
                 video_id=job.get("production_video_id"),
                 session_id=active_session,
