@@ -66,10 +66,32 @@ def _job_dir_has_markers(path: Path) -> bool:
     )
 
 
-def resolve_job_dir(slug: str, jobs_root: Path) -> Path | None:
+def resolve_job_dir(slug: str, jobs_root: Path, *, job_date: str | None = None) -> Path | None:
     """Find an existing job folder (dated layout first, then legacy flat)."""
     if not jobs_root.is_dir():
         return None
+
+    def _marked(path: Path) -> Path | None:
+        if path.is_dir() and _job_dir_has_markers(path):
+            return path
+        return None
+
+    if job_date and is_date_folder(job_date):
+        if is_date_folder(jobs_root.name):
+            if jobs_root.name == job_date:
+                hit = _marked(jobs_root / slug)
+                if hit:
+                    return hit
+        else:
+            hit = _marked(jobs_root / job_date / slug)
+            if hit:
+                return hit
+
+    if is_date_folder(jobs_root.name):
+        hit = _marked(jobs_root / slug)
+        if hit:
+            return hit
+
     legacy = legacy_job_dir(slug, jobs_root)
     dated_matches: list[Path] = []
     for child in jobs_root.iterdir():
@@ -80,7 +102,19 @@ def resolve_job_dir(slug: str, jobs_root: Path) -> Path | None:
             if candidate.is_dir() and _job_dir_has_markers(candidate):
                 dated_matches.append(candidate)
     if dated_matches:
-        return max(dated_matches, key=lambda p: p.stat().st_mtime)
+        if job_date and is_date_folder(job_date):
+            for candidate in dated_matches:
+                if candidate.parent.name == job_date:
+                    return candidate
+        if len(dated_matches) == 1:
+            return dated_matches[0]
+        preferred: list[Path] = []
+        for candidate in dated_matches:
+            stored = infer_job_folder_date(candidate)
+            if stored == candidate.parent.name:
+                preferred.append(candidate)
+        pool = preferred or dated_matches
+        return max(pool, key=lambda p: p.stat().st_mtime)
     if legacy.is_dir() and _job_dir_has_markers(legacy):
         return legacy
     return None

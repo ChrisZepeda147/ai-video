@@ -41,6 +41,26 @@ class MotivationPathsTests(unittest.TestCase):
         resolved = resolve_job_dir(slug, self.jobs_root)
         self.assertEqual(resolved, dated)
 
+    def test_resolve_pins_job_date(self) -> None:
+        slug = "pinned-slug"
+        older = job_dir_for(slug, self.jobs_root, job_date="2026-09-10")
+        older.mkdir(parents=True)
+        (older / "job.json").write_text('{"job_date":"2026-09-10"}', encoding="utf-8")
+
+        newer = job_dir_for(slug, self.jobs_root, job_date="2026-09-13")
+        newer.mkdir(parents=True)
+        (newer / "job.json").write_text('{"job_date":"2026-09-13"}', encoding="utf-8")
+
+        self.assertEqual(resolve_job_dir(slug, self.jobs_root, job_date="2026-09-10"), older)
+
+    def test_resolve_date_scoped_jobs_root(self) -> None:
+        slug = "scoped-slug"
+        day_root = self.jobs_root / "2026-09-14"
+        job = day_root / slug
+        job.mkdir(parents=True)
+        (job / "job.json").write_text("{}", encoding="utf-8")
+        self.assertEqual(resolve_job_dir(slug, day_root), job)
+
     def test_iter_includes_legacy_and_dated(self) -> None:
         legacy = self.jobs_root / "legacy-job"
         legacy.mkdir()

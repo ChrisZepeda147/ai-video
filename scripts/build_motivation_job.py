@@ -3300,6 +3300,7 @@ def rerender_existing_job(
     *,
     jobs_root: Path,
     slug: str,
+    job_date: str | None = None,
     segment_length: float | None,
     seed: int | None,
     grade: bool,
@@ -3318,7 +3319,7 @@ def rerender_existing_job(
     caption_mode: str | None = None,
     caption_align: str | None = None,
 ) -> int:
-    job_dir = resolve_job_dir(slug, jobs_root)
+    job_dir = resolve_job_dir(slug, jobs_root, job_date=job_date)
     if not job_dir:
         print(f"No job folder for slug {slug} under {jobs_root}", file=sys.stderr)
         return 1
@@ -3330,6 +3331,16 @@ def rerender_existing_job(
         print(f"No job.json at {job_path}", file=sys.stderr)
         return 1
     payload = json.loads(job_path.read_text(encoding="utf-8"))
+    stored_date = str(payload.get("job_date") or "").strip()
+    if stored_date and is_date_folder(stored_date):
+        pinned = resolve_job_dir(slug, jobs_root, job_date=stored_date)
+        if pinned and pinned != job_dir:
+            job_dir = pinned
+            job_path = job_dir / "job.json"
+            audio = job_dir / "audio" / "speech.mp3"
+            captions = job_dir / "audio" / "subs.en.json3"
+            output = job_dir / "output" / f"{slug}-motivation.mp4"
+            payload = json.loads(job_path.read_text(encoding="utf-8"))
     if not audio.is_file() or not captions.is_file():
         speech_url = str(payload.get("speech_url") or "").strip()
         speech_id = str(payload.get("speech_id") or "").strip()
@@ -3397,23 +3408,29 @@ def rerender_existing_job(
         subject=subject,
     )
     try:
-        ensure_broll_clips(
-            jobs_root=jobs_root,
-            clips_dir=clips_dir,
-            subject=subject,
-            query=str(payload.get("broll_query") or subject),
-            needed_clips=needed_clips,
-            clips_limit=clips_limit,
-            clip_length=clip_length,
-            max_parts=max_parts,
-            min_views=50000,
-            min_duration=30,
-            start_offset=start_offset,
-            use_vision=use_vision,
-            frame_gate=frame_gate,
-            broll_ids=broll_ids,
-            slug=slug,
-        )
+        manifest_ok, manifest_present, _manifest_required = verify_manifest(job_dir, clips_dir)
+        if not (manifest_ok and manifest_present >= needed_clips):
+            ensure_broll_clips(
+                jobs_root=jobs_root,
+                clips_dir=clips_dir,
+                subject=subject,
+                query=str(payload.get("broll_query") or subject),
+                needed_clips=needed_clips,
+                clips_limit=clips_limit,
+                clip_length=clip_length,
+                max_parts=max_parts,
+                min_views=50000,
+                min_duration=30,
+                start_offset=start_offset,
+                use_vision=use_vision,
+                frame_gate=frame_gate,
+                broll_ids=broll_ids,
+                slug=slug,
+            )
+        else:
+            print(
+                f"B-roll manifest OK ({manifest_present}/{needed_clips} clips) — skipping download."
+            )
         render_job(
             jobs_root=jobs_root,
             clips_dir=clips_dir,
@@ -3674,6 +3691,7 @@ def main() -> int:
         return rerender_existing_job(
             jobs_root=jobs_root,
             slug=args.slug,
+            job_date=args.job_date,
             segment_length=args.segment_length,
             seed=args.seed,
             grade=not args.no_grade,

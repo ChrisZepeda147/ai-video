@@ -185,20 +185,45 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
 
+def _words_from_event(event: dict) -> list[tuple[float, str]]:
+    """Split a json3 phrase cue into word-level (absolute sec, word) pairs."""
+    segs = event.get("segs") or []
+    chunk_parts: list[str] = []
+    for seg in segs:
+        text = str(seg.get("utf8") or "")
+        if not text or text == "\n":
+            continue
+        chunk_parts.append(text)
+    if not chunk_parts:
+        return []
+    blob = " ".join(" ".join(chunk_parts).split())
+    if not blob:
+        return []
+    tokens = blob.split()
+    base_ms = float(event.get("tStartMs") or 0.0)
+    first_offset_ms = 0.0
+    for seg in segs:
+        text = str(seg.get("utf8") or "").strip()
+        if text and text != "\n":
+            first_offset_ms = float(seg.get("tOffsetMs") or 0.0)
+            break
+    start_ms = base_ms + first_offset_ms
+    dur_ms = float(event.get("dDurationMs") or 0.0)
+    if dur_ms <= 0:
+        dur_ms = max(400.0, len(tokens) * 180.0)
+    start_sec = start_ms / 1000.0
+    duration_sec = dur_ms / 1000.0
+    if len(tokens) == 1:
+        return [(start_sec, tokens[0])]
+    step = duration_sec / len(tokens)
+    return [(start_sec + index * step, token) for index, token in enumerate(tokens)]
+
+
 def parse_json3_words(json3_path: Path, *, start: float, duration: float) -> list[tuple[float, float, str]]:
     data = json.loads(json3_path.read_text(encoding="utf-8"))
     raw: list[tuple[float, str]] = []
     for event in data.get("events") or []:
-        segs = event.get("segs")
-        if not segs:
-            continue
-        base = float(event.get("tStartMs") or 0) / 1000.0
-        for seg in segs:
-            text = str(seg.get("utf8") or "").strip()
-            if not text or text == "\n":
-                continue
-            offset = float(seg.get("tOffsetMs") or 0) / 1000.0
-            raw.append((base + offset, text))
+        raw.extend(_words_from_event(event))
 
     raw.sort(key=lambda item: item[0])
     end = start + duration

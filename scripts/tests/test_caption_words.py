@@ -49,7 +49,7 @@ class CaptionWordTests(unittest.TestCase):
 
     def test_center_header_uses_middle_alignment(self) -> None:
         header = _ass_header(width=1080, height=1920, caption_align="center")
-        self.assertIn(",5,80,80,0,1", header)
+        self.assertIn(",5,80,80,80,1", header)
         self.assertEqual(normalize_caption_align(None, caption_mode="word"), "center")
         self.assertEqual(normalize_caption_align(None, caption_mode="phrase"), "lower_middle")
 
