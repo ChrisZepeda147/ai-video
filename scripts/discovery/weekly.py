@@ -413,6 +413,69 @@ def due_slots(store, *, day: str, owner: str | None = None) -> list[dict[str, An
     return out
 
 
+def slots_for_calendar_day(
+    store, *, day: str, owner: str | None = None
+) -> list[dict[str, Any]]:
+    """All weekly slots for a calendar date, ordered 1 → 3 (any status)."""
+    ensure_weekly_tables(store)
+    target = date.fromisoformat(day)
+    monday = week_start_monday(target).isoformat()
+    weekday = DAYS[target.weekday()]
+    query = """
+        SELECT s.*, p.week_start, p.owner, p.status AS plan_status
+        FROM weekly_slots s
+        JOIN weekly_plans p ON p.id = s.plan_id
+        WHERE p.week_start = ? AND s.day = ?
+          AND p.status IN ('ready', 'active', 'completed')
+    """
+    args: list[Any] = [monday, weekday]
+    if owner:
+        query += " AND p.owner = ?"
+        args.append(normalize_owner(owner))
+    query += " ORDER BY s.slot"
+    import json as _json
+
+    rows = store._conn.execute(query, args).fetchall()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        try:
+            item["image_paths"] = _json.loads(row["image_paths"] or "[]")
+        except Exception:
+            item["image_paths"] = []
+        out.append(item)
+    return out
+
+
+def _fetch_slot_record(store, slot_id: int) -> dict[str, Any] | None:
+    import json as _json
+
+    row = store._conn.execute(
+        """
+        SELECT s.*, p.week_start, p.owner, p.status AS plan_status
+        FROM weekly_slots s
+        JOIN weekly_plans p ON p.id = s.plan_id
+        WHERE s.id = ?
+        """,
+        (slot_id,),
+    ).fetchone()
+    if not row:
+        return None
+    item = dict(row)
+    try:
+        item["image_paths"] = _json.loads(row["image_paths"] or "[]")
+    except Exception:
+        item["image_paths"] = []
+    return item
+
+
+def _slot_status(store, slot_id: int) -> str:
+    row = store._conn.execute(
+        "SELECT status FROM weekly_slots WHERE id = ?", (slot_id,)
+    ).fetchone()
+    return str(row["status"] or "") if row else ""
+
+
 def refresh_plan_completion(store, *, plan_id: int) -> None:
     ensure_weekly_tables(store)
     row = store._conn.execute(
@@ -726,6 +789,24 @@ def _fill_slot_wait_sec() -> int:
         return max(3600, int(_os.environ.get("WEEKLY_FILL_SLOT_WAIT_SEC", "14400")))
     except ValueError:
         return 14_400
+
+
+def _slot_retry_sleep_sec() -> int:
+    import os as _os
+
+    try:
+        return max(0, int(_os.environ.get("WEEKLY_SLOT_RETRY_SLEEP_SEC", "8")))
+    except ValueError:
+        return 8
+
+
+def _slot_max_attempts_per_slot() -> int:
+    import os as _os
+
+    try:
+        return max(1, min(64, int(_os.environ.get("WEEKLY_SLOT_MAX_ATTEMPTS", "32"))))
+    except ValueError:
+        return 32
 
 
 def _append_fill_log(line: str) -> None:
@@ -1660,45 +1741,99 @@ def run_weekly_due_batch(
         }
 
     wait_complete = True
-    max_submit = cap
     submitted: list[dict[str, str]] = []
     deadline = _time.monotonic() + max(60, wait_timeout_sec)
-    pending = list(due)
+    retry_sleep = _slot_retry_sleep_sec()
+    max_attempts = _slot_max_attempts_per_slot()
 
-    for slot in pending:
-        if len(submitted) >= max_submit:
-            break
+    ordered = slots_for_calendar_day(store, day=day, owner=owner_norm)
+    if slot_ids:
+        want = {int(x) for x in slot_ids}
+        ordered = [s for s in ordered if int(s["id"]) in want]
+    ordered = ordered[:cap]
+
+    for slot in ordered:
         if _time.monotonic() >= deadline:
-            break
-        if not _wait_for_production_idle(store, deadline=deadline):
             break
 
         slot_id = int(slot["id"])
-        row = store._conn.execute(
-            "SELECT status FROM weekly_slots WHERE id = ?", (slot_id,)
-        ).fetchone()
-        if row and str(row["status"]) == "done":
+        if _slot_status(store, slot_id) == "done":
             continue
 
-        command = slot_command_text(slot)
-        try:
-            result = submit_fn(
-                store,
-                user_command=command,
-                slot_id=slot_id,
-                agent_model=None,
-                wait_montage=wait_complete,
-                wait_timeout_sec=wait_timeout_sec,
+        attempts = 0
+        while _time.monotonic() < deadline and attempts < max_attempts:
+            reconcile_slots(store)
+            status = _slot_status(store, slot_id)
+            if status == "done":
+                break
+            if status == "failed":
+                requeue_slot(store, slot_id)
+                status = _slot_status(store, slot_id)
+            if status == "running":
+                if not _wait_for_production_idle(store, deadline=deadline):
+                    break
+                status = _slot_status(store, slot_id)
+                if status == "done":
+                    break
+                if status == "failed":
+                    continue
+
+            if status not in {"queued", "rerunning"}:
+                break
+
+            if not _wait_for_production_idle(store, deadline=deadline):
+                break
+
+            slot_row = _fetch_slot_record(store, slot_id) or slot
+            command = slot_command_text(slot_row)
+            attempts += 1
+            try:
+                result = submit_fn(
+                    store,
+                    user_command=command,
+                    slot_id=slot_id,
+                    agent_model=None,
+                    wait_montage=wait_complete,
+                    wait_timeout_sec=wait_timeout_sec,
+                )
+            except Exception as exc:  # noqa: BLE001
+                mark_slot(
+                    store,
+                    slot_id,
+                    status="failed",
+                    error=str(exc)[:500],
+                    reset_job_key=True,
+                )
+                _append_fill_log(
+                    f"slot {slot_id} attempt {attempts} exception: {str(exc)[:120]}"
+                )
+                if retry_sleep:
+                    _time.sleep(retry_sleep)
+                continue
+
+            refresh_plan_completion(store, plan_id=int(slot_row["plan_id"]))
+            status = _slot_status(store, slot_id)
+            if status == "done":
+                job_key = str(result.get("job_key") or "")
+                submitted.append({"slot_id": str(slot_id), "job_key": job_key})
+                break
+
+            if status == "failed":
+                _append_fill_log(f"slot {slot_id} attempt {attempts} failed — retry")
+                if retry_sleep:
+                    _time.sleep(retry_sleep)
+                continue
+
+            job_key = str(result.get("job_key") or "")
+            if job_key:
+                submitted.append({"slot_id": str(slot_id), "job_key": job_key})
+            break
+
+        if _slot_status(store, slot_id) != "done":
+            _append_fill_log(
+                f"slot {slot_id} not done after {attempts} attempt(s) — stopping batch"
             )
-        except Exception as exc:  # noqa: BLE001
-            mark_slot(store, slot_id, status="failed", error=str(exc)[:500], reset_job_key=True)
-            _time.sleep(12)
-            continue
-
-        job_key = str(result.get("job_key") or "")
-        refresh_plan_completion(store, plan_id=int(slot["plan_id"]))
-        submitted.append({"slot_id": str(slot["id"]), "job_key": job_key})
-        _time.sleep(12)
+            break
 
     out = {
         "day": day,

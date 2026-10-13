@@ -147,23 +147,28 @@ class TestWeeklyPipeline(unittest.TestCase):
     def test_serial_three_and_continue_after_failure(self) -> None:
         toolchain = {"ok": True}
         calls: list[int] = []
-        fail_first = {"n": 0}
+        attempts: dict[int, int] = {}
 
         def submit(store, user_command, slot_id=None, **_kw):
-            calls.append(int(slot_id or 0))
-            fail_first["n"] += 1
-            if fail_first["n"] == 1:
-                weekly.mark_slot(store, int(slot_id), status="failed", error="boom")
+            sid = int(slot_id or 0)
+            calls.append(sid)
+            attempts[sid] = attempts.get(sid, 0) + 1
+            slot_one = self.store._conn.execute(
+                "SELECT id FROM weekly_slots WHERE slot = 1"
+            ).fetchone()
+            slot_one_id = int(slot_one["id"]) if slot_one else -1
+            if sid == slot_one_id and attempts[sid] == 1:
+                weekly.mark_slot(store, sid, status="failed", error="boom")
                 raise RuntimeError("boom")
             record = create_command_job(store, user_command=user_command)
             job_key = str(record["job_key"])
-            weekly.mark_slot(store, int(slot_id), status="running", job_key=job_key)
+            weekly.mark_slot(store, sid, status="running", job_key=job_key)
             self.store._conn.execute(
                 "UPDATE cursor_command_jobs SET status = 'completed', completed_at = ? WHERE job_key = ?",
                 (now_iso(), job_key),
             )
             self.store._conn.commit()
-            weekly._sync_slot_from_job(store, int(slot_id), job_key)
+            weekly._sync_slot_from_job(store, sid, job_key)
             return {"job_key": job_key, "status": "completed"}
 
         weekly.save_slots(
@@ -178,7 +183,7 @@ class TestWeeklyPipeline(unittest.TestCase):
         )
         with patch("discovery.config.resolve_python_exe", return_value="C:/Python/python.exe"), patch(
             "toolchain_env.check_toolchain", return_value=toolchain
-        ):
+        ), patch("discovery.weekly._slot_retry_sleep_sec", return_value=0):
             result = weekly.run_weekly_due_batch(
                 self.store,
                 day="2026-09-28",
@@ -186,13 +191,20 @@ class TestWeeklyPipeline(unittest.TestCase):
                 limit=3,
                 submit_fn=submit,
             )
-        self.assertEqual(result["count"], 2)
-        self.assertEqual(len(calls), 3)
-        self.assertEqual(len(set(calls)), 3)
+        self.assertEqual(result["count"], 3)
+        slot_one_id = int(
+            self.store._conn.execute("SELECT id FROM weekly_slots WHERE slot = 1").fetchone()["id"]
+        )
+        slot_two_id = int(
+            self.store._conn.execute("SELECT id FROM weekly_slots WHERE slot = 2").fetchone()["id"]
+        )
+        self.assertGreaterEqual(calls.count(slot_one_id), 2)
+        first_slot_two = calls.index(slot_two_id)
+        self.assertGreaterEqual(calls[:first_slot_two].count(slot_one_id), 2)
         failed = self.store._conn.execute(
             "SELECT status FROM weekly_slots WHERE slot = 1"
         ).fetchone()
-        self.assertEqual(failed["status"], "failed")
+        self.assertEqual(failed["status"], "done")
 
     def test_fill_day_requeues_failed_until_done(self) -> None:
         toolchain = {"ok": True}
