@@ -800,9 +800,18 @@ def _slot_retry_sleep_sec() -> int:
     import os as _os
 
     try:
-        return max(0, int(_os.environ.get("WEEKLY_SLOT_RETRY_SLEEP_SEC", "8")))
+        return max(0, int(_os.environ.get("WEEKLY_SLOT_RETRY_SLEEP_SEC", "0")))
     except ValueError:
-        return 8
+        return 0
+
+
+def _fill_fail_round_sleep_sec() -> int:
+    import os as _os
+
+    try:
+        return max(0, int(_os.environ.get("WEEKLY_FILL_FAIL_SLEEP_SEC", "0")))
+    except ValueError:
+        return 0
 
 
 def _slot_max_attempts_per_slot() -> int:
@@ -907,7 +916,8 @@ def run_weekly_fill_day(
 
         if batch.get("deferred"):
             _append_fill_log(f"{owner_norm} {day} round={rounds} deferred=busy")
-            _time.sleep(sleep_sec)
+            fail_sleep = _fill_fail_round_sleep_sec()
+            _time.sleep(fail_sleep if fail_sleep else min(3, sleep_sec))
             continue
 
         stats = today_slot_stats(store, day=day, owner=owner_norm)
@@ -918,7 +928,9 @@ def run_weekly_fill_day(
             _append_fill_log(
                 f"{owner_norm} {day} round={rounds} stats={stats} batch_count={batch.get('count')}"
             )
-            _time.sleep(sleep_sec)
+            round_pause = _fill_fail_round_sleep_sec() if int(stats.get("failed") or 0) > 0 else sleep_sec
+            if round_pause:
+                _time.sleep(round_pause)
 
     complete = day_fill_complete(store, day=day, owner=owner_norm)
     stats = today_slot_stats(store, day=day, owner=owner_norm)
@@ -966,6 +978,59 @@ def run_weekly_fill_all_owners(
 
 _fill_thread_lock = None
 _fill_thread_running = False
+_fill_kick_lock = None
+_fill_last_kick_mono = 0.0
+
+
+def _fill_kick_debounce_lock():
+    global _fill_kick_lock
+    if _fill_kick_lock is None:
+        import threading
+
+        _fill_kick_lock = threading.Lock()
+    return _fill_kick_lock
+
+
+def request_daily_fill_kick(
+    store=None,
+    *,
+    slot_id: int | None = None,
+    day: str | None = None,
+    owner: str | None = None,
+) -> dict[str, Any]:
+    """Start (or ensure) fill for today right after a slot/job failure."""
+    import time as _time
+
+    global _fill_last_kick_mono
+    with _fill_kick_debounce_lock():
+        now = _time.monotonic()
+        if now - _fill_last_kick_mono < 1.5:
+            return {"started": False, "reason": "debounced"}
+        _fill_last_kick_mono = now
+
+    day_iso = day or date.today().isoformat()
+    owner_norm = normalize_owner(owner) if owner else None
+    if store is not None and slot_id is not None:
+        row = _fetch_slot_record(store, int(slot_id))
+        if row:
+            owner_norm = normalize_owner(str(row.get("owner") or owner_norm or ""))
+            try:
+                cal = slot_date(str(row.get("week_start") or ""), str(row.get("day") or ""))
+                day_iso = cal or day_iso
+            except Exception:
+                pass
+
+    if weekly_fill_running():
+        return {"started": False, "reason": "fill_already_running", "day": day_iso}
+
+    if store is not None:
+        weekly_reconcile_pipeline(store)
+        if owner_norm and day_fill_complete(store, day=day_iso, owner=owner_norm):
+            return {"started": False, "reason": "day_complete", "day": day_iso}
+        if owner_norm and planned_slots_for_calendar_day(store, day=day_iso, owner=owner_norm) <= 0:
+            return {"started": False, "reason": "no_plan", "day": day_iso}
+
+    return kickoff_daily_fill_async(day=day_iso, owner=owner_norm)
 
 
 def _fill_lock():
@@ -1491,6 +1556,7 @@ def _sync_slot_from_job(store, slot_id: int, job_key: str) -> None:
             job_key=job_key,
             error=command_job_error_summary(job),
         )
+        request_daily_fill_kick(store, slot_id=slot_id)
     else:
         mark_slot(store, slot_id, status="running", job_key=job_key, error="")
 
@@ -1880,12 +1946,19 @@ def run_weekly_due_batch(
 
             if status == "failed":
                 _append_fill_log(f"slot {slot_id} attempt {attempts} failed — retry")
+                requeue_slot(store, slot_id)
                 if retry_sleep:
                     _time.sleep(retry_sleep)
                 continue
 
+            if status == "running":
+                _append_fill_log(f"slot {slot_id} still running after submit — wait")
+                if not _wait_for_production_idle(store, deadline=deadline):
+                    break
+                continue
+
             job_key = str(result.get("job_key") or "")
-            if job_key:
+            if job_key and status == "done":
                 submitted.append({"slot_id": str(slot_id), "job_key": job_key})
             break
 

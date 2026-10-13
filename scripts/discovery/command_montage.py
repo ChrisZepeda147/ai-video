@@ -431,6 +431,12 @@ def run_direct_montage_command(
             )
             thread_store._conn.commit()
         finally:
+            try:
+                from discovery.weekly import sync_weekly_slots_for_job
+
+                sync_weekly_slots_for_job(thread_store, job_key)
+            except Exception:
+                pass
             thread_store.close()
 
     if block:
