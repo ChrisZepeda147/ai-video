@@ -229,7 +229,7 @@ class TestWeeklyPipeline(unittest.TestCase):
 
         weekly.save_slots(
             self.store,
-            week_start="2026-09-28",
+            week_start="2026-10-12",
             owner="chris",
             slots=[
                 {"day": "mon", "slot": 1, "speaker": "A", "visual_direction": "v1"},
@@ -242,13 +242,32 @@ class TestWeeklyPipeline(unittest.TestCase):
         ), patch("discovery.weekly.weekly_submit_command", side_effect=submit):
             result = weekly.run_weekly_fill_day(
                 self.store,
-                day="2026-09-28",
+                day="2026-10-12",
                 owner="chris",
             )
         self.assertTrue(result.get("complete"))
         stats = result.get("today_stats") or {}
         self.assertEqual(int(stats.get("done") or 0), 3)
         self.assertGreaterEqual(attempts.get(1, 0), 2)
+
+    def test_automation_backlog_mon_before_tue(self) -> None:
+        weekly.save_slots(
+            self.store,
+            week_start="2026-10-12",
+            owner="chris",
+            slots=[
+                {"day": "mon", "slot": 1, "speaker": "A", "visual_direction": "v1"},
+                {"day": "tue", "slot": 1, "speaker": "B", "visual_direction": "v2"},
+            ],
+        )
+        mon = weekly.slot_date("2026-10-12", "mon")
+        tue = weekly.slot_date("2026-10-12", "tue")
+        backlog = weekly.automation_calendar_days_to_fill(
+            self.store,
+            owner="chris",
+            through=__import__("datetime").date.fromisoformat(tue),
+        )
+        self.assertEqual(backlog, [mon, tue])
 
 
 if __name__ == "__main__":

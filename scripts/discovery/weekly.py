@@ -872,10 +872,10 @@ def run_weekly_fill_day(
 
     while rounds < max_rounds:
         rounds += 1
-        if day_fill_complete(store, day=day, owner=owner_norm):
+        if week_automation_complete(store, owner=owner_norm):
             break
-        result = weekly_automation_tick(store, day=day, owner=owner_norm)
-        if result.get("action") == "day_complete":
+        result = weekly_automation_tick(store, owner=owner_norm)
+        if result.get("action") in {"week_complete", "day_complete"}:
             break
         if result.get("action") == "preflight_blocked":
             return {
@@ -892,20 +892,22 @@ def run_weekly_fill_day(
         if result.get("action") == "slot_running" and tick:
             _time.sleep(min(2.0, tick))
 
-    complete = day_fill_complete(store, day=day, owner=owner_norm)
+    complete = week_automation_complete(store, owner=owner_norm)
     stats = today_slot_stats(store, day=day, owner=owner_norm)
+    backlog = automation_calendar_days_to_fill(store, owner=owner_norm)
     out = {
         "day": day,
         "owner": owner_norm,
         "complete": complete,
         "rounds": rounds,
         "today_stats": stats,
+        "backlog_days": backlog,
         "submitted": [],
         "count": 0,
     }
     write_last_run({**out, "fill_day": True})
     _append_fill_log(
-        f"{owner_norm} {day} fill_done complete={complete} rounds={rounds} stats={stats}"
+        f"{owner_norm} fill_done complete={complete} backlog={backlog} rounds={rounds} stats={stats}"
     )
     return out
 
@@ -964,86 +966,162 @@ def _automation_tick_sec() -> float:
         return 0.5
 
 
+def _automation_backlog_scope() -> str:
+    import os as _os
+
+    return _os.environ.get("WEEKLY_AUTOMATION_BACKLOG", "current_week").strip().lower()
+
+
+def automation_calendar_days_to_fill(
+    store,
+    *,
+    owner: str | None = None,
+    through: date | None = None,
+) -> list[str]:
+    """Calendar dates (sorted) with incomplete weekly slots, any active plan, through today."""
+    ensure_weekly_tables(store)
+    end = through or date.today()
+    owner_filter = normalize_owner(owner) if owner else None
+    query = """
+        SELECT DISTINCT p.week_start, s.day, p.owner
+        FROM weekly_slots s
+        JOIN weekly_plans p ON p.id = s.plan_id
+        WHERE p.status IN ('ready', 'active', 'completed')
+          AND s.status != 'done'
+    """
+    args: list[Any] = []
+    if owner_filter:
+        query += " AND p.owner = ?"
+        args.append(owner_filter)
+    rows = store._conn.execute(query, args).fetchall()
+    candidates: set[str] = set()
+    for row in rows:
+        week_start = str(row["week_start"] or "")
+        weekday = str(row["day"] or "")
+        owner_norm = normalize_owner(str(row["owner"] or ""))
+        if not week_start or weekday not in DAYS:
+            continue
+        try:
+            cal = slot_date(week_start, weekday)
+            if date.fromisoformat(cal) > end:
+                continue
+        except ValueError:
+            continue
+        activate_plans_for_day(store, day=cal)
+        if planned_slots_for_calendar_day(store, day=cal, owner=owner_norm) <= 0:
+            continue
+        if not day_fill_complete(store, day=cal, owner=owner_norm):
+            candidates.add(cal)
+    scope = _automation_backlog_scope()
+    if scope in {"current_week", "week", "this_week"}:
+        week_mon = week_start_monday(end)
+        week_sun = week_mon + timedelta(days=6)
+        candidates = {
+            cal
+            for cal in candidates
+            if week_mon <= date.fromisoformat(cal) <= week_sun
+        }
+    return sorted(candidates)
+
+
+def week_automation_complete(store, *, owner: str | None = None, through: date | None = None) -> bool:
+    return len(automation_calendar_days_to_fill(store, owner=owner, through=through)) == 0
+
+
 def weekly_automation_tick(
     store,
     *,
     day: str | None = None,
     owner: str | None = None,
 ) -> dict[str, Any]:
-    """One step toward 3/3: run the lowest slot that is not done (instant retry after fail)."""
-    day_iso = day or date.today().isoformat()
+    """One step toward 3/3: oldest incomplete calendar day first, then slot 1→3."""
     owner_filter = normalize_owner(owner) if owner else None
-    activate_plans_for_day(store, day=day_iso)
     weekly_reconcile_pipeline(store)
 
     preflight = weekly_preflight()
     if not preflight["ok"]:
-        return {"day": day_iso, "action": "preflight_blocked", "error": preflight["issues"]}
+        today = date.today().isoformat()
+        return {"day": today, "action": "preflight_blocked", "error": preflight["issues"]}
+
+    if day:
+        calendar_days = [date.fromisoformat(day).isoformat()]
+    else:
+        calendar_days = automation_calendar_days_to_fill(store, owner=owner_filter)
+        if not calendar_days:
+            return {"day": date.today().isoformat(), "action": "week_complete"}
 
     _, _, submit_lock = _automation_threading()
     if not submit_lock.acquire(blocking=False):
-        return {"day": day_iso, "action": "submit_busy"}
+        return {"day": calendar_days[0], "action": "submit_busy"}
 
     try:
         if production_queue_busy(store, owner=None):
-            return {"day": day_iso, "action": "queue_busy"}
+            return {"day": calendar_days[0], "action": "queue_busy"}
 
         owners = [owner_filter] if owner_filter else list(OWNERS)
-        for owner_norm in owners:
-            if planned_slots_for_calendar_day(store, day=day_iso, owner=owner_norm) <= 0:
-                continue
-            if day_fill_complete(store, day=day_iso, owner=owner_norm):
-                continue
-
-            requeue_failed_slots_for_calendar_day(store, day=day_iso, owner=owner_norm)
-
-            for slot_row in slots_for_calendar_day(store, day=day_iso, owner=owner_norm):
-                slot_id = int(slot_row["id"])
-                slot_no = int(slot_row.get("slot") or 0)
-                status = _slot_status(store, slot_id)
-                if status == "done":
+        for day_iso in calendar_days:
+            activate_plans_for_day(store, day=day_iso)
+            for owner_norm in owners:
+                if planned_slots_for_calendar_day(store, day=day_iso, owner=owner_norm) <= 0:
                     continue
-                if status == "running":
-                    return {"day": day_iso, "action": "slot_running", "owner": owner_norm, "slot": slot_no}
-                if status == "failed":
-                    requeue_slot(store, slot_id)
+                if day_fill_complete(store, day=day_iso, owner=owner_norm):
+                    continue
 
-                command = slot_command_text(slot_row)
-                wait_sec = _fill_slot_wait_sec()
-                _append_fill_log(f"automation submit {owner_norm} slot={slot_no} id={slot_id}")
-                try:
-                    weekly_submit_command(
-                        store,
-                        user_command=command,
-                        slot_id=slot_id,
-                        wait_montage=True,
-                        wait_timeout_sec=wait_sec,
+                requeue_failed_slots_for_calendar_day(store, day=day_iso, owner=owner_norm)
+
+                for slot_row in slots_for_calendar_day(store, day=day_iso, owner=owner_norm):
+                    slot_id = int(slot_row["id"])
+                    slot_no = int(slot_row.get("slot") or 0)
+                    status = _slot_status(store, slot_id)
+                    if status == "done":
+                        continue
+                    if status == "running":
+                        return {
+                            "day": day_iso,
+                            "action": "slot_running",
+                            "owner": owner_norm,
+                            "slot": slot_no,
+                        }
+                    if status == "failed":
+                        requeue_slot(store, slot_id)
+
+                    command = slot_command_text(slot_row)
+                    wait_sec = _fill_slot_wait_sec()
+                    _append_fill_log(
+                        f"automation submit {owner_norm} day={day_iso} slot={slot_no} id={slot_id}"
                     )
-                except Exception as exc:  # noqa: BLE001
-                    mark_slot(
-                        store,
-                        slot_id,
-                        status="failed",
-                        error=str(exc)[:500],
-                        reset_job_key=True,
-                    )
-                    _append_fill_log(f"automation exception slot={slot_no}: {str(exc)[:160]}")
+                    try:
+                        weekly_submit_command(
+                            store,
+                            user_command=command,
+                            slot_id=slot_id,
+                            wait_montage=True,
+                            wait_timeout_sec=wait_sec,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        mark_slot(
+                            store,
+                            slot_id,
+                            status="failed",
+                            error=str(exc)[:500],
+                            reset_job_key=True,
+                        )
+                        _append_fill_log(
+                            f"automation exception day={day_iso} slot={slot_no}: {str(exc)[:160]}"
+                        )
 
-                final = _slot_status(store, slot_id)
-                return {
-                    "day": day_iso,
-                    "action": "attempted",
-                    "owner": owner_norm,
-                    "slot": slot_no,
-                    "status": final,
-                }
+                    final = _slot_status(store, slot_id)
+                    return {
+                        "day": day_iso,
+                        "action": "attempted",
+                        "owner": owner_norm,
+                        "slot": slot_no,
+                        "status": final,
+                    }
 
-        complete = all(
-            day_fill_complete(store, day=day_iso, owner=o)
-            for o in OWNERS
-            if planned_slots_for_calendar_day(store, day=day_iso, owner=o) > 0
-        )
-        return {"day": day_iso, "action": "day_complete" if complete else "idle"}
+        if week_automation_complete(store, owner=owner_filter):
+            return {"day": calendar_days[-1], "action": "week_complete"}
+        return {"day": calendar_days[0], "action": "idle"}
     finally:
         submit_lock.release()
 
@@ -1131,18 +1209,10 @@ def maybe_run_daily_fill(store) -> dict[str, Any] | None:
     if _os.environ.get("WEEKLY_DAILY_FILL", "1").strip().lower() in {"0", "false", "no"}:
         return None
 
-    today = date.today().isoformat()
     weekly_reconcile_pipeline(store)
-
-    owners_needing: list[str] = []
-    for o in OWNERS:
-        if planned_slots_for_calendar_day(store, day=today, owner=o) <= 0:
-            continue
-        if not day_fill_complete(store, day=today, owner=o):
-            owners_needing.append(o)
-
-    if not owners_needing:
-        return {"day": today, "skipped": "all_complete"}
+    backlog = automation_calendar_days_to_fill(store)
+    if not backlog:
+        return {"day": date.today().isoformat(), "skipped": "all_complete", "backlog": []}
 
     if weekly_fill_running():
         return {"day": today, "skipped": "fill_already_running"}
