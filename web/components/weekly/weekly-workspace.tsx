@@ -311,6 +311,7 @@ export function WeeklyWorkspace() {
       const res = await postWeeklyRunDue({
         day: target.day,
         owner,
+        fill_day: true,
         retry_failed: true,
         limit: 3,
         serial: true,
@@ -326,6 +327,10 @@ export function WeeklyWorkspace() {
         setStatus(`Could not start: ${d.error}`);
       } else if (d.deferred) {
         setStatus(`Deferred (${d.reason ?? "busy"}) — wait for current montage, then Run again.`);
+      } else if (d.started && d.fill_day) {
+        setStatus(
+          `Fill running for ${target.label} — retries failures until all 3 slots are done. Refresh to watch progress.`,
+        );
       } else if ((d.count ?? 0) === 0) {
         const issues = d.preflight?.issues?.filter(Boolean).join(" · ");
         setStatus(

@@ -371,7 +371,7 @@ def count_failed_slots_for_calendar_day(store, *, day: str, owner: str | None = 
         SELECT COUNT(*) AS n FROM weekly_slots s
         JOIN weekly_plans p ON p.id = s.plan_id
         WHERE p.week_start = ? AND s.day = ? AND s.status = 'failed'
-          AND p.status IN ('ready', 'active')
+          AND p.status IN ('ready', 'active', 'completed')
     """
     args: list[Any] = [monday, weekday]
     if owner:
@@ -666,6 +666,306 @@ def weekly_preflight() -> dict[str, Any]:
     }
 
 
+def requeue_failed_slots_for_calendar_day(
+    store, *, day: str, owner: str | None = None
+) -> int:
+    """Move all failed slots for a calendar day back to queued (auto-retry)."""
+    ensure_weekly_tables(store)
+    target = date.fromisoformat(day)
+    monday = week_start_monday(target).isoformat()
+    weekday = DAYS[target.weekday()]
+    query = """
+        SELECT s.id FROM weekly_slots s
+        JOIN weekly_plans p ON p.id = s.plan_id
+        WHERE p.week_start = ? AND s.day = ? AND s.status = 'failed'
+          AND p.status IN ('ready', 'active')
+    """
+    args: list[Any] = [monday, weekday]
+    if owner:
+        query += " AND p.owner = ?"
+        args.append(normalize_owner(owner))
+    n = 0
+    for row in store._conn.execute(query, args).fetchall():
+        if requeue_slot(store, int(row["id"])):
+            n += 1
+    return n
+
+
+def planned_slots_for_calendar_day(store, *, day: str, owner: str | None = None) -> int:
+    stats = today_slot_stats(store, day=day, owner=owner)
+    return sum(int(v) for v in stats.values())
+
+
+def day_fill_complete(store, *, day: str, owner: str) -> bool:
+    stats = today_slot_stats(store, day=day, owner=owner)
+    return int(stats.get("done") or 0) >= VIDEOS_PER_DAY and int(stats.get("failed") or 0) == 0
+
+
+def _fill_max_rounds() -> int:
+    import os as _os
+
+    try:
+        return max(1, min(48, int(_os.environ.get("WEEKLY_FILL_MAX_ROUNDS", "24"))))
+    except ValueError:
+        return 24
+
+
+def _fill_round_sleep_sec() -> int:
+    import os as _os
+
+    try:
+        return max(15, int(_os.environ.get("WEEKLY_FILL_ROUND_SLEEP_SEC", "45")))
+    except ValueError:
+        return 45
+
+
+def _fill_slot_wait_sec() -> int:
+    import os as _os
+
+    try:
+        return max(3600, int(_os.environ.get("WEEKLY_FILL_SLOT_WAIT_SEC", "14400")))
+    except ValueError:
+        return 14_400
+
+
+def _append_fill_log(line: str) -> None:
+    path = project_root() / "data" / "logs" / "weekly-fill.log"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().isoformat(timespec="seconds")
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(f"{stamp}  {line}\n")
+
+
+def run_weekly_fill_day(
+    store,
+    *,
+    day: str,
+    owner: str,
+    dry_run: bool = False,
+    submit_fn=None,
+) -> dict[str, Any]:
+    """Run serial montages until all 3 slots for this owner/day are done (re-queue failures)."""
+    import time as _time
+
+    owner_norm = normalize_owner(owner)
+    if planned_slots_for_calendar_day(store, day=day, owner=owner_norm) <= 0:
+        return {
+            "day": day,
+            "owner": owner_norm,
+            "complete": True,
+            "rounds": 0,
+            "submitted": [],
+            "skipped": "no_plan",
+        }
+
+    if dry_run:
+        requeue_failed_slots_for_calendar_day(store, day=day, owner=owner_norm)
+        due = due_slots(store, day=day, owner=owner_norm)
+        stats = today_slot_stats(store, day=day, owner=owner_norm)
+        return {
+            "day": day,
+            "owner": owner_norm,
+            "dry_run": True,
+            "due_count": len(due),
+            "today_stats": stats,
+            "complete": day_fill_complete(store, day=day, owner=owner_norm),
+        }
+
+    submitted_all: list[dict[str, str]] = []
+    rounds = 0
+    max_rounds = _fill_max_rounds()
+    sleep_sec = _fill_round_sleep_sec()
+    wait_sec = _fill_slot_wait_sec()
+
+    while rounds < max_rounds:
+        rounds += 1
+        weekly_reconcile_pipeline(store)
+        stats = today_slot_stats(store, day=day, owner=owner_norm)
+        if day_fill_complete(store, day=day, owner=owner_norm):
+            break
+
+        running = int(stats.get("running") or 0)
+        queued = int(stats.get("queued") or 0) + int(stats.get("rerunning") or 0)
+        failed = int(stats.get("failed") or 0)
+        done = int(stats.get("done") or 0)
+
+        if running > 0 and queued == 0 and failed == 0:
+            deadline = _time.monotonic() + min(wait_sec, 600)
+            _wait_for_production_idle(store, deadline=deadline)
+            continue
+
+        requeued = requeue_failed_slots_for_calendar_day(store, day=day, owner=owner_norm)
+        if requeued:
+            _append_fill_log(f"{owner_norm} {day} requeued_failed={requeued} round={rounds}")
+
+        batch = run_weekly_due_batch(
+            store,
+            day=day,
+            owner=owner_norm,
+            limit=VIDEOS_PER_DAY,
+            dry_run=False,
+            serial=True,
+            wait_complete=True,
+            wait_timeout_sec=wait_sec,
+            retry_failed=False,
+            submit_fn=submit_fn,
+        )
+        submitted_all.extend(batch.get("submitted") or [])
+
+        if batch.get("error"):
+            _append_fill_log(
+                f"{owner_norm} {day} round={rounds} preflight_error={batch.get('error')}"
+            )
+            _time.sleep(sleep_sec)
+            continue
+
+        if batch.get("deferred"):
+            _append_fill_log(f"{owner_norm} {day} round={rounds} deferred=busy")
+            _time.sleep(sleep_sec)
+            continue
+
+        stats = today_slot_stats(store, day=day, owner=owner_norm)
+        if day_fill_complete(store, day=day, owner=owner_norm):
+            break
+
+        if int(stats.get("failed") or 0) > 0 or int(stats.get("done") or 0) < VIDEOS_PER_DAY:
+            _append_fill_log(
+                f"{owner_norm} {day} round={rounds} stats={stats} batch_count={batch.get('count')}"
+            )
+            _time.sleep(sleep_sec)
+
+    complete = day_fill_complete(store, day=day, owner=owner_norm)
+    stats = today_slot_stats(store, day=day, owner=owner_norm)
+    out = {
+        "day": day,
+        "owner": owner_norm,
+        "complete": complete,
+        "rounds": rounds,
+        "today_stats": stats,
+        "submitted": submitted_all,
+        "count": len(submitted_all),
+    }
+    write_last_run({**out, "fill_day": True})
+    _append_fill_log(
+        f"{owner_norm} {day} fill_done complete={complete} rounds={rounds} stats={stats}"
+    )
+    return out
+
+
+def run_weekly_fill_all_owners(
+    store,
+    *,
+    day: str,
+    dry_run: bool = False,
+    submit_fn=None,
+) -> dict[str, Any]:
+    results: list[dict[str, Any]] = []
+    for owner in OWNERS:
+        if planned_slots_for_calendar_day(store, day=day, owner=owner) <= 0:
+            continue
+        if day_fill_complete(store, day=day, owner=owner) and not dry_run:
+            continue
+        results.append(
+            run_weekly_fill_day(
+                store,
+                day=day,
+                owner=owner,
+                dry_run=dry_run,
+                submit_fn=submit_fn,
+            )
+        )
+    all_complete = all(r.get("complete") for r in results) if results else True
+    return {"day": day, "owners": results, "all_complete": all_complete}
+
+
+_fill_thread_lock = None
+_fill_thread_running = False
+
+
+def _fill_lock():
+    global _fill_thread_lock
+    if _fill_thread_lock is None:
+        import threading
+
+        _fill_thread_lock = threading.Lock()
+    return _fill_thread_lock
+
+
+def weekly_fill_running() -> bool:
+    return _fill_thread_running
+
+
+def kickoff_daily_fill_async(
+    *,
+    day: str | None = None,
+    owner: str | None = None,
+) -> dict[str, Any]:
+    """Background fill for today — safe from API startup / poller / Run due."""
+    global _fill_thread_running
+    import threading
+
+    day_iso = day or date.today().isoformat()
+    owner_norm = normalize_owner(owner) if owner else None
+
+    with _fill_lock():
+        if _fill_thread_running:
+            return {"started": False, "reason": "fill_already_running", "day": day_iso}
+
+        def _run() -> None:
+            global _fill_thread_running
+            from discovery.config import default_db_path, load_env
+            from discovery.store import DiscoveryStore
+
+            load_env()
+            store = DiscoveryStore(default_db_path())
+            try:
+                _append_fill_log(f"fill_async start day={day_iso} owner={owner_norm or 'all'}")
+                if owner_norm:
+                    run_weekly_fill_day(store, day=day_iso, owner=owner_norm)
+                else:
+                    run_weekly_fill_all_owners(store, day=day_iso)
+            except Exception as exc:  # noqa: BLE001
+                _append_fill_log(f"fill_async error {exc}")
+            finally:
+                store.close()
+                with _fill_lock():
+                    _fill_thread_running = False
+
+        _fill_thread_running = True
+        threading.Thread(target=_run, name="weekly-fill-day", daemon=True).start()
+
+    return {"started": True, "day": day_iso, "owner": owner_norm, "fill_day": True}
+
+
+def maybe_run_daily_fill(store) -> dict[str, Any] | None:
+    """On PC/API startup: kick off fill for today whenever spots are not all done."""
+    import os as _os
+
+    if _os.environ.get("WEEKLY_DAILY_FILL", "1").strip().lower() in {"0", "false", "no"}:
+        return None
+
+    today = date.today().isoformat()
+    weekly_reconcile_pipeline(store)
+
+    owners_needing: list[str] = []
+    for o in OWNERS:
+        if planned_slots_for_calendar_day(store, day=today, owner=o) <= 0:
+            continue
+        if not day_fill_complete(store, day=today, owner=o):
+            owners_needing.append(o)
+
+    if not owners_needing:
+        return {"day": today, "skipped": "all_complete"}
+
+    if weekly_fill_running():
+        return {"day": today, "skipped": "fill_already_running"}
+
+    if production_queue_busy(store, owner=None):
+        return {"day": today, "skipped": "busy", "owners_needing": owners_needing}
+
+    return kickoff_daily_fill_async(day=today)
+
+
 def requeue_slot(store, slot_id: int) -> bool:
     """Reset a failed slot to queued so 7am or Run due can pick it up again."""
     ensure_weekly_tables(store)
@@ -697,7 +997,8 @@ def today_slot_stats(store, *, day: str, owner: str | None = None) -> dict[str, 
         SELECT s.status, COUNT(*) AS n
         FROM weekly_slots s
         JOIN weekly_plans p ON p.id = s.plan_id
-        WHERE p.week_start = ? AND s.day = ? AND p.status IN ('ready', 'active')
+        WHERE p.week_start = ? AND s.day = ?
+          AND p.status IN ('ready', 'active', 'completed')
     """
     args: list[Any] = [monday, weekday]
     if owner:
@@ -836,55 +1137,12 @@ def _write_catchup_state(payload: dict[str, Any]) -> None:
 
 
 def maybe_run_morning_catchup(store) -> dict[str, Any] | None:
-    """If 7am task missed and slots still queued, submit morning batch once per day (API startup)."""
+    """API startup hook — alias for daily fill (any time of day, retries until 3/3)."""
     import os as _os
 
     if _os.environ.get("WEEKLY_MORNING_CATCHUP", "1").strip().lower() in {"0", "false", "no"}:
         return None
-    today = date.today().isoformat()
-    state = _read_catchup_state()
-    due_remaining = sum(len(due_slots(store, day=today, owner=o)) for o in OWNERS)
-    failed_remaining = sum(
-        count_failed_slots_for_calendar_day(store, day=today, owner=o) for o in OWNERS
-    )
-    work_remaining = due_remaining + failed_remaining
-    if state.get("day") == today and state.get("ran") and work_remaining <= 0:
-        return state
-    if not past_morning_cutoff(today):
-        return None
-    if work_remaining <= 0:
-        return None
-    if count_running_command_jobs(store) > 0 or count_running_weekly_slots(store) > 0:
-        return None
-
-    any_due = False
-    results: list[dict[str, Any]] = []
-    for owner in OWNERS:
-        if count_running_weekly_slots(store, owner=owner) > 0:
-            continue
-        due_n = len(due_slots(store, day=today, owner=owner))
-        failed_n = count_failed_slots_for_calendar_day(store, day=today, owner=owner)
-        if due_n <= 0 and failed_n <= 0:
-            continue
-        any_due = True
-        batch = run_weekly_due_batch(
-            store,
-            day=today,
-            owner=owner,
-            limit=VIDEOS_PER_DAY,
-            dry_run=False,
-            serial=True,
-            wait_complete=True,
-            retry_failed=True,
-        )
-        results.append({"owner": owner, **{k: batch.get(k) for k in ("count", "deferred", "error", "submitted")}})
-
-    if not any_due:
-        _write_catchup_state({"day": today, "ran": True, "skipped": "nothing_due"})
-        return _read_catchup_state()
-
-    _write_catchup_state({"day": today, "ran": True, "results": results})
-    return _read_catchup_state()
+    return maybe_run_daily_fill(store)
 
 
 def weekly_health(store, *, day: str | None = None, owner: str | None = None) -> dict[str, Any]:
@@ -1364,21 +1622,7 @@ def run_weekly_due_batch(
         return blocked
 
     if retry_failed:
-        target = date.fromisoformat(day)
-        monday = week_start_monday(target).isoformat()
-        weekday = DAYS[target.weekday()]
-        fail_query = """
-            SELECT s.id FROM weekly_slots s
-            JOIN weekly_plans p ON p.id = s.plan_id
-            WHERE p.week_start = ? AND s.day = ? AND s.status = 'failed'
-              AND p.status IN ('ready', 'active')
-        """
-        fail_args: list[Any] = [monday, weekday]
-        if owner_norm:
-            fail_query += " AND p.owner = ?"
-            fail_args.append(owner_norm)
-        for row in store._conn.execute(fail_query, fail_args).fetchall():
-            requeue_slot(store, int(row["id"]))
+        requeue_failed_slots_for_calendar_day(store, day=day, owner=owner_norm)
 
     due = due_slots(store, day=day, owner=owner_norm)
     if slot_ids:

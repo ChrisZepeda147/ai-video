@@ -3,9 +3,11 @@
 param(
   [string]$Time = "07:00",
   [string]$TaskName = "AiVideoWeekly7am",
+  [string]$LogonTaskName = "AiVideoWeeklyLogon",
   [string]$Owner = "",
   [switch]$Uninstall,
-  [switch]$Status
+  [switch]$Status,
+  [switch]$SkipLogon
 )
 
 $Root = Split-Path -Parent $PSScriptRoot
@@ -15,6 +17,7 @@ $LogPath = Join-Path $LogDir "weekly-7am.log"
 $SilentVbsDir = Join-Path $env:LOCALAPPDATA "AiVideo"
 $SilentVbsPath = Join-Path $SilentVbsDir "weekly_7am_silent.vbs"
 $WeeklyPs1 = Join-Path $Root "scripts\weekly_7am.ps1"
+$LogonPs1 = Join-Path $Root "scripts\weekly_at_logon.ps1"
 
 function Remove-LegacyExtraTasks {
   foreach ($suffix in @("1000", "1400")) {
@@ -37,6 +40,22 @@ function Write-WeeklySilentLauncher {
   return $SilentVbsPath
 }
 
+function Write-LogonSilentLauncher {
+  param([string]$Ps1Path, [string]$VbsPath)
+  $powershell = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
+  New-Item -ItemType Directory -Force -Path $SilentVbsDir | Out-Null
+  $cmd = "$powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Ps1Path`""
+  $escaped = $cmd.Replace('"', '""')
+  $rootEsc = $Root.Replace('"', '""')
+  @(
+    "On Error Resume Next"
+    "Set sh = CreateObject(""Wscript.Shell"")"
+    "sh.CurrentDirectory = ""$rootEsc"""
+    "sh.Run ""$escaped"", 0, False"
+  ) -join "`r`n" | Set-Content -Path $VbsPath -Encoding ASCII
+  return $VbsPath
+}
+
 function Install-WeeklyTask {
   if (-not (Test-Path $WeeklyPs1)) { throw "Missing $WeeklyPs1" }
   . (Join-Path $Root "scripts\dev-common.ps1")
@@ -56,7 +75,16 @@ function Install-WeeklyTask {
   $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
   Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
   Write-Host "installed $TaskName daily $Time (StartWhenAvailable; silent launcher: $vbs)"
-  Write-Host "Morning batch: serial direct montage, 3 videos/owner (log: $LogPath)"
+  Write-Host "Morning batch: fill-day until 3/3 per owner (log: $LogPath)"
+
+  if (-not $SkipLogon -and (Test-Path $LogonPs1)) {
+    $logonVbs = Join-Path $SilentVbsDir "weekly_logon_silent.vbs"
+    $logonVbs = Write-LogonSilentLauncher -Ps1Path $LogonPs1 -VbsPath $logonVbs
+    $logonAction = New-ScheduledTaskAction -Execute $wscript -Argument "//B //Nologo `"$logonVbs`""
+    $logonTrigger = New-ScheduledTaskTrigger -AtLogOn
+    Register-ScheduledTask -TaskName $LogonTaskName -Action $logonAction -Trigger $logonTrigger -Settings $settings -Force | Out-Null
+    Write-Host "installed $LogonTaskName at logon (fill-day; log: data\logs\weekly-logon.log)"
+  }
 }
 
 if ($Status) {
@@ -66,6 +94,7 @@ if ($Status) {
 
 if ($Uninstall) {
   schtasks /Delete /TN $TaskName /F 2>$null
+  schtasks /Delete /TN $LogonTaskName /F 2>$null
   Remove-LegacyExtraTasks
   if (Test-Path $SilentVbsPath) { Remove-Item -Force $SilentVbsPath -ErrorAction SilentlyContinue }
   exit 0

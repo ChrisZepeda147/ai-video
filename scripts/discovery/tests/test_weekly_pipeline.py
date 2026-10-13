@@ -194,6 +194,51 @@ class TestWeeklyPipeline(unittest.TestCase):
         ).fetchone()
         self.assertEqual(failed["status"], "failed")
 
+    def test_fill_day_requeues_failed_until_done(self) -> None:
+        toolchain = {"ok": True}
+        attempts: dict[int, int] = {}
+
+        def submit(store, user_command, slot_id=None, **_kw):
+            sid = int(slot_id or 0)
+            attempts[sid] = attempts.get(sid, 0) + 1
+            if sid == 1 and attempts[sid] == 1:
+                weekly.mark_slot(store, sid, status="failed", error="boom")
+                raise RuntimeError("boom")
+            record = create_command_job(store, user_command=user_command)
+            job_key = str(record["job_key"])
+            weekly.mark_slot(store, sid, status="running", job_key=job_key)
+            self.store._conn.execute(
+                "UPDATE cursor_command_jobs SET status = 'completed', completed_at = ? WHERE job_key = ?",
+                (now_iso(), job_key),
+            )
+            self.store._conn.commit()
+            weekly._sync_slot_from_job(store, sid, job_key)
+            return {"job_key": job_key, "status": "completed"}
+
+        weekly.save_slots(
+            self.store,
+            week_start="2026-09-28",
+            owner="chris",
+            slots=[
+                {"day": "mon", "slot": 1, "speaker": "A", "visual_direction": "v1"},
+                {"day": "mon", "slot": 2, "speaker": "B", "visual_direction": "v2"},
+                {"day": "mon", "slot": 3, "speaker": "C", "visual_direction": "v3"},
+            ],
+        )
+        with patch("discovery.config.resolve_python_exe", return_value="C:/Python/python.exe"), patch(
+            "toolchain_env.check_toolchain", return_value=toolchain
+        ), patch("discovery.weekly._fill_round_sleep_sec", return_value=0):
+            result = weekly.run_weekly_fill_day(
+                self.store,
+                day="2026-09-28",
+                owner="chris",
+                submit_fn=submit,
+            )
+        self.assertTrue(result.get("complete"))
+        stats = result.get("today_stats") or {}
+        self.assertEqual(int(stats.get("done") or 0), 3)
+        self.assertGreaterEqual(attempts.get(1, 0), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

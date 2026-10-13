@@ -23,6 +23,8 @@ from discovery.weekly import (
     VIDEOS_PER_DAY,
     normalize_owner,
     run_weekly_due_batch,
+    run_weekly_fill_all_owners,
+    run_weekly_fill_day,
     weekly_agent_model,
 )
 
@@ -61,6 +63,11 @@ def main() -> int:
     parser.add_argument("--wait-timeout-minutes", type=int, default=240, help="With --wait-complete")
     parser.add_argument("--retry-failed", action="store_true", help="Re-queue failed slots for today first")
     parser.add_argument(
+        "--fill-day",
+        action="store_true",
+        help="Retry until all 3 slots for the day are done (re-queue failures between rounds)",
+    )
+    parser.add_argument(
         "--all-owners",
         action="store_true",
         help="Run morning batch for each owner (chris + stephen), 3 slots each",
@@ -86,17 +93,33 @@ def main() -> int:
     exit_code = 0
     try:
         for owner_key in owners:
-            result = run_weekly_due_batch(
-                store,
-                day=day,
-                owner=owner_key,
-                limit=args.limit,
-                dry_run=args.dry_run,
-                serial=serial,
-                wait_complete=args.wait_complete,
-                wait_timeout_sec=max(60, args.wait_timeout_minutes * 60),
-                retry_failed=args.retry_failed,
-            )
+            if args.fill_day:
+                if owner_key is None:
+                    result = run_weekly_fill_all_owners(
+                        store,
+                        day=day,
+                        dry_run=args.dry_run,
+                    )
+                else:
+                    one = run_weekly_fill_day(
+                        store,
+                        day=day,
+                        owner=owner_key,
+                        dry_run=args.dry_run,
+                    )
+                    result = one
+            else:
+                result = run_weekly_due_batch(
+                    store,
+                    day=day,
+                    owner=owner_key,
+                    limit=args.limit,
+                    dry_run=args.dry_run,
+                    serial=serial,
+                    wait_complete=args.wait_complete,
+                    wait_timeout_sec=max(60, args.wait_timeout_minutes * 60),
+                    retry_failed=args.retry_failed or args.fill_day,
+                )
             label = owner_key or "all"
             if result.get("error"):
                 print(f"[{label}] Preflight failed: {result['error']}")
@@ -118,6 +141,21 @@ def main() -> int:
 
             if result.get("deferred"):
                 print(f"[{label}] Deferred ({result.get('reason', 'busy')}): job already running for {day}")
+                continue
+
+            if args.fill_day:
+                stats = result.get("today_stats") or {}
+                complete = result.get("complete") or result.get("all_complete")
+                print(
+                    f"[{label}] Fill day {day}: complete={complete} "
+                    f"rounds={result.get('rounds', '—')} stats={stats}"
+                )
+                if result.get("owners"):
+                    for item in result["owners"]:
+                        print(
+                            f"  {item.get('owner')}: complete={item.get('complete')} "
+                            f"stats={item.get('today_stats')}"
+                        )
                 continue
 
             if result.get("count", 0) == 0:

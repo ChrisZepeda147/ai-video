@@ -974,20 +974,23 @@ export async function postWeeklyRunDue(body: {
   serial?: boolean;
   retry_failed?: boolean;
   wait_complete?: boolean;
+  fill_day?: boolean;
 }) {
   return fetchJson<{
     day: string;
-    count: number;
+    count?: number;
+    started?: boolean;
+    fill_day?: boolean;
     deferred?: boolean;
     reason?: string;
     error?: string;
     preflight?: { ok: boolean; issues: string[] };
-    submitted: Array<{ slot_id: string; job_key: string }>;
+    submitted?: Array<{ slot_id: string; job_key: string }>;
   }>(buildUrl("/api/weekly/run-due"), {
     method: "POST",
-    body: JSON.stringify(body),
+    body: JSON.stringify({ fill_day: true, retry_failed: true, ...body }),
     headers: internalHeaders(),
-    signal: AbortSignal.timeout(4 * 60 * 60 * 1000),
+    signal: AbortSignal.timeout(120_000),
   });
 }
 
