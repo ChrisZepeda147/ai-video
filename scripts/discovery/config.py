@@ -307,3 +307,34 @@ def visual_prompt_dup_threshold() -> float:
 def analytics_exploit_ratio() -> float:
     """Fraction of concept guidance from proven patterns (rest is experiments)."""
     return min(1.0, max(0.0, _float_env("DISCOVERY_ANALYTICS_EXPLOIT_RATIO", DEFAULT_ANALYTICS_EXPLOIT_RATIO)))
+
+
+def montage_job_timeout_minutes() -> int:
+    """Wall clock for one build_motivation_job (weekly slot)."""
+    try:
+        raw = int(os.environ.get("WEEKLY_MONTAGE_TIMEOUT_MINUTES", "45"))
+    except ValueError:
+        raw = 45
+    return max(15, min(120, raw))
+
+
+def montage_job_timeout_sec() -> int:
+    return montage_job_timeout_minutes() * 60
+
+
+def montage_stale_minutes() -> int:
+    """Mark running montage jobs failed if worker hung (slightly above timeout)."""
+    try:
+        raw = int(os.environ.get("WEEKLY_MONTAGE_STALE_MINUTES", "0"))
+    except ValueError:
+        raw = 0
+    if raw > 0:
+        return max(20, min(180, raw))
+    return montage_job_timeout_minutes() + 5
+
+
+def speech_max_candidate_attempts() -> int:
+    try:
+        return max(6, min(32, int(os.environ.get("SPEECH_MAX_CANDIDATES", "16"))))
+    except ValueError:
+        return 16

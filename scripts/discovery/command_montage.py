@@ -12,7 +12,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from discovery.config import default_db_path, project_root, resolve_python_exe
+from discovery.config import (
+    default_db_path,
+    montage_job_timeout_sec,
+    project_root,
+    resolve_python_exe,
+)
 from discovery.motivation_build import _build_command
 from discovery.reuse_policy import normalize_reuse_policy, parse_reuse_policy
 from discovery.store import DiscoveryStore
@@ -307,15 +312,43 @@ def run_direct_montage_command(
                     "hook": plan.get("hook"),
                 }
                 cmd, slug, rel_output = _build_command(body, root)
-                result = _subprocess_run(
-                    cmd,
-                    cwd=root,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    env=env,
-                )
+                montage_timeout = montage_job_timeout_sec()
+                try:
+                    result = _subprocess_run(
+                        cmd,
+                        cwd=root,
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        env=env,
+                        timeout=montage_timeout,
+                    )
+                except subprocess.TimeoutExpired:
+                    mins = max(1, montage_timeout // 60)
+                    msg = (
+                        f"Montage exceeded {mins}m wall clock (WEEKLY_MONTAGE_TIMEOUT_MINUTES). "
+                        "Weekly will retry this slot."
+                    )
+                    truncated = "\n\n".join(logs)[-120_000:]
+                    thread_store._conn.execute(
+                        """
+                        UPDATE cursor_command_jobs
+                        SET status = 'failed', stdout_log = ?, stderr_log = ?, error_message = ?,
+                            error_summary = ?, completed_at = ?
+                        WHERE job_key = ?
+                        """,
+                        (
+                            truncated,
+                            msg,
+                            msg,
+                            msg[:500],
+                            _now_iso(),
+                            job_key,
+                        ),
+                    )
+                    thread_store._conn.commit()
+                    return
                 part_log = "\n".join(p for p in (result.stdout, result.stderr) if p).strip()
                 if part_log:
                     logs.append(f"=== build {index + 1}/{video_count} ({slug}) ===\n{part_log}")

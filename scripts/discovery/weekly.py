@@ -785,10 +785,15 @@ def _fill_round_sleep_sec() -> int:
 def _fill_slot_wait_sec() -> int:
     import os as _os
 
-    try:
-        return max(3600, int(_os.environ.get("WEEKLY_FILL_SLOT_WAIT_SEC", "14400")))
-    except ValueError:
-        return 14_400
+    from discovery.config import montage_job_timeout_sec
+
+    override = _os.environ.get("WEEKLY_FILL_SLOT_WAIT_SEC", "").strip()
+    if override:
+        try:
+            return max(600, int(override))
+        except ValueError:
+            pass
+    return montage_job_timeout_sec() + 300
 
 
 def _slot_retry_sleep_sec() -> int:
@@ -1047,6 +1052,32 @@ def maybe_run_daily_fill(store) -> dict[str, Any] | None:
     return kickoff_daily_fill_async(day=today)
 
 
+def _reset_weekly_slot_acquire_state(store, slot_id: int) -> None:
+    """Drop speech/B-roll exclude sidecars so a re-run does not inherit a dead search."""
+    row = _fetch_slot_record(store, slot_id)
+    if not row:
+        return
+    owner = normalize_owner(str(row.get("owner") or ""))
+    week = str(row.get("week_start") or "").strip()
+    day = str(row.get("day") or "").strip()
+    slot_no = int(row.get("slot") or 1)
+    if not week or not day:
+        return
+    slug = f"weekly-{owner}-{week}-{day}-{slot_no}"
+    try:
+        from discovery.motivation_paths import default_job_date, job_dir_for, motivation_jobs_root
+
+        job_dir = job_dir_for(slug, motivation_jobs_root(), job_date=default_job_date())
+    except Exception:
+        return
+    if not job_dir.is_dir():
+        return
+    for name in ("speech_acquire.json", "broll_acquire.json"):
+        path = job_dir / name
+        if path.is_file():
+            path.unlink(missing_ok=True)
+
+
 def requeue_slot(store, slot_id: int) -> bool:
     """Reset a failed slot to queued so 7am or Run due can pick it up again."""
     ensure_weekly_tables(store)
@@ -1055,6 +1086,7 @@ def requeue_slot(store, slot_id: int) -> bool:
     ).fetchone()
     if not row or str(row["status"]) != "failed":
         return False
+    _reset_weekly_slot_acquire_state(store, slot_id)
     ts = _now()
     store._conn.execute(
         """
@@ -1290,6 +1322,21 @@ def _montage_inline() -> bool:
     return _os.environ.get("WEEKLY_MONTAGE_INLINE", "").strip().lower() in {"1", "true", "yes"}
 
 
+def _fail_running_command_job(store, job_key: str, *, message: str) -> None:
+    from discovery.command_jobs import now_iso
+
+    ts = now_iso()
+    store._conn.execute(
+        """
+        UPDATE cursor_command_jobs
+        SET status = 'failed', error_message = ?, completed_at = ?
+        WHERE job_key = ? AND status = 'running'
+        """,
+        (message[:2000], ts, job_key),
+    )
+    store._conn.commit()
+
+
 def _wait_for_command_job(store, job_key: str, *, deadline: float) -> None:
     import time as _time
 
@@ -1301,6 +1348,19 @@ def _wait_for_command_job(store, job_key: str, *, deadline: float) -> None:
             return
         _time.sleep(8)
         reconcile_slots(store)
+
+    job = get_command_job(store, job_key)
+    if job and str(job.get("status") or "") == "running":
+        from discovery.config import montage_job_timeout_minutes
+
+        mins = montage_job_timeout_minutes()
+        _fail_running_command_job(
+            store,
+            job_key,
+            message=(
+                f"Montage wait exceeded {mins}m — job marked failed so weekly can retry this slot."
+            ),
+        )
 
 
 def _wait_for_production_idle(store, *, deadline: float) -> bool:

@@ -1919,7 +1919,13 @@ def weekly_restart_day_endpoint(
             owner=str(owner),
             run_after=bool(run_after),
             kill_workers=bool(kill_workers),
-            wait_timeout_sec=max(60, int(body.get("wait_timeout_minutes") or 240) * 60),
+            wait_timeout_sec=max(
+                60,
+                int(body.get("wait_timeout_minutes") or 0) * 60
+                or __import__(
+                    "discovery.config", fromlist=["montage_job_timeout_sec"]
+                ).montage_job_timeout_sec(),
+            ),
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -1959,7 +1965,13 @@ def weekly_run_due_endpoint(
             dry_run=False,
             serial=bool(serial),
             wait_complete=bool(wait_complete),
-            wait_timeout_sec=max(60, int(body.get("wait_timeout_minutes") or 240) * 60),
+            wait_timeout_sec=max(
+                60,
+                int(body.get("wait_timeout_minutes") or 0) * 60
+                or __import__(
+                    "discovery.config", fromlist=["montage_job_timeout_sec"]
+                ).montage_job_timeout_sec(),
+            ),
             retry_failed=bool(body.get("retry_failed")),
         )
     except ValueError as exc:

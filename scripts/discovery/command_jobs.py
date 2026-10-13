@@ -323,7 +323,9 @@ def reconcile_stale_command_jobs(store) -> dict[str, int]:
         is_montage = should_use_direct_montage(cmd)
         stale_min = max_age
         if is_montage:
-            stale_min = max(stale_min, 240)
+            from discovery.config import montage_stale_minutes
+
+            stale_min = max(stale_min, montage_stale_minutes())
         if status == "running" and age_min >= stale_min:
             msg = (
                 f"Stale after {int(age_min)}m (likely API restart or agent hung). "

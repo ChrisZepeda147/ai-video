@@ -1559,6 +1559,15 @@ def prepare_speech(
     job_dir = audio_dir.parent
     stats = SpeechAcquireStats(speaker=speaker)
     blocked_ids = load_failed_source_ids(job_dir)
+    from discovery.config import speech_max_candidate_attempts
+
+    speech_try_cap = speech_max_candidate_attempts()
+    if len(blocked_ids) >= speech_try_cap:
+        raise MotivationJobError(
+            "SPEECH_EXHAUSTED",
+            f"Speech acquisition already tried {len(blocked_ids)} sources for this job folder. "
+            "Pin a --speech-url, clear the job audio folder, or pick a different speaker clip.",
+        )
     primary_query, fallback_query = speech_search_queries(speaker, speech_query)
     candidate_batches: list[tuple[str, list[VideoCandidate]]] = []
     if speech_url:
@@ -1618,6 +1627,8 @@ def prepare_speech(
         elif batch_label == "fallback":
             print(f"Speech fallback candidates: {len(candidates)} (search: {fallback_query})")
         for candidate in candidates:
+            if stats.candidates_attempted >= speech_try_cap:
+                return False
             if candidate.video_id in tried_video_ids or candidate.video_id in blocked_ids:
                 continue
             tried_video_ids.add(candidate.video_id)
