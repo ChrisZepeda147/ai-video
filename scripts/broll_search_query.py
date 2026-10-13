@@ -43,6 +43,15 @@ SCENE_SEARCHES: tuple[tuple[str, str], ...] = (
     ("apartment", "luxury penthouse window skyline view cinematic 60fps"),
     ("penthouse", "penthouse window city skyline view cinematic 60fps"),
     ("yacht", "luxury yacht cinematic 60fps"),
+    ("waterfall", "waterfall forest cinematic 60fps"),
+    ("redwood", "redwood forest cinematic 60fps"),
+    ("redwoods", "redwood forest cinematic 60fps"),
+    ("thunderstorm", "mountain thunderstorm cinematic 60fps"),
+    ("autumn", "autumn lake forest cinematic 60fps"),
+    ("dolomite", "dolomites sunrise cinematic 60fps"),
+    ("dolomites", "dolomites sunrise cinematic 60fps"),
+    ("canyon", "canyon sunrise cinematic 60fps"),
+    ("forest", "misty forest cinematic 60fps"),
 )
 
 
@@ -146,7 +155,7 @@ _MODIFIER_WORDS = frozenset(
 )
 
 
-def broaden_broll_query_ladder(query: str, *, max_steps: int = 4) -> list[str]:
+def broaden_broll_query_ladder(query: str, *, max_steps: int = 6) -> list[str]:
     """Deterministic broader searches that keep the core subject tokens."""
     text = (query or "").strip()
     if not text:

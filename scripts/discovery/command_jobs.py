@@ -338,6 +338,12 @@ def reconcile_stale_command_jobs(store) -> dict[str, int]:
                 (msg, now_iso(), job_key),
             )
             failed += 1
+            try:
+                from discovery.weekly import sync_weekly_slots_for_job
+
+                sync_weekly_slots_for_job(store, job_key)
+            except Exception:
+                pass
         elif status == "queued" and age_min >= min(15, max_age):
             cmd = str(row["user_command"] or "")
             if should_use_direct_montage(cmd):

@@ -44,6 +44,18 @@ class ClipsMontageTests(unittest.TestCase):
         self.assertGreaterEqual(needed, 3)
         self.assertLessEqual(needed, 12)
 
+    def test_driven_34s_scenic_does_not_require_eight_pool_files(self) -> None:
+        seg = montage.segment_length_for_duration(34.0)
+        needed = montage.broll_pool_files_required(
+            target_duration=34.0,
+            segment_length=seg,
+            layout="single",
+            driven_pacing=True,
+            subject="redwoods fog cinematic 60fps",
+        )
+        self.assertLessEqual(needed, 7)
+        self.assertGreaterEqual(needed, 5)
+
     def test_clip_picker_recycles_when_exhausted(self) -> None:
         clips = [
             Path("aaa_part01.mp4"),

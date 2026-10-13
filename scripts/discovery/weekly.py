@@ -1039,6 +1039,34 @@ def weekly_submit_command(
     return dict(job or record)
 
 
+def sync_weekly_slots_for_job(store, job_key: str) -> int:
+    """Push cursor_command_jobs terminal status onto any running weekly slot for this job."""
+    ensure_weekly_tables(store)
+    key = str(job_key or "").strip()
+    if not key:
+        return 0
+    rows = store._conn.execute(
+        """
+        SELECT id FROM weekly_slots
+        WHERE job_key = ? AND status IN ('running', 'rerunning')
+        """,
+        (key,),
+    ).fetchall()
+    plan_ids: set[int] = set()
+    for row in rows:
+        slot_id = int(row["id"])
+        plan = store._conn.execute(
+            "SELECT plan_id FROM weekly_slots WHERE id = ?",
+            (slot_id,),
+        ).fetchone()
+        if plan:
+            plan_ids.add(int(plan["plan_id"]))
+        _sync_slot_from_job(store, slot_id, key)
+    for pid in plan_ids:
+        refresh_plan_completion(store, plan_id=pid)
+    return len(rows)
+
+
 def _sync_slot_from_job(store, slot_id: int, job_key: str) -> None:
     from discovery.command_jobs import get_command_job
 

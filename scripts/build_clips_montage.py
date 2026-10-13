@@ -79,25 +79,27 @@ def broll_pool_files_required(
     subject: str = "",
 ) -> int:
     """Distinct B-roll part files to download — montage re-trims/reuses them across fast beats."""
-    plan = segment_length
+    cap = 8
+    floor = 3
     if driven_pacing:
-        from broll_frame_gate import wants_vehicle
-        from discovery.driven_visuals import planning_segment_length
-
-        plan = planning_segment_length(
+        # Fast beats reuse the same part files. planning_segment_length is sub-second
+        # and must not drive download count (would falsely require 8 for ~30s scenic slots).
+        beats = estimate_montage_beats(
+            target_duration=target_duration,
+            segment_length=segment_length,
             driven_pacing=True,
-            fallback=segment_length,
-            duration=target_duration,
-            vehicle=wants_vehicle(subject),
+            subject=subject,
         )
+        target = max(floor, min(cap, math.ceil(beats / 2.5)))
+        if target_duration >= 60.0:
+            target = max(target, min(6, cap))
+        return target
     base = montage_beats_needed(
         duration=target_duration,
-        segment_length=plan,
+        segment_length=segment_length,
         layout=layout,
     )
     if target_duration <= 90.0:
-        cap = 8
-        floor = 3
         target = max(floor, min(base, cap))
         if target_duration >= 60.0:
             target = max(target, min(6, cap))

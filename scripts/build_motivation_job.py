@@ -2813,6 +2813,79 @@ def _discover_candidates_for_query(
     return filtered[:limit] if limit else filtered
 
 
+def _try_extend_existing_sources(
+    *,
+    clips_dir: Path,
+    job_dir: Path,
+    subject: str,
+    query: str,
+    clip_length: int,
+    max_parts: int | None,
+    start_offset: float,
+    use_vision: bool,
+    frame_gate: bool,
+    jobs_root: Path,
+    split_full_source: bool,
+    exclude_source_ids: set[str],
+    inv: BrollInventory,
+) -> tuple[BrollInventory, int, int]:
+    """Fetch more parts from YouTube IDs already in clips/ (pool often copies one part per source)."""
+    if inv.satisfies_count():
+        return inv, 0, 0
+    missing = max(0, inv.required - inv.usable_count)
+    if missing <= 0:
+        return inv, 0, 0
+    ids = _broll_ids_from_clips(clips_dir)
+    if not ids:
+        return inv, 0, 0
+    urls = [f"https://www.youtube.com/watch?v={video_id}" for video_id in ids]
+    candidates = discover_urls(urls)
+    candidates = [c for c in candidates if c.video_id not in exclude_source_ids]
+    if not candidates:
+        return inv, 0, 0
+    attempts = 1
+    ok = 0
+    montage_timer().stats.downloads_attempted += 1
+    print(
+        f"  extend existing sources: {len(candidates)} id(s), "
+        f"need {missing} more usable clip(s)"
+    )
+    try:
+        with montage_timer().stage_child("broll_download"):
+            got = download_broll_candidates(
+                clips_dir,
+                candidates,
+                clip_length=clip_length,
+                max_parts=max_parts,
+                start_offset=start_offset,
+                subject=subject,
+                query=query,
+                use_vision=use_vision,
+                frame_gate=frame_gate,
+                jobs_root=jobs_root,
+                split_full_source=split_full_source,
+                job_dir=job_dir,
+                exclude_source_ids=exclude_source_ids,
+                parts_needed=min(8, missing + 2),
+                needed_clips=inv.required,
+                raise_if_empty=False,
+            )
+        if got:
+            ok = 1
+            montage_timer().stats.downloads_successful += 1
+    except RuntimeError:
+        pass
+    inv = _inventory(
+        clips_dir,
+        required=inv.required,
+        subject=subject,
+        use_vision=use_vision,
+        frame_gate=frame_gate,
+        jobs_root=jobs_root,
+    )
+    return inv, attempts, ok
+
+
 def _try_diversity_download(
     *,
     clips_dir: Path,
@@ -3034,6 +3107,49 @@ def ensure_broll_clips(
         _persist_broll_success(job_dir, inv)
         return collected_ids
 
+    if not inv.satisfies_count() and inv.usable_count > 0:
+        inv, ext_attempts, ext_ok = _try_extend_existing_sources(
+            clips_dir=clips_dir,
+            job_dir=job_dir,
+            subject=subject,
+            query=query,
+            clip_length=clip_length,
+            max_parts=max_parts,
+            start_offset=start_offset,
+            use_vision=use_vision,
+            frame_gate=frame_gate,
+            jobs_root=jobs_root,
+            split_full_source=split_full_source,
+            exclude_source_ids=exclude,
+            inv=inv,
+        )
+        downloads_attempted += ext_attempts
+        downloads_ok += ext_ok
+        log_broll_progress("ensure_broll", inv, status="progress")
+        if inv.satisfies_count():
+            inv = _try_diversity_download(
+                clips_dir=clips_dir,
+                job_dir=job_dir,
+                subject=subject,
+                query=query,
+                clips_limit=clips_limit,
+                clip_length=clip_length,
+                max_parts=max_parts,
+                min_views=min_views,
+                min_duration=min_duration,
+                start_offset=start_offset,
+                use_vision=use_vision,
+                frame_gate=frame_gate,
+                jobs_root=jobs_root,
+                split_full_source=split_full_source,
+                reuse_policy=reuse_policy,
+                exclude_source_ids=exclude,
+                inv=inv,
+            )
+            log_broll_progress("ensure_broll", inv, status="ok")
+            _persist_broll_success(job_dir, inv)
+            return collected_ids
+
     if broll_ids:
         broll_pool.copy_youtube_clips(
             jobs_root,
@@ -3173,6 +3289,26 @@ def ensure_broll_clips(
             else:
                 stagnant_pops += 1
         attempt += 1
+
+    if not inv.satisfies_count() and inv.usable_count > 0:
+        inv, ext_attempts, ext_ok = _try_extend_existing_sources(
+            clips_dir=clips_dir,
+            job_dir=job_dir,
+            subject=subject,
+            query=query,
+            clip_length=clip_length,
+            max_parts=max_parts,
+            start_offset=start_offset,
+            use_vision=use_vision,
+            frame_gate=frame_gate,
+            jobs_root=jobs_root,
+            split_full_source=split_full_source,
+            exclude_source_ids=exclude,
+            inv=inv,
+        )
+        downloads_attempted += ext_attempts
+        downloads_ok += ext_ok
+        log_broll_progress("ensure_broll", inv, status="progress")
 
     if not inv.satisfies_count():
         _raise_broll_insufficient(
