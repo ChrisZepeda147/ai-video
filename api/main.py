@@ -264,10 +264,12 @@ def _start_brother_auto_sync() -> None:
 @app.on_event("startup")
 def _start_weekly_morning_catchup() -> None:
     import logging
+    import os
     import threading
+    import time
 
     from discovery.config import default_db_path
-    from discovery.weekly import maybe_run_morning_catchup, weekly_reconcile_pipeline
+    from discovery.weekly import maybe_run_daily_fill, weekly_reconcile_pipeline
 
     def _run() -> None:
         log = logging.getLogger("uvicorn.error")
@@ -279,16 +281,43 @@ def _start_weekly_morning_catchup() -> None:
             pipe = weekly_reconcile_pipeline(store)
             if pipe.get("stale", {}).get("stale_failed"):
                 log.info("Weekly reconcile: stale jobs failed=%s", pipe["stale"])
-            result = maybe_run_morning_catchup(store)
+            result = maybe_run_daily_fill(store)
         except Exception as exc:
-            log.warning("Weekly morning catchup failed: %s", exc)
+            log.warning("Weekly daily fill kickoff failed: %s", exc)
             return
         finally:
             store.close()
-        if result and result.get("results"):
-            log.info("Weekly morning catchup: %s", result.get("results"))
+        if result and result.get("started"):
+            log.info("Weekly daily fill started: %s", result)
+        elif result and result.get("owners_needing"):
+            log.info("Weekly daily fill deferred (busy): %s", result)
 
-    threading.Thread(target=_run, name="weekly-morning-catchup", daemon=True).start()
+    threading.Thread(target=_run, name="weekly-daily-fill", daemon=True).start()
+
+    def _poll_loop() -> None:
+        log = logging.getLogger("uvicorn.error")
+        if os.environ.get("WEEKLY_FILL_POLL", "1").strip().lower() in {"0", "false", "no"}:
+            return
+        try:
+            minutes = max(5, int(os.environ.get("WEEKLY_FILL_POLL_MINUTES", "10")))
+        except ValueError:
+            minutes = 10
+        while True:
+            time.sleep(minutes * 60)
+            db = default_db_path()
+            if not Path(db).is_file():
+                continue
+            store = DiscoveryStore(db)
+            try:
+                result = maybe_run_daily_fill(store)
+                if result and result.get("started"):
+                    log.info("Weekly fill poller started: %s", result)
+            except Exception as exc:
+                log.warning("Weekly fill poller: %s", exc)
+            finally:
+                store.close()
+
+    threading.Thread(target=_poll_loop, name="weekly-fill-poller", daemon=True).start()
 
 
 @app.on_event("startup")
@@ -1913,7 +1942,15 @@ def weekly_run_due_endpoint(
     wait_complete = body.get("wait_complete", True)
     if isinstance(wait_complete, str):
         wait_complete = wait_complete.strip().lower() not in {"0", "false", "no"}
+    fill_day = body.get("fill_day", True)
+    if isinstance(fill_day, str):
+        fill_day = fill_day.strip().lower() not in {"0", "false", "no"}
     try:
+        if fill_day:
+            from discovery.weekly import kickoff_daily_fill_async
+
+            day_iso = day or __import__("datetime").date.today().isoformat()
+            return kickoff_daily_fill_async(day=day_iso, owner=owner)
         return run_weekly_due_batch(
             store,
             day=day,
