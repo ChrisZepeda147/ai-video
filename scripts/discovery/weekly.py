@@ -866,71 +866,31 @@ def run_weekly_fill_day(
             "complete": day_fill_complete(store, day=day, owner=owner_norm),
         }
 
-    submitted_all: list[dict[str, str]] = []
     rounds = 0
     max_rounds = _fill_max_rounds()
-    sleep_sec = _fill_round_sleep_sec()
-    wait_sec = _fill_slot_wait_sec()
+    tick = _automation_tick_sec()
 
     while rounds < max_rounds:
         rounds += 1
-        weekly_reconcile_pipeline(store)
-        stats = today_slot_stats(store, day=day, owner=owner_norm)
         if day_fill_complete(store, day=day, owner=owner_norm):
             break
-
-        running = int(stats.get("running") or 0)
-        queued = int(stats.get("queued") or 0) + int(stats.get("rerunning") or 0)
-        failed = int(stats.get("failed") or 0)
-        done = int(stats.get("done") or 0)
-
-        if running > 0 and queued == 0 and failed == 0:
-            deadline = _time.monotonic() + min(wait_sec, 600)
-            _wait_for_production_idle(store, deadline=deadline)
-            continue
-
-        requeued = requeue_failed_slots_for_calendar_day(store, day=day, owner=owner_norm)
-        if requeued:
-            _append_fill_log(f"{owner_norm} {day} requeued_failed={requeued} round={rounds}")
-
-        batch = run_weekly_due_batch(
-            store,
-            day=day,
-            owner=owner_norm,
-            limit=VIDEOS_PER_DAY,
-            dry_run=False,
-            serial=True,
-            wait_complete=True,
-            wait_timeout_sec=wait_sec,
-            retry_failed=False,
-            submit_fn=submit_fn,
-        )
-        submitted_all.extend(batch.get("submitted") or [])
-
-        if batch.get("error"):
-            _append_fill_log(
-                f"{owner_norm} {day} round={rounds} preflight_error={batch.get('error')}"
-            )
-            _time.sleep(sleep_sec)
-            continue
-
-        if batch.get("deferred"):
-            _append_fill_log(f"{owner_norm} {day} round={rounds} deferred=busy")
-            fail_sleep = _fill_fail_round_sleep_sec()
-            _time.sleep(fail_sleep if fail_sleep else min(3, sleep_sec))
-            continue
-
-        stats = today_slot_stats(store, day=day, owner=owner_norm)
-        if day_fill_complete(store, day=day, owner=owner_norm):
+        result = weekly_automation_tick(store, day=day, owner=owner_norm)
+        if result.get("action") == "day_complete":
             break
-
-        if int(stats.get("failed") or 0) > 0 or int(stats.get("done") or 0) < VIDEOS_PER_DAY:
-            _append_fill_log(
-                f"{owner_norm} {day} round={rounds} stats={stats} batch_count={batch.get('count')}"
-            )
-            round_pause = _fill_fail_round_sleep_sec() if int(stats.get("failed") or 0) > 0 else sleep_sec
-            if round_pause:
-                _time.sleep(round_pause)
+        if result.get("action") == "preflight_blocked":
+            return {
+                "day": day,
+                "owner": owner_norm,
+                "complete": False,
+                "rounds": rounds,
+                "error": "; ".join(result.get("error") or []),
+            }
+        if result.get("action") == "attempted" and result.get("status") == "failed":
+            continue
+        if result.get("action") in {"idle", "queue_busy", "submit_busy"} and tick:
+            _time.sleep(tick)
+        if result.get("action") == "slot_running" and tick:
+            _time.sleep(min(2.0, tick))
 
     complete = day_fill_complete(store, day=day, owner=owner_norm)
     stats = today_slot_stats(store, day=day, owner=owner_norm)
@@ -940,8 +900,8 @@ def run_weekly_fill_day(
         "complete": complete,
         "rounds": rounds,
         "today_stats": stats,
-        "submitted": submitted_all,
-        "count": len(submitted_all),
+        "submitted": [],
+        "count": 0,
     }
     write_last_run({**out, "fill_day": True})
     _append_fill_log(
@@ -976,19 +936,160 @@ def run_weekly_fill_all_owners(
     return {"day": day, "owners": results, "all_complete": all_complete}
 
 
-_fill_thread_lock = None
-_fill_thread_running = False
-_fill_kick_lock = None
-_fill_last_kick_mono = 0.0
+_automation_lock = None
+_automation_running = False
+_automation_wakeup = None
+_automation_submit_lock = None
 
 
-def _fill_kick_debounce_lock():
-    global _fill_kick_lock
-    if _fill_kick_lock is None:
-        import threading
+def _automation_threading():
+    global _automation_lock, _automation_wakeup, _automation_submit_lock
+    import threading
 
-        _fill_kick_lock = threading.Lock()
-    return _fill_kick_lock
+    if _automation_lock is None:
+        _automation_lock = threading.Lock()
+    if _automation_wakeup is None:
+        _automation_wakeup = threading.Event()
+    if _automation_submit_lock is None:
+        _automation_submit_lock = threading.Lock()
+    return _automation_lock, _automation_wakeup, _automation_submit_lock
+
+
+def _automation_tick_sec() -> float:
+    import os as _os
+
+    try:
+        return max(0.25, float(_os.environ.get("WEEKLY_AUTOMATION_TICK_SEC", "0.5")))
+    except ValueError:
+        return 0.5
+
+
+def weekly_automation_tick(
+    store,
+    *,
+    day: str | None = None,
+    owner: str | None = None,
+) -> dict[str, Any]:
+    """One step toward 3/3: run the lowest slot that is not done (instant retry after fail)."""
+    day_iso = day or date.today().isoformat()
+    owner_filter = normalize_owner(owner) if owner else None
+    activate_plans_for_day(store, day=day_iso)
+    weekly_reconcile_pipeline(store)
+
+    preflight = weekly_preflight()
+    if not preflight["ok"]:
+        return {"day": day_iso, "action": "preflight_blocked", "error": preflight["issues"]}
+
+    _, _, submit_lock = _automation_threading()
+    if not submit_lock.acquire(blocking=False):
+        return {"day": day_iso, "action": "submit_busy"}
+
+    try:
+        if production_queue_busy(store, owner=None):
+            return {"day": day_iso, "action": "queue_busy"}
+
+        owners = [owner_filter] if owner_filter else list(OWNERS)
+        for owner_norm in owners:
+            if planned_slots_for_calendar_day(store, day=day_iso, owner=owner_norm) <= 0:
+                continue
+            if day_fill_complete(store, day=day_iso, owner=owner_norm):
+                continue
+
+            requeue_failed_slots_for_calendar_day(store, day=day_iso, owner=owner_norm)
+
+            for slot_row in slots_for_calendar_day(store, day=day_iso, owner=owner_norm):
+                slot_id = int(slot_row["id"])
+                slot_no = int(slot_row.get("slot") or 0)
+                status = _slot_status(store, slot_id)
+                if status == "done":
+                    continue
+                if status == "running":
+                    return {"day": day_iso, "action": "slot_running", "owner": owner_norm, "slot": slot_no}
+                if status == "failed":
+                    requeue_slot(store, slot_id)
+
+                command = slot_command_text(slot_row)
+                wait_sec = _fill_slot_wait_sec()
+                _append_fill_log(f"automation submit {owner_norm} slot={slot_no} id={slot_id}")
+                try:
+                    weekly_submit_command(
+                        store,
+                        user_command=command,
+                        slot_id=slot_id,
+                        wait_montage=True,
+                        wait_timeout_sec=wait_sec,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    mark_slot(
+                        store,
+                        slot_id,
+                        status="failed",
+                        error=str(exc)[:500],
+                        reset_job_key=True,
+                    )
+                    _append_fill_log(f"automation exception slot={slot_no}: {str(exc)[:160]}")
+
+                final = _slot_status(store, slot_id)
+                return {
+                    "day": day_iso,
+                    "action": "attempted",
+                    "owner": owner_norm,
+                    "slot": slot_no,
+                    "status": final,
+                }
+
+        complete = all(
+            day_fill_complete(store, day=day_iso, owner=o)
+            for o in OWNERS
+            if planned_slots_for_calendar_day(store, day=day_iso, owner=o) > 0
+        )
+        return {"day": day_iso, "action": "day_complete" if complete else "idle"}
+    finally:
+        submit_lock.release()
+
+
+def _weekly_automation_daemon() -> None:
+    global _automation_running
+    import time as _time
+
+    from discovery.config import default_db_path, load_env
+    from discovery.store import DiscoveryStore
+
+    load_env()
+    _append_fill_log("weekly automation daemon started")
+    tick = _automation_tick_sec()
+    while _automation_running:
+        _, wakeup, _ = _automation_threading()
+        store = DiscoveryStore(default_db_path())
+        instant_retry = False
+        try:
+            result = weekly_automation_tick(store)
+            instant_retry = (
+                result.get("action") == "attempted" and result.get("status") == "failed"
+            )
+        except Exception as exc:  # noqa: BLE001
+            _append_fill_log(f"automation daemon error: {exc}")
+        finally:
+            store.close()
+        if instant_retry:
+            continue
+        wakeup.wait(timeout=tick)
+        wakeup.clear()
+
+
+def ensure_weekly_automation_started() -> dict[str, Any]:
+    """Start the always-on tick loop (one montage at a time, instant retry on fail)."""
+    global _automation_running
+    import threading
+
+    lock, wakeup, _ = _automation_threading()
+    with lock:
+        if _automation_running:
+            wakeup.set()
+            return {"started": False, "reason": "automation_already_running", "fill_day": True}
+        _automation_running = True
+        threading.Thread(target=_weekly_automation_daemon, name="weekly-automation", daemon=True).start()
+    return {"started": True, "fill_day": True, "automation": True}
 
 
 def request_daily_fill_kick(
@@ -998,52 +1099,15 @@ def request_daily_fill_kick(
     day: str | None = None,
     owner: str | None = None,
 ) -> dict[str, Any]:
-    """Start (or ensure) fill for today right after a slot/job failure."""
-    import time as _time
-
-    global _fill_last_kick_mono
-    with _fill_kick_debounce_lock():
-        now = _time.monotonic()
-        if now - _fill_last_kick_mono < 1.5:
-            return {"started": False, "reason": "debounced"}
-        _fill_last_kick_mono = now
-
-    day_iso = day or date.today().isoformat()
-    owner_norm = normalize_owner(owner) if owner else None
-    if store is not None and slot_id is not None:
-        row = _fetch_slot_record(store, int(slot_id))
-        if row:
-            owner_norm = normalize_owner(str(row.get("owner") or owner_norm or ""))
-            try:
-                cal = slot_date(str(row.get("week_start") or ""), str(row.get("day") or ""))
-                day_iso = cal or day_iso
-            except Exception:
-                pass
-
-    if weekly_fill_running():
-        return {"started": False, "reason": "fill_already_running", "day": day_iso}
-
-    if store is not None:
-        weekly_reconcile_pipeline(store)
-        if owner_norm and day_fill_complete(store, day=day_iso, owner=owner_norm):
-            return {"started": False, "reason": "day_complete", "day": day_iso}
-        if owner_norm and planned_slots_for_calendar_day(store, day=day_iso, owner=owner_norm) <= 0:
-            return {"started": False, "reason": "no_plan", "day": day_iso}
-
-    return kickoff_daily_fill_async(day=day_iso, owner=owner_norm)
-
-
-def _fill_lock():
-    global _fill_thread_lock
-    if _fill_thread_lock is None:
-        import threading
-
-        _fill_thread_lock = threading.Lock()
-    return _fill_thread_lock
+    """Wake automation immediately after a failure (no debounce)."""
+    _, wakeup, _ = _automation_threading()
+    out = ensure_weekly_automation_started()
+    wakeup.set()
+    return out
 
 
 def weekly_fill_running() -> bool:
-    return _fill_thread_running
+    return _automation_running
 
 
 def kickoff_daily_fill_async(
@@ -1051,41 +1115,13 @@ def kickoff_daily_fill_async(
     day: str | None = None,
     owner: str | None = None,
 ) -> dict[str, Any]:
-    """Background fill for today — safe from API startup / poller / Run due."""
-    global _fill_thread_running
-    import threading
-
+    """Start background automation for today (non-blocking)."""
     day_iso = day or date.today().isoformat()
     owner_norm = normalize_owner(owner) if owner else None
-
-    with _fill_lock():
-        if _fill_thread_running:
-            return {"started": False, "reason": "fill_already_running", "day": day_iso}
-
-        def _run() -> None:
-            global _fill_thread_running
-            from discovery.config import default_db_path, load_env
-            from discovery.store import DiscoveryStore
-
-            load_env()
-            store = DiscoveryStore(default_db_path())
-            try:
-                _append_fill_log(f"fill_async start day={day_iso} owner={owner_norm or 'all'}")
-                if owner_norm:
-                    run_weekly_fill_day(store, day=day_iso, owner=owner_norm)
-                else:
-                    run_weekly_fill_all_owners(store, day=day_iso)
-            except Exception as exc:  # noqa: BLE001
-                _append_fill_log(f"fill_async error {exc}")
-            finally:
-                store.close()
-                with _fill_lock():
-                    _fill_thread_running = False
-
-        _fill_thread_running = True
-        threading.Thread(target=_run, name="weekly-fill-day", daemon=True).start()
-
-    return {"started": True, "day": day_iso, "owner": owner_norm, "fill_day": True}
+    out = ensure_weekly_automation_started()
+    _, wakeup, _ = _automation_threading()
+    wakeup.set()
+    return {**out, "day": day_iso, "owner": owner_norm}
 
 
 def maybe_run_daily_fill(store) -> dict[str, Any] | None:
@@ -1111,10 +1147,7 @@ def maybe_run_daily_fill(store) -> dict[str, Any] | None:
     if weekly_fill_running():
         return {"day": today, "skipped": "fill_already_running"}
 
-    if production_queue_busy(store, owner=None):
-        return {"day": today, "skipped": "busy", "owners_needing": owners_needing}
-
-    return kickoff_daily_fill_async(day=today)
+    return ensure_weekly_automation_started()
 
 
 def _reset_weekly_slot_acquire_state(store, slot_id: int) -> None:

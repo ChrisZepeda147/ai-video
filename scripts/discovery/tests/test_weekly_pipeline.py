@@ -239,12 +239,11 @@ class TestWeeklyPipeline(unittest.TestCase):
         )
         with patch("discovery.config.resolve_python_exe", return_value="C:/Python/python.exe"), patch(
             "toolchain_env.check_toolchain", return_value=toolchain
-        ), patch("discovery.weekly._fill_round_sleep_sec", return_value=0):
+        ), patch("discovery.weekly.weekly_submit_command", side_effect=submit):
             result = weekly.run_weekly_fill_day(
                 self.store,
                 day="2026-09-28",
                 owner="chris",
-                submit_fn=submit,
             )
         self.assertTrue(result.get("complete"))
         stats = result.get("today_stats") or {}
