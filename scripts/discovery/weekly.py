@@ -895,14 +895,15 @@ def _advance_round_robin_cursor(slot_numbers: list[int], attempted_slot: int) ->
     return slot_numbers[(idx + 1) % len(slot_numbers)]
 
 
-def pick_next_round_robin_slot(
+def _round_robin_select_slot(
     store,
     *,
     day: str,
     owner: str,
     allowed_slot_ids: set[int] | None = None,
+    advance_cursor: bool,
+    requeue_failed: bool,
 ) -> dict[str, Any] | None:
-    """Next unfinished slot for one attempt (round-robin; persists cursor across API restarts)."""
     owner_norm = normalize_owner(owner)
     ordered = slots_for_calendar_day(store, day=day, owner=owner_norm)
     if allowed_slot_ids is not None:
@@ -934,14 +935,54 @@ def pick_next_round_robin_slot(
         if status == "running":
             return None
         if status == "failed":
-            requeue_slot(store, slot_id)
-        next_cursor = _advance_round_robin_cursor(slot_numbers, slot_no)
-        state[key] = next_cursor
-        _write_round_robin_state(state)
+            if requeue_failed:
+                requeue_slot(store, slot_id)
+            else:
+                continue
+        if advance_cursor:
+            next_cursor = _advance_round_robin_cursor(slot_numbers, slot_no)
+            state[key] = next_cursor
+            _write_round_robin_state(state)
         return row
 
-    clear_round_robin_cursor(owner=owner_norm, day=day)
+    if advance_cursor:
+        clear_round_robin_cursor(owner=owner_norm, day=day)
     return None
+
+
+def pick_next_round_robin_slot(
+    store,
+    *,
+    day: str,
+    owner: str,
+    allowed_slot_ids: set[int] | None = None,
+) -> dict[str, Any] | None:
+    """Next unfinished slot for one attempt (round-robin; persists cursor across API restarts)."""
+    return _round_robin_select_slot(
+        store,
+        day=day,
+        owner=owner,
+        allowed_slot_ids=allowed_slot_ids,
+        advance_cursor=True,
+        requeue_failed=True,
+    )
+
+
+def peek_next_round_robin_slot(
+    store,
+    *,
+    day: str,
+    owner: str,
+) -> dict[str, Any] | None:
+    """Read-only: next slot automation would attempt (no cursor or requeue side effects)."""
+    return _round_robin_select_slot(
+        store,
+        day=day,
+        owner=owner,
+        allowed_slot_ids=None,
+        advance_cursor=False,
+        requeue_failed=False,
+    )
 
 
 def run_weekly_fill_day(
@@ -1052,6 +1093,7 @@ def run_weekly_fill_all_owners(
 
 _automation_lock = None
 _automation_running = False
+_automation_thread = None
 _automation_wakeup = None
 _automation_submit_lock = None
 
@@ -1248,32 +1290,65 @@ def weekly_automation_tick(
         submit_lock.release()
 
 
-def _weekly_automation_daemon() -> None:
+def automation_daemon_alive() -> bool:
+    """True when the in-process weekly automation thread is running."""
+    thread = _automation_thread
+    return thread is not None and thread.is_alive()
+
+
+def _clear_automation_daemon_state(*, reason: str) -> None:
+    global _automation_running, _automation_thread
+    _automation_running = False
+    _automation_thread = None
+    _append_fill_log(f"WEEKLY_AUTOMATION_DAEMON_STOP reason={reason}")
+
+
+def repair_stale_automation_state() -> bool:
+    """Reset flag when _automation_running but daemon thread is dead."""
     global _automation_running
+    if _automation_running and not automation_daemon_alive():
+        _append_fill_log("WEEKLY_AUTOMATION_STALE_STATE_RECOVERED")
+        _clear_automation_daemon_state(reason="stale_flag_without_live_thread")
+        return True
+    if not _automation_running and _automation_thread is not None and not automation_daemon_alive():
+        _automation_thread = None  # type: ignore[misc]
+        return True
+    return False
+
+
+def _weekly_automation_daemon() -> None:
+    global _automation_running, _automation_thread
+    import threading
     import time as _time
 
     from discovery.config import default_db_path, load_env
     from discovery.store import DiscoveryStore
 
+    me = threading.current_thread()
+    stop_reason = "loop_exit"
     load_env()
-    _append_fill_log("weekly automation daemon started")
+    _append_fill_log(f"WEEKLY_AUTOMATION_DAEMON_START thread={me.name} ident={me.ident}")
     tick = _automation_tick_sec()
-    while _automation_running:
-        from discovery.production_pause import is_production_paused
+    try:
+        while _automation_running:
+            from discovery.production_pause import is_production_paused
 
-        if is_production_paused():
-            _append_fill_log("automation paused (production_pause.json)")
-            break
-        _, wakeup, _ = _automation_threading()
-        store = DiscoveryStore(default_db_path())
-        try:
-            weekly_automation_tick(store)
-        except Exception as exc:  # noqa: BLE001
-            _append_fill_log(f"automation daemon error: {exc}")
-        finally:
-            store.close()
-        wakeup.wait(timeout=tick)
-        wakeup.clear()
+            if is_production_paused():
+                stop_reason = "production_pause"
+                break
+            _, wakeup, _ = _automation_threading()
+            store = DiscoveryStore(default_db_path())
+            try:
+                weekly_automation_tick(store)
+            except Exception as exc:  # noqa: BLE001
+                _append_fill_log(f"automation daemon error: {exc}")
+            finally:
+                store.close()
+            wakeup.wait(timeout=tick)
+            wakeup.clear()
+    finally:
+        if _automation_thread is me:
+            _clear_automation_daemon_state(reason=stop_reason)
 
 
 def stop_weekly_automation() -> None:
@@ -1285,23 +1360,38 @@ def stop_weekly_automation() -> None:
 
 
 def ensure_weekly_automation_started() -> dict[str, Any]:
-    """Start the always-on tick loop (one montage at a time, instant retry on fail)."""
-    global _automation_running
+    """Start the always-on tick loop (one montage at a time)."""
+    global _automation_running, _automation_thread
     import threading
 
     from discovery.production_pause import is_production_paused
 
-    if is_production_paused():
-        return {"started": False, "reason": "production_paused", "fill_day": True}
-
     lock, wakeup, _ = _automation_threading()
     with lock:
-        if _automation_running:
+        repair_stale_automation_state()
+        if is_production_paused():
+            if not automation_daemon_alive():
+                _automation_running = False
+            return {"started": False, "reason": "production_paused", "fill_day": True}
+
+        if automation_daemon_alive():
             wakeup.set()
-            return {"started": False, "reason": "automation_already_running", "fill_day": True}
+            return {
+                "started": False,
+                "reason": "automation_already_running",
+                "fill_day": True,
+                "thread_alive": True,
+            }
+
         _automation_running = True
-        threading.Thread(target=_weekly_automation_daemon, name="weekly-automation", daemon=True).start()
-    return {"started": True, "fill_day": True, "automation": True}
+        thread = threading.Thread(
+            target=_weekly_automation_daemon,
+            name="weekly-automation",
+            daemon=True,
+        )
+        _automation_thread = thread
+        thread.start()
+    return {"started": True, "fill_day": True, "automation": True, "thread_alive": True}
 
 
 def request_daily_fill_kick(
@@ -1319,7 +1409,54 @@ def request_daily_fill_kick(
 
 
 def weekly_fill_running() -> bool:
-    return _automation_running
+    return automation_daemon_alive()
+
+
+def automation_health_snapshot(store, *, owner: str | None = None) -> dict[str, Any]:
+    """Read-only automation diagnostics for /api/weekly/health."""
+    from discovery.production_pause import is_production_paused
+
+    owner_norm = normalize_owner(owner) if owner else None
+    backlog = automation_calendar_days_to_fill(store, owner=owner_norm)
+    next_day: str | None = backlog[0] if backlog else None
+    next_row: dict[str, Any] | None = None
+    if next_day and owner_norm:
+        next_row = peek_next_round_robin_slot(store, day=next_day, owner=owner_norm)
+    elif next_day:
+        for o in OWNERS:
+            next_row = peek_next_round_robin_slot(store, day=next_day, owner=o)
+            if next_row:
+                owner_norm = o
+                break
+    return {
+        "automation_running": bool(_automation_running),
+        "automation_thread_alive": automation_daemon_alive(),
+        "production_paused": is_production_paused(),
+        "queue_busy": production_queue_busy(store, owner=None),
+        "backlog_days": backlog,
+        "next_slot_id": int(next_row["id"]) if next_row else None,
+        "next_slot_day": next_day,
+        "next_slot_number": int(next_row.get("slot") or 0) if next_row else None,
+        "next_slot_owner": owner_norm,
+    }
+
+
+def weekly_api_startup_recover(store) -> dict[str, Any]:
+    """Reconcile DB, ensure live daemon, wake if backlog exists."""
+    pipe = weekly_reconcile_pipeline(store)
+    repair_stale_automation_state()
+    start = ensure_weekly_automation_started()
+    backlog = automation_calendar_days_to_fill(store)
+    kicked = False
+    if backlog and start.get("started") or start.get("reason") == "automation_already_running":
+        request_daily_fill_kick(store)
+        kicked = True
+    return {
+        "reconcile": pipe,
+        "automation": start,
+        "backlog_days": backlog,
+        "kicked": kicked,
+    }
 
 
 def kickoff_daily_fill_async(
@@ -1349,7 +1486,7 @@ def maybe_run_daily_fill(store) -> dict[str, Any] | None:
         return {"day": date.today().isoformat(), "skipped": "all_complete", "backlog": []}
 
     if weekly_fill_running():
-        return {"day": today, "skipped": "fill_already_running"}
+        return {"day": date.today().isoformat(), "skipped": "fill_already_running"}
 
     return ensure_weekly_automation_started()
 
@@ -1525,23 +1662,29 @@ def day_batch_started_at(store, *, day: str, owner: str | None = None) -> str | 
     return str(started) if started else None
 
 
-def day_morning_status(store, *, day: str, owner: str | None = None) -> dict[str, Any]:
-    """Per-calendar-day batch outcome for 7am + UI checklist."""
+def day_morning_status(
+    store,
+    *,
+    day: str,
+    owner: str | None = None,
+    automation_thread_alive: bool | None = None,
+    production_paused: bool | None = None,
+) -> dict[str, Any]:
+    """Per-calendar-day automation status for Weekly UI (all-day backlog, not 7am-only)."""
+    from discovery.production_pause import is_production_paused
+
     if owner:
         owner = normalize_owner(owner)
+    paused = production_paused if production_paused is not None else is_production_paused()
+    daemon_alive = (
+        automation_thread_alive
+        if automation_thread_alive is not None
+        else automation_daemon_alive()
+    )
     stats = today_slot_stats(store, day=day, owner=owner)
     batch_started_at = day_batch_started_at(store, day=day, owner=owner)
     filled = sum(stats.values())
     expected = VIDEOS_PER_DAY if filled >= VIDEOS_PER_DAY else max(filled, VIDEOS_PER_DAY)
-    last = _read_last_run()
-    morning_submitted = bool(
-        last
-        and str(last.get("day") or "") == day
-        and int(last.get("count") or 0) > 0
-        and (owner is None or str(last.get("owner") or "") in ("", owner))
-    )
-    catchup = _read_catchup_state()
-    catchup_ran = bool(catchup.get("day") == day and catchup.get("ran"))
 
     done = int(stats.get("done") or 0)
     running = int(stats.get("running") or 0)
@@ -1549,19 +1692,39 @@ def day_morning_status(store, *, day: str, owner: str | None = None) -> dict[str
     queued = int(stats.get("queued") or 0)
     rerunning = int(stats.get("rerunning") or 0)
     waiting = queued + rerunning
+    remaining = max(0, expected - done)
 
     if filled == 0:
         outcome = "empty"
+        status_line = "No plan for this day"
     elif done >= min(expected, filled) and waiting == 0 and running == 0 and failed == 0:
         outcome = "finished"
-    elif running > 0 or rerunning > 0 or (done > 0 and waiting > 0):
+        status_line = f"Finished — {done}/{expected} videos ready"
+    elif paused and remaining > 0:
+        outcome = "paused"
+        status_line = f"Production paused — {remaining} video(s) remaining"
+    elif running > 0 or rerunning > 0:
         outcome = "in_progress"
-    elif failed > 0:
+        status_line = f"Automation running — {done}/{expected} finished"
+    elif failed > 0 and waiting > 0:
+        outcome = "automation_retrying"
+        status_line = f"Automation retrying — {done}/{expected} finished"
+    elif failed > 0 and waiting == 0:
         outcome = "failed"
-    elif past_morning_cutoff(day) and queued > 0:
-        outcome = "not_finished"
+        status_line = "Failed — check preflight or retry"
+    elif waiting > 0 and past_morning_cutoff(day):
+        outcome = "automation_queued" if not daemon_alive else "in_progress"
+        status_line = (
+            f"Automation queued — {remaining} video(s) remaining"
+            if not daemon_alive
+            else f"Automation running — {done}/{expected} finished"
+        )
+    elif waiting > 0:
+        outcome = "scheduled"
+        status_line = "Waiting for scheduled start"
     else:
-        outcome = "pending"
+        outcome = "in_progress"
+        status_line = f"Automation running — {done}/{expected} finished"
 
     return {
         "day": day,
@@ -1569,10 +1732,10 @@ def day_morning_status(store, *, day: str, owner: str | None = None) -> dict[str
         "filled": filled,
         "stats": stats,
         "outcome": outcome,
-        "morning_submitted": morning_submitted,
-        "catchup_ran": catchup_ran,
+        "status_line": status_line,
+        "remaining": remaining,
+        "automation_active": daemon_alive,
         "past_morning_cutoff": past_morning_cutoff(day),
-        "last_run": last,
         "batch_started_at": batch_started_at,
     }
 
