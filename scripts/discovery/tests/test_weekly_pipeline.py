@@ -558,7 +558,7 @@ class TestWeeklyRoundRobin(unittest.TestCase):
         self.assertTrue(sidecar.is_file())
         self.assertIn("xyz", sidecar.read_text(encoding="utf-8"))
 
-    def test_api_restart_resumes_round_robin_cursor(self) -> None:
+    def test_api_restart_resumes_backlog_pass_cursor(self) -> None:
         ids = self._save_three()
         day = weekly.slot_date("2026-10-12", "mon")
         calls: list[int] = []
@@ -575,7 +575,8 @@ class TestWeeklyRoundRobin(unittest.TestCase):
             )
             weekly.weekly_automation_tick(self.store, day=day, owner="chris")
         self.assertEqual(calls, [ids[1]])
-        self.assertEqual(weekly.get_round_robin_cursor(owner="chris", day=day), 2)
+        pass_state = weekly.get_backlog_pass_state(owner="chris")
+        self.assertIn(ids[1], pass_state["attempted_slot_ids"])
 
         calls.clear()
         with ExitStack() as stack:
@@ -585,6 +586,119 @@ class TestWeeklyRoundRobin(unittest.TestCase):
             )
             weekly.weekly_automation_tick(self.store, day=day, owner="chris")
         self.assertEqual(calls, [ids[2]])
+
+    def test_mon_fail_then_mon2_not_mon1_again(self) -> None:
+        """Explicit: Mon #1 fail → next tick must be Mon #2 (same pass)."""
+        ids = self._save_three()
+        day = weekly.slot_date("2026-10-12", "mon")
+        calls: list[int] = []
+
+        def submit(store, user_command, slot_id=None, **_kw):
+            sid = int(slot_id or 0)
+            calls.append(sid)
+            weekly.prepare_slot_for_retry(store, sid, error="fail")
+            return {"job_key": "cmd_x", "status": "failed"}
+
+        with ExitStack() as stack:
+            self._apply_preflight(stack)
+            stack.enter_context(
+                patch("discovery.weekly.weekly_submit_command", side_effect=submit)
+            )
+            weekly.weekly_automation_tick(self.store, day=day, owner="chris")
+            weekly.weekly_automation_tick(self.store, day=day, owner="chris")
+        self.assertEqual(calls[0], ids[1])
+        self.assertEqual(calls[1], ids[2])
+
+    def test_mon3_fail_next_is_tue1_then_pass_retries_mon1(self) -> None:
+        weekly.save_slots(
+            self.store,
+            week_start="2026-10-12",
+            owner="chris",
+            slots=[
+                {"day": "mon", "slot": 1, "speaker": "A", "visual_direction": "v1"},
+                {"day": "mon", "slot": 2, "speaker": "B", "visual_direction": "v2"},
+                {"day": "mon", "slot": 3, "speaker": "C", "visual_direction": "v3"},
+                {"day": "tue", "slot": 1, "speaker": "D", "visual_direction": "v4"},
+            ],
+        )
+        mon_ids = {
+            n: int(
+                self.store._conn.execute(
+                    "SELECT id FROM weekly_slots WHERE day = 'mon' AND slot = ?", (n,)
+                ).fetchone()["id"]
+            )
+            for n in (1, 2, 3)
+        }
+        tue1 = int(
+            self.store._conn.execute(
+                "SELECT id FROM weekly_slots WHERE day = 'tue' AND slot = 1"
+            ).fetchone()["id"]
+        )
+        mon = weekly.slot_date("2026-10-12", "mon")
+        tue = weekly.slot_date("2026-10-12", "tue")
+        calls: list[int] = []
+
+        def submit(store, user_command, slot_id=None, **_kw):
+            calls.append(int(slot_id or 0))
+            weekly.prepare_slot_for_retry(store, int(slot_id or 0), error="fail")
+            return {"job_key": "cmd_x", "status": "failed"}
+
+        backlog = [mon, tue]
+        with ExitStack() as stack:
+            self._apply_preflight(stack)
+            stack.enter_context(
+                patch("discovery.weekly.weekly_submit_command", side_effect=submit)
+            )
+            stack.enter_context(
+                patch("discovery.weekly.automation_calendar_days_to_fill", return_value=backlog)
+            )
+            for _ in range(5):
+                weekly.weekly_automation_tick(self.store, owner="chris")
+
+        self.assertEqual(calls[:3], [mon_ids[1], mon_ids[2], mon_ids[3]])
+        self.assertEqual(calls[3], tue1)
+        self.assertEqual(calls[4], mon_ids[1])
+
+    def test_timeout_failure_advances_to_next_slot_not_immediate_retry(self) -> None:
+        ids = self._save_three()
+        day = weekly.slot_date("2026-10-12", "mon")
+        calls: list[int] = []
+
+        def submit(store, user_command, slot_id=None, wait_timeout_sec=None, **_kw):
+            sid = int(slot_id or 0)
+            calls.append(sid)
+            weekly.prepare_slot_for_retry(store, sid, error="montage timeout")
+            return {"job_key": "cmd_timeout", "status": "failed"}
+
+        with ExitStack() as stack:
+            self._apply_preflight(stack)
+            stack.enter_context(
+                patch("discovery.weekly.weekly_submit_command", side_effect=submit)
+            )
+            weekly.weekly_automation_tick(self.store, day=day, owner="chris")
+            weekly.weekly_automation_tick(self.store, day=day, owner="chris")
+        self.assertEqual(calls, [ids[1], ids[2]])
+
+    def test_only_one_submit_when_queue_busy(self) -> None:
+        ids = self._save_three()
+        day = weekly.slot_date("2026-10-12", "mon")
+        submit_count = {"n": 0}
+
+        def submit(store, user_command, slot_id=None, **_kw):
+            submit_count["n"] += 1
+            weekly.mark_slot(store, int(slot_id or 0), status="running", job_key="cmd_busy")
+            return {"job_key": "cmd_busy", "status": "running"}
+
+        with ExitStack() as stack:
+            self._apply_preflight(stack)
+            stack.enter_context(
+                patch("discovery.weekly.weekly_submit_command", side_effect=submit)
+            )
+            r1 = weekly.weekly_automation_tick(self.store, day=day, owner="chris")
+            r2 = weekly.weekly_automation_tick(self.store, day=day, owner="chris")
+        self.assertEqual(r1.get("action"), "attempted")
+        self.assertEqual(r2.get("action"), "slot_running")
+        self.assertEqual(submit_count["n"], 1)
 
 
 class TestWeeklyDaemonLifecycle(unittest.TestCase):
@@ -662,9 +776,9 @@ class TestWeeklyDaemonLifecycle(unittest.TestCase):
             slots=[{"day": "wed", "slot": 1, "speaker": "J", "visual_direction": "v"}],
         )
         day = weekly.slot_date("2026-10-12", "wed")
-        before = weekly.get_round_robin_cursor(owner="chris", day=day)
+        before = weekly.get_backlog_pass_state(owner="chris")
         snap = weekly.automation_health_snapshot(self.store, owner="chris")
-        after = weekly.get_round_robin_cursor(owner="chris", day=day)
+        after = weekly.get_backlog_pass_state(owner="chris")
         self.assertEqual(before, after)
         self.assertIsNotNone(snap.get("next_slot_id"))
 

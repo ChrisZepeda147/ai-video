@@ -426,9 +426,11 @@ export function WeeklyWorkspace() {
   function slotUiStatus(_key: SlotKey, meta?: (typeof slotMeta)[SlotKey]) {
     const st = meta?.status ?? "queued";
     const jobKey = (meta?.job_key ?? "").trim();
+    const err = (meta?.error_message ?? "").trim();
     if (st === "done") return "done";
     if (st === "failed") return "failed";
     if (st === "running" && jobKey) return "rendering";
+    if ((st === "queued" || st === "rerunning") && !jobKey && err) return "retry_pending";
     if ((st === "queued" || st === "rerunning") && !jobKey) return "queued";
     if (st === "running") return "rendering";
     return st;
@@ -439,15 +441,18 @@ export function WeeklyWorkspace() {
     const label =
       s === "rendering"
         ? "Rendering"
-        : s === "queued"
-          ? "Queued"
-          : s === "done"
-            ? "Done"
-            : s === "failed"
-              ? "Failed"
-              : s;
+        : s === "retry_pending"
+          ? "Failed — retry pending"
+          : s === "queued"
+            ? "Queued"
+            : s === "done"
+              ? "Done"
+              : s === "failed"
+                ? "Failed"
+                : s;
     const colors: Record<string, string> = {
       queued: "bg-amber-900/50 text-amber-100",
+      retry_pending: "bg-red-900/40 text-red-100",
       rendering: "bg-amber-500/80 text-amber-950",
       done: "bg-emerald-600/80 text-emerald-50",
       failed: "bg-red-900/50 text-red-200",

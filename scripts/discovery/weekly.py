@@ -855,11 +855,18 @@ def _round_robin_state_path() -> Path:
     return project_root() / "data" / "logs" / "weekly-round-robin.json"
 
 
+_BACKLOG_PASS_PREFIX = "__pass:"
+
+
 def round_robin_key(owner: str, day_iso: str) -> str:
     return f"{normalize_owner(owner)}:{day_iso}"
 
 
-def _read_round_robin_state() -> dict[str, int]:
+def _backlog_pass_key(owner: str) -> str:
+    return f"{_BACKLOG_PASS_PREFIX}{normalize_owner(owner)}"
+
+
+def _load_scheduler_state() -> dict[str, Any]:
     import json as _json
 
     path = _round_robin_state_path()
@@ -869,10 +876,22 @@ def _read_round_robin_state() -> dict[str, int]:
         raw = _json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
         return {}
-    if not isinstance(raw, dict):
-        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _save_scheduler_state(state: dict[str, Any]) -> None:
+    import json as _json
+
+    path = _round_robin_state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_json.dumps(state, indent=2), encoding="utf-8")
+
+
+def _read_round_robin_state() -> dict[str, int]:
     out: dict[str, int] = {}
-    for key, val in raw.items():
+    for key, val in _load_scheduler_state().items():
+        if str(key).startswith(_BACKLOG_PASS_PREFIX):
+            continue
         try:
             out[str(key)] = int(val)
         except (TypeError, ValueError):
@@ -881,11 +900,48 @@ def _read_round_robin_state() -> dict[str, int]:
 
 
 def _write_round_robin_state(state: dict[str, int]) -> None:
-    import json as _json
+    full = _load_scheduler_state()
+    for key in list(full.keys()):
+        if not str(key).startswith(_BACKLOG_PASS_PREFIX):
+            del full[key]
+    for key, val in state.items():
+        full[str(key)] = int(val)
+    _save_scheduler_state(full)
 
-    path = _round_robin_state_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(_json.dumps(state, indent=2), encoding="utf-8")
+
+def get_backlog_pass_state(*, owner: str) -> dict[str, Any]:
+    """Current pass number and slot ids already attempted this pass (automation)."""
+    block = _load_scheduler_state().get(_backlog_pass_key(owner))
+    if not isinstance(block, dict):
+        return {"pass": 1, "attempted_slot_ids": []}
+    attempted: list[int] = []
+    for sid in block.get("attempted") or []:
+        try:
+            attempted.append(int(sid))
+        except (TypeError, ValueError):
+            continue
+    try:
+        pass_no = max(1, int(block.get("pass") or 1))
+    except (TypeError, ValueError):
+        pass_no = 1
+    return {"pass": pass_no, "attempted_slot_ids": attempted}
+
+
+def _write_backlog_pass_state(*, owner: str, pass_no: int, attempted_slot_ids: set[int]) -> None:
+    full = _load_scheduler_state()
+    full[_backlog_pass_key(owner)] = {
+        "pass": int(pass_no),
+        "attempted": sorted(int(x) for x in attempted_slot_ids),
+    }
+    _save_scheduler_state(full)
+
+
+def clear_backlog_pass_state(*, owner: str) -> None:
+    full = _load_scheduler_state()
+    key = _backlog_pass_key(owner)
+    if key in full:
+        del full[key]
+        _save_scheduler_state(full)
 
 
 def clear_round_robin_cursor(*, owner: str, day: str) -> None:
@@ -1006,6 +1062,124 @@ def peek_next_round_robin_slot(
         owner=owner,
         allowed_slot_ids=None,
         advance_cursor=False,
+        requeue_failed=False,
+    )
+
+
+def ordered_incomplete_backlog_slots(
+    store,
+    *,
+    owner: str,
+    calendar_days: list[str],
+) -> list[tuple[str, dict[str, Any]]]:
+    """Chronological backlog: oldest day first, slots 1→3; skips done only."""
+    owner_norm = normalize_owner(owner)
+    out: list[tuple[str, dict[str, Any]]] = []
+    for day_iso in calendar_days:
+        for slot_row in slots_for_calendar_day(store, day=day_iso, owner=owner_norm):
+            slot_id = int(slot_row["id"])
+            if _slot_status(store, slot_id) == "done":
+                continue
+            out.append((day_iso, slot_row))
+    return out
+
+
+def _backlog_pass_pick_slot(
+    store,
+    *,
+    owner: str,
+    calendar_days: list[str],
+    advance: bool,
+    requeue_failed: bool,
+    _pass_reset: bool = False,
+) -> tuple[str, dict[str, Any]] | None:
+    """One attempt per slot per pass across all calendar_days (serial montage)."""
+    owner_norm = normalize_owner(owner)
+    ordered = ordered_incomplete_backlog_slots(
+        store, owner=owner_norm, calendar_days=calendar_days
+    )
+    if not ordered:
+        return None
+
+    pass_info = get_backlog_pass_state(owner=owner_norm)
+    pass_no = int(pass_info["pass"])
+    attempted: set[int] = set(pass_info["attempted_slot_ids"])
+
+    if _pass_reset:
+        attempted = set()
+        pass_no += 1
+        if advance:
+            _write_backlog_pass_state(
+                owner=owner_norm, pass_no=pass_no, attempted_slot_ids=attempted
+            )
+            _append_fill_log(
+                f"backlog pass {pass_no} start owner={owner_norm} days={len(calendar_days)}"
+            )
+
+    for day_iso, row in ordered:
+        slot_id = int(row["id"])
+        status = _slot_status(store, slot_id)
+        if status == "running":
+            return None
+        if slot_id in attempted:
+            continue
+        if status == "failed":
+            if requeue_failed and advance:
+                requeue_slot(store, slot_id)
+                status = _slot_status(store, slot_id)
+            elif not advance:
+                return (day_iso, row)
+            else:
+                continue
+        if status not in ("queued", "rerunning"):
+            continue
+        if advance:
+            attempted.add(slot_id)
+            _write_backlog_pass_state(
+                owner=owner_norm, pass_no=pass_no, attempted_slot_ids=attempted
+            )
+        return (day_iso, row)
+
+    if ordered and not _pass_reset:
+        return _backlog_pass_pick_slot(
+            store,
+            owner=owner_norm,
+            calendar_days=calendar_days,
+            advance=advance,
+            requeue_failed=requeue_failed,
+            _pass_reset=True,
+        )
+    return None
+
+
+def pick_next_backlog_pass_slot(
+    store,
+    *,
+    owner: str,
+    calendar_days: list[str],
+) -> tuple[str, dict[str, Any]] | None:
+    """Next slot for one automation attempt (global pass across backlog days)."""
+    return _backlog_pass_pick_slot(
+        store,
+        owner=owner,
+        calendar_days=calendar_days,
+        advance=True,
+        requeue_failed=True,
+    )
+
+
+def peek_next_backlog_pass_slot(
+    store,
+    *,
+    owner: str,
+    calendar_days: list[str],
+) -> tuple[str, dict[str, Any]] | None:
+    """Read-only next slot for automation (no pass / requeue side effects)."""
+    return _backlog_pass_pick_slot(
+        store,
+        owner=owner,
+        calendar_days=calendar_days,
+        advance=False,
         requeue_failed=False,
     )
 
@@ -1242,17 +1416,21 @@ def weekly_automation_tick(
         if production_queue_busy(store, owner=None, heal=True):
             return {"day": calendar_days[0], "action": "queue_busy"}
 
-        owners = [owner_filter] if owner_filter else list(OWNERS)
         for day_iso in calendar_days:
             activate_plans_for_day(store, day=day_iso)
-            for owner_norm in owners:
-                if planned_slots_for_calendar_day(store, day=day_iso, owner=owner_norm) <= 0:
-                    continue
-                if day_fill_complete(store, day=day_iso, owner=owner_norm):
-                    continue
 
-                requeue_failed_slots_for_calendar_day(store, day=day_iso, owner=owner_norm)
+        owners = [owner_filter] if owner_filter else list(OWNERS)
+        for owner_norm in owners:
+            backlog_days = [
+                d
+                for d in calendar_days
+                if planned_slots_for_calendar_day(store, day=d, owner=owner_norm) > 0
+                and not day_fill_complete(store, day=d, owner=owner_norm)
+            ]
+            if not backlog_days:
+                continue
 
+            for day_iso in backlog_days:
                 for slot_row in slots_for_calendar_day(store, day=day_iso, owner=owner_norm):
                     if _slot_status(store, int(slot_row["id"])) == "running":
                         return {
@@ -1262,51 +1440,50 @@ def weekly_automation_tick(
                             "slot": int(slot_row.get("slot") or 0),
                         }
 
-                slot_row = pick_next_round_robin_slot(
-                    store, day=day_iso, owner=owner_norm
-                )
-                if not slot_row:
-                    if day_fill_complete(store, day=day_iso, owner=owner_norm):
-                        clear_round_robin_cursor(owner=owner_norm, day=day_iso)
-                        continue
-                    return {"day": day_iso, "action": "idle", "owner": owner_norm}
+            picked = pick_next_backlog_pass_slot(
+                store, owner=owner_norm, calendar_days=backlog_days
+            )
+            if not picked:
+                continue
 
-                slot_id = int(slot_row["id"])
-                slot_no = int(slot_row.get("slot") or 0)
-                command = slot_command_text(slot_row)
-                wait_sec = _fill_slot_wait_sec()
+            day_iso, slot_row = picked
+            slot_id = int(slot_row["id"])
+            slot_no = int(slot_row.get("slot") or 0)
+            command = slot_command_text(slot_row)
+            wait_sec = _fill_slot_wait_sec()
+            pass_info = get_backlog_pass_state(owner=owner_norm)
+            _append_fill_log(
+                f"automation submit {owner_norm} day={day_iso} slot={slot_no} id={slot_id} "
+                f"(backlog pass={pass_info['pass']} attempted={pass_info['attempted_slot_ids']})"
+            )
+            try:
+                weekly_submit_command(
+                    store,
+                    user_command=command,
+                    slot_id=slot_id,
+                    wait_montage=True,
+                    wait_timeout_sec=wait_sec,
+                )
+            except Exception as exc:  # noqa: BLE001
+                prepare_slot_for_retry(
+                    store,
+                    slot_id,
+                    error=str(exc)[:500],
+                )
                 _append_fill_log(
-                    f"automation submit {owner_norm} day={day_iso} slot={slot_no} id={slot_id} "
-                    f"(round-robin cursor→{get_round_robin_cursor(owner=owner_norm, day=day_iso)})"
+                    f"automation exception day={day_iso} slot={slot_no}: {str(exc)[:160]}"
                 )
-                try:
-                    weekly_submit_command(
-                        store,
-                        user_command=command,
-                        slot_id=slot_id,
-                        wait_montage=True,
-                        wait_timeout_sec=wait_sec,
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    prepare_slot_for_retry(
-                        store,
-                        slot_id,
-                        error=str(exc)[:500],
-                    )
-                    _append_fill_log(
-                        f"automation exception day={day_iso} slot={slot_no}: {str(exc)[:160]}"
-                    )
 
-                final = _slot_status(store, slot_id)
-                if day_fill_complete(store, day=day_iso, owner=owner_norm):
-                    clear_round_robin_cursor(owner=owner_norm, day=day_iso)
-                return {
-                    "day": day_iso,
-                    "action": "attempted",
-                    "owner": owner_norm,
-                    "slot": slot_no,
-                    "status": final,
-                }
+            final = _slot_status(store, slot_id)
+            if day_fill_complete(store, day=day_iso, owner=owner_norm):
+                clear_round_robin_cursor(owner=owner_norm, day=day_iso)
+            return {
+                "day": day_iso,
+                "action": "attempted",
+                "owner": owner_norm,
+                "slot": slot_no,
+                "status": final,
+            }
 
         if week_automation_complete(store, owner=owner_filter):
             return {"day": calendar_days[-1], "action": "week_complete"}
@@ -1443,22 +1620,31 @@ def automation_health_snapshot(store, *, owner: str | None = None) -> dict[str, 
 
     owner_norm = normalize_owner(owner) if owner else None
     backlog = automation_calendar_days_to_fill(store, owner=owner_norm)
-    next_day: str | None = backlog[0] if backlog else None
+    next_day: str | None = None
     next_row: dict[str, Any] | None = None
-    if next_day and owner_norm:
-        next_row = peek_next_round_robin_slot(store, day=next_day, owner=owner_norm)
-    elif next_day:
+    peek_days = backlog
+    if owner_norm and peek_days:
+        picked = peek_next_backlog_pass_slot(
+            store, owner=owner_norm, calendar_days=peek_days
+        )
+        if picked:
+            next_day, next_row = picked
+    elif peek_days:
         for o in OWNERS:
-            next_row = peek_next_round_robin_slot(store, day=next_day, owner=o)
-            if next_row:
+            picked = peek_next_backlog_pass_slot(store, owner=o, calendar_days=peek_days)
+            if picked:
+                next_day, next_row = picked
                 owner_norm = o
                 break
+    pass_info = get_backlog_pass_state(owner=owner_norm) if owner_norm else None
     return {
         "automation_running": bool(_automation_running),
         "automation_thread_alive": automation_daemon_alive(),
         "production_paused": is_production_paused(),
         "queue_busy": production_queue_busy(store, owner=None),
         "backlog_days": backlog,
+        "backlog_pass": pass_info["pass"] if pass_info else None,
+        "backlog_attempted_slot_ids": pass_info["attempted_slot_ids"] if pass_info else [],
         "next_slot_id": int(next_row["id"]) if next_row else None,
         "next_slot_day": next_day,
         "next_slot_number": int(next_row.get("slot") or 0) if next_row else None,
