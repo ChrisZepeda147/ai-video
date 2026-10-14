@@ -31,6 +31,24 @@ Default target length: 60–90 seconds unless extra instructions override.
 """
 
 
+def _isolate_weekly_automation() -> None:
+    """In-process only: stop daemon thread and reset submit lock (tests must not see submit_busy)."""
+    import time
+
+    weekly.stop_weekly_automation()
+    thread = weekly._automation_thread  # noqa: SLF001
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=5.0)
+    weekly._automation_running = False  # noqa: SLF001
+    weekly._automation_thread = None  # noqa: SLF001
+    weekly._automation_lock = None  # noqa: SLF001
+    weekly._automation_wakeup = None  # noqa: SLF001
+    weekly._automation_submit_lock = None  # noqa: SLF001
+    weekly.repair_stale_automation_state()
+    _, wakeup, _ = weekly._automation_threading()
+    wakeup.clear()
+
+
 class TestWeeklyPipeline(unittest.TestCase):
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
@@ -366,6 +384,8 @@ class TestWeeklyPipeline(unittest.TestCase):
 
 class TestWeeklyRoundRobin(unittest.TestCase):
     def setUp(self) -> None:
+        _isolate_weekly_automation()
+        self.addCleanup(_isolate_weekly_automation)
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.store = DiscoveryStore(Path(tmp.name) / "catalog.sqlite")
@@ -376,6 +396,8 @@ class TestWeeklyRoundRobin(unittest.TestCase):
         self.rr_patch = patch("discovery.weekly._round_robin_state_path", return_value=self.rr_path)
         self.rr_patch.start()
         self.addCleanup(self.rr_patch.stop)
+        if self.rr_path.is_file():
+            self.rr_path.unlink()
 
     def _save_three(self, week_start: str = "2026-10-12") -> dict[int, int]:
         weekly.save_slots(
@@ -409,6 +431,15 @@ class TestWeeklyRoundRobin(unittest.TestCase):
         )
         stack.enter_context(patch("toolchain_env.check_toolchain", return_value=toolchain))
         stack.enter_context(patch("discovery.weekly.production_queue_busy", return_value=False))
+        stack.enter_context(
+            patch(
+                "discovery.weekly.ensure_weekly_automation_started",
+                return_value={"started": False, "reason": "test_isolated"},
+            )
+        )
+        stack.enter_context(
+            patch("discovery.weekly.request_daily_fill_kick", return_value={"started": False})
+        )
 
     def test_failed_v1_waits_for_v2_v3_before_retry(self) -> None:
         ids = self._save_three()
@@ -703,19 +734,14 @@ class TestWeeklyRoundRobin(unittest.TestCase):
 
 class TestWeeklyDaemonLifecycle(unittest.TestCase):
     def setUp(self) -> None:
+        _isolate_weekly_automation()
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.store = DiscoveryStore(Path(tmp.name) / "catalog.sqlite")
         self.addCleanup(self.store.close)
-        weekly.stop_weekly_automation()
-        weekly.repair_stale_automation_state()
 
     def tearDown(self) -> None:
-        weekly.stop_weekly_automation()
-        import time
-
-        time.sleep(0.05)
-        weekly.repair_stale_automation_state()
+        _isolate_weekly_automation()
 
     def test_stale_flag_starts_new_daemon(self) -> None:
         weekly._automation_running = True  # noqa: SLF001
