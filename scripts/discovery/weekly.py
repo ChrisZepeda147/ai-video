@@ -1633,9 +1633,14 @@ def automation_daemon_alive() -> bool:
     return thread is not None and thread.is_alive()
 
 
-def _clear_automation_daemon_state(*, reason: str) -> None:
+def _clear_automation_daemon_state(
+    *,
+    reason: str,
+    clear_running_flag: bool = False,
+) -> None:
     global _automation_running, _automation_thread  # noqa: PLW0603
-    _automation_running = False
+    if clear_running_flag:
+        _automation_running = False
     _automation_thread = None
     _append_fill_log(f"WEEKLY_AUTOMATION_DAEMON_STOP reason={reason}")
 
@@ -1645,7 +1650,10 @@ def repair_stale_automation_state() -> bool:
     global _automation_running, _automation_thread
     if _automation_running and not automation_daemon_alive():
         _append_fill_log("WEEKLY_AUTOMATION_STALE_STATE_RECOVERED")
-        _clear_automation_daemon_state(reason="stale_flag_without_live_thread")
+        _clear_automation_daemon_state(
+            reason="stale_flag_without_live_thread",
+            clear_running_flag=True,
+        )
         return True
     if not _automation_running and _automation_thread is not None and not automation_daemon_alive():
         _automation_thread = None
@@ -1703,15 +1711,22 @@ def _weekly_automation_daemon() -> None:
             wakeup.clear()
     finally:
         if _automation_thread is me:
-            _clear_automation_daemon_state(reason=stop_reason)
+            _automation_thread = None
+            _append_fill_log(f"WEEKLY_AUTOMATION_DAEMON_STOP reason={stop_reason}")
+        if stop_reason == "production_pause":
+            _automation_running = False
 
 
 def stop_weekly_automation() -> None:
     """Stop in-process automation loop (API / worker thread)."""
-    global _automation_running
+    global _automation_running, _automation_thread
     _, wakeup, _ = _automation_threading()
     _automation_running = False
     wakeup.set()
+    thread = _automation_thread
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=3.0)
+    _automation_thread = None
 
 
 def ensure_weekly_automation_started() -> dict[str, Any]:

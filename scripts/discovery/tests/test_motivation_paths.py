@@ -61,6 +61,21 @@ class MotivationPathsTests(unittest.TestCase):
         (job / "job.json").write_text("{}", encoding="utf-8")
         self.assertEqual(resolve_job_dir(slug, day_root), job)
 
+    def test_resolve_prefers_rich_workspace_over_empty_retry_folder(self) -> None:
+        slug = "weekly-retry-slug"
+        rich = job_dir_for(slug, self.jobs_root, job_date="2026-10-12")
+        rich.mkdir(parents=True)
+        (rich / "audio").mkdir()
+        (rich / "audio" / "speech.mp3").write_bytes(b"mp3")
+        (rich / "speech_acquire.json").write_text("{}", encoding="utf-8")
+
+        empty_retry = job_dir_for(slug, self.jobs_root, job_date="2026-10-14")
+        empty_retry.mkdir(parents=True)
+        (empty_retry / "audio").mkdir()
+
+        resolved = resolve_job_dir(slug, self.jobs_root)
+        self.assertEqual(resolved, rich)
+
     def test_iter_includes_legacy_and_dated(self) -> None:
         legacy = self.jobs_root / "legacy-job"
         legacy.mkdir()

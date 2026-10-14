@@ -56,7 +56,17 @@ def run_broll_source_subprocess(
     }
     req_path.write_text(json.dumps(payload), encoding="utf-8")
 
-    cmd = [sys.executable, str(_WORKER), "--request", str(req_path)]
+    python_exe = sys.executable
+    try:
+        from discovery.config import load_env, resolve_worker_python
+
+        load_env()
+        resolved = resolve_worker_python()
+        if resolved:
+            python_exe = resolved
+    except Exception:
+        pass
+    cmd = [python_exe, str(_WORKER), "--request", str(req_path)]
     proc = subprocess.Popen(
         cmd,
         cwd=str(_SCRIPTS_DIR),

@@ -4029,8 +4029,19 @@ def main() -> int:
     if args.job_date and not is_date_folder(args.job_date):
         print("--job-date must be YYYY-MM-DD", file=sys.stderr)
         return 2
-    job_date = args.job_date or default_job_date()
-    job_dir = job_dir_for(args.slug, jobs_root, job_date=job_date)
+    existing_job = resolve_job_dir(args.slug, jobs_root, job_date=args.job_date)
+    if existing_job:
+        job_dir = existing_job
+        parent_name = existing_job.parent.name
+        job_date = (
+            parent_name
+            if is_date_folder(parent_name)
+            else (args.job_date or default_job_date())
+        )
+        print(f"Reusing job workspace: {job_dir.as_posix()}")
+    else:
+        job_date = args.job_date or default_job_date()
+        job_dir = job_dir_for(args.slug, jobs_root, job_date=job_date)
     audio_dir = job_dir / "audio"
     clips_dir = job_dir / "clips"
     output = motivation_output_path(job_dir, args.slug)

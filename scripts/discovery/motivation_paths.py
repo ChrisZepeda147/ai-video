@@ -66,6 +66,27 @@ def _job_dir_has_markers(path: Path) -> bool:
     )
 
 
+def job_dir_asset_rank(path: Path) -> tuple[int, int, int, int, int, float]:
+    """Higher = richer persistent workspace (speech/clips beat empty retry folders)."""
+    speech = 1 if (path / "audio" / "speech.mp3").is_file() else 0
+    clips_dir = path / "clips"
+    clips = len(list(clips_dir.glob("*_part*.mp4"))) if clips_dir.is_dir() else 0
+    broll_state = 1 if (path / "broll_acquire.json").is_file() else 0
+    speech_state = 1 if (path / "speech_acquire.json").is_file() else 0
+    job_json = 1 if (path / "job.json").is_file() else 0
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    return (speech, clips, broll_state, speech_state, job_json, mtime)
+
+
+def pick_best_job_dir(candidates: list[Path]) -> Path | None:
+    if not candidates:
+        return None
+    return max(candidates, key=job_dir_asset_rank)
+
+
 def resolve_job_dir(slug: str, jobs_root: Path, *, job_date: str | None = None) -> Path | None:
     """Find an existing job folder (dated layout first, then legacy flat)."""
     if not jobs_root.is_dir():
@@ -108,13 +129,7 @@ def resolve_job_dir(slug: str, jobs_root: Path, *, job_date: str | None = None) 
                     return candidate
         if len(dated_matches) == 1:
             return dated_matches[0]
-        preferred: list[Path] = []
-        for candidate in dated_matches:
-            stored = infer_job_folder_date(candidate)
-            if stored == candidate.parent.name:
-                preferred.append(candidate)
-        pool = preferred or dated_matches
-        return max(pool, key=lambda p: p.stat().st_mtime)
+        return pick_best_job_dir(dated_matches)
     if legacy.is_dir() and _job_dir_has_markers(legacy):
         return legacy
     return None

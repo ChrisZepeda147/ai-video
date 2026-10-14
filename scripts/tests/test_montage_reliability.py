@@ -19,6 +19,27 @@ from montage_telemetry import MontageFailure, resolve_actionable_error
 
 
 class MontageReliabilityTests(unittest.TestCase):
+    def test_search_keeps_unknown_fps_for_download_probe(self) -> None:
+        from youtube_popular_downloader import VideoCandidate, pick_usable_fps_candidates
+
+        candidates = [
+            VideoCandidate(
+                video_id="abc123",
+                title="Dolomites sunrise cinematic",
+                url="https://www.youtube.com/watch?v=abc123",
+                channel="scenic",
+                view_count=100_000,
+                duration_seconds=600.0,
+                published_at="2026-01-01",
+                source="search",
+                fps=None,
+            )
+        ]
+        with patch("youtube_popular_downloader.probe_listed_fps", return_value=None):
+            kept = pick_usable_fps_candidates(candidates, limit=5, probe=True)
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(kept[0].video_id, "abc123")
+
     def test_driven_pacing_does_not_require_beat_count_files(self) -> None:
         for duration in (60.0, 76.0, 90.0):
             needed = montage.unique_clips_required(

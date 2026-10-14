@@ -252,9 +252,6 @@ def pick_usable_fps_candidates(
         if fps is not None and not is_usable_fps(fps):
             skipped += 1
             continue
-        if fps is None and not title_suggests_usable_fps(video.title):
-            skipped += 1
-            continue
         kept.append(video)
         if len(kept) >= limit:
             break
