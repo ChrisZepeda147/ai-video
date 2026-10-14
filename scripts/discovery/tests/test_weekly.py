@@ -186,7 +186,7 @@ class TestWeekly(unittest.TestCase):
         self.store._conn.commit()
         from unittest.mock import patch
 
-        with patch("discovery.config.resolve_python_exe", return_value="C:/Python/python.exe"), patch(
+        with patch("discovery.config.resolve_worker_python", return_value="C:/Python/python.exe"), patch(
             "toolchain_env.check_toolchain", return_value=toolchain
         ):
             result = weekly.run_weekly_due_batch(
@@ -253,7 +253,7 @@ class TestWeekly(unittest.TestCase):
 
         from unittest.mock import patch
 
-        with patch("discovery.config.resolve_python_exe", return_value="C:/Python/python.exe"), patch(
+        with patch("discovery.config.resolve_worker_python", return_value="C:/Python/python.exe"), patch(
             "toolchain_env.check_toolchain", return_value=toolchain
         ):
             result = weekly.run_weekly_due_batch(

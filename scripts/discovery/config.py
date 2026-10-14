@@ -59,29 +59,91 @@ def _python_can_import_api_deps(exe: str) -> bool:
         return False
 
 
-def resolve_python_exe() -> str:
-    """Python for subprocess workers; prefers non-Store installs, probes PATH when needed."""
-    import shutil
-    import sys
+def is_windows_store_python_alias(path: str) -> bool:
+    """True for WindowsApps / PythonSoftwareFoundation shim paths (not a explicit install path)."""
+    if not path:
+        return False
+    lower = path.replace("/", "\\").lower()
+    if "pythonsoftwarefoundation" in lower and "windowsapps" in lower:
+        return True
+    parts = [p.lower() for p in Path(path).parts]
+    return "windowsapps" in parts and any("pythonsoftwarefoundation" in p for p in parts)
 
-    load_env()
-    tried: list[str] = []
-    env_py = os.environ.get("AI_VIDEO_PYTHON", "").strip()
-    if env_py:
-        tried.append(env_py)
+
+def _env_file_ai_video_python() -> str:
+    """Value of AI_VIDEO_PYTHON from scripts/.env only (not process env)."""
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if not env_path.is_file():
+        return ""
+    for raw in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key.strip() == "AI_VIDEO_PYTHON":
+            return value.strip().strip('"').strip("'")
+    return ""
+
+
+def _worker_python_candidates() -> list[str]:
+    root = project_root()
+    local = Path(os.environ.get("LOCALAPPDATA", ""))
+    candidates: list[str] = []
+    configured = _env_file_ai_video_python()
+    if configured:
+        candidates.append(configured)
+    for venv_name in (".venv", "venv", "env"):
+        candidates.append(str(root / venv_name / "Scripts" / "python.exe"))
     for rel in (
         "Python/bin/python.exe",
         "Programs/Python/Python313/python.exe",
         "Programs/Python/Python312/python.exe",
         "Programs/Python/Python311/python.exe",
     ):
-        tried.append(str(Path(os.environ.get("LOCALAPPDATA", "")) / rel.replace("/", os.sep)))
-    for name in ("python", "python3"):
-        w = shutil.which(name)
-        if w:
-            tried.append(w)
+        candidates.append(str(local / rel.replace("/", os.sep)))
+    for rel in (
+        "Python313/python.exe",
+        "Python312/python.exe",
+        "Python311/python.exe",
+    ):
+        candidates.append(str(Path(os.environ.get("ProgramFiles", "")) / rel))
+    return candidates
+
+
+def _python_can_run_weekly_worker(exe: str) -> bool:
+    """Same imports run_direct_job needs before montage work starts."""
+    import subprocess
+
+    root = project_root()
+    scripts = root / "scripts"
+    snippet = (
+        "import sys; "
+        f"sys.path.insert(0, {str(scripts)!r}); "
+        "from discovery.config import load_env, default_db_path; "
+        "load_env(); "
+        "from discovery.store import DiscoveryStore; "
+        "DiscoveryStore(default_db_path()).close(); "
+        "print('worker_ok')"
+    )
+    try:
+        r = subprocess.run(
+            [exe, "-c", snippet],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=45,
+            check=False,
+        )
+        return r.returncode == 0 and "worker_ok" in (r.stdout or "")
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def resolve_worker_python() -> str:
+    """Interpreter for detached Weekly workers (run_direct_job / build_motivation_job)."""
+    load_env()
     seen: set[str] = set()
-    for raw in tried:
+    for raw in _worker_python_candidates():
         path = Path(raw)
         if not path.is_file():
             continue
@@ -89,12 +151,40 @@ def resolve_python_exe() -> str:
         if key in seen:
             continue
         seen.add(key)
-        if "WindowsApps" not in path.parts:
+        if is_windows_store_python_alias(str(path)) and not _env_file_ai_video_python():
+            continue
+        if _python_can_run_weekly_worker(str(path)):
             return str(path)
-        if _python_can_import_api_deps(str(path)):
-            return str(path)
+    return ""
+
+
+def resolve_worker_python_issue() -> str:
+    configured = _env_file_ai_video_python()
+    if configured and not Path(configured).is_file():
+        return f"AI_VIDEO_PYTHON is set but not found: {configured}"
+    if configured and not _python_can_run_weekly_worker(configured):
+        return (
+            "AI_VIDEO_PYTHON is set but cannot run Weekly worker imports "
+            f"(check path: {configured})"
+        )
+    if not configured:
+        return (
+            "AI_VIDEO_PYTHON is not configured to a usable project Python interpreter. "
+            "Set AI_VIDEO_PYTHON in scripts/.env to your venv or "
+            "LocalAppData\\Programs\\Python\\Python3xx\\python.exe"
+        )
+    return "No usable Weekly worker Python interpreter found"
+
+
+def resolve_python_exe() -> str:
+    """Alias: Weekly production and subprocess workers use resolve_worker_python()."""
+    worker = resolve_worker_python()
+    if worker:
+        return worker
+    import sys
+
     exe = Path(sys.executable)
-    if exe.is_file() and "WindowsApps" not in exe.parts:
+    if exe.is_file() and not is_windows_store_python_alias(str(exe)):
         return str(exe)
     return str(exe)
 

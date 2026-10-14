@@ -40,7 +40,7 @@ class TestWeeklyPipeline(unittest.TestCase):
 
     def test_preflight_ok_without_cursor_agent(self) -> None:
         toolchain = {"ok": True, "ffmpeg": True, "ffprobe": True, "yt_dlp": True}
-        with patch("discovery.config.resolve_python_exe", return_value="C:/Python/python.exe"), patch(
+        with patch("discovery.config.resolve_worker_python", return_value="C:/Python/python.exe"), patch(
             "discovery.cursor_bridge.agent_available", return_value=False
         ), patch("toolchain_env.check_toolchain", return_value=toolchain):
             result = weekly.weekly_preflight()
@@ -194,7 +194,7 @@ class TestWeeklyPipeline(unittest.TestCase):
         slots = weekly.due_slots(self.store, day="2026-09-28", owner="chris")
         slot1 = slots[0]
 
-        with patch("discovery.config.resolve_python_exe", return_value="C:/Python/python.exe"), patch(
+        with patch("discovery.config.resolve_worker_python", return_value="C:/Python/python.exe"), patch(
             "toolchain_env.check_toolchain", return_value=toolchain
         ):
             weekly.weekly_submit_command(
@@ -263,7 +263,7 @@ class TestWeeklyPipeline(unittest.TestCase):
                 {"day": "mon", "slot": 3, "speaker": "C", "visual_direction": "v3"},
             ],
         )
-        with patch("discovery.config.resolve_python_exe", return_value="C:/Python/python.exe"), patch(
+        with patch("discovery.config.resolve_worker_python", return_value="C:/Python/python.exe"), patch(
             "toolchain_env.check_toolchain", return_value=toolchain
         ), patch("discovery.weekly._slot_retry_sleep_sec", return_value=0):
             result = weekly.run_weekly_due_batch(
@@ -328,7 +328,7 @@ class TestWeeklyPipeline(unittest.TestCase):
                 {"day": "mon", "slot": 3, "speaker": "C", "visual_direction": "v3"},
             ],
         )
-        with patch("discovery.config.resolve_python_exe", return_value="C:/Python/python.exe"), patch(
+        with patch("discovery.config.resolve_worker_python", return_value="C:/Python/python.exe"), patch(
             "toolchain_env.check_toolchain", return_value=toolchain
         ), patch("discovery.weekly.weekly_submit_command", side_effect=submit):
             result = weekly.run_weekly_fill_day(
@@ -405,7 +405,7 @@ class TestWeeklyRoundRobin(unittest.TestCase):
     def _apply_preflight(self, stack: ExitStack) -> None:
         toolchain = {"ok": True}
         stack.enter_context(
-            patch("discovery.config.resolve_python_exe", return_value="C:/Python/python.exe")
+            patch("discovery.config.resolve_worker_python", return_value="C:/Python/python.exe")
         )
         stack.enter_context(patch("toolchain_env.check_toolchain", return_value=toolchain))
         stack.enter_context(patch("discovery.weekly.production_queue_busy", return_value=False))
@@ -607,7 +607,7 @@ class TestWeeklyDaemonLifecycle(unittest.TestCase):
         weekly._automation_running = True  # noqa: SLF001
         weekly._automation_thread = None  # noqa: SLF001
         toolchain = {"ok": True}
-        with patch("discovery.config.resolve_python_exe", return_value="C:/Python/python.exe"), patch(
+        with patch("discovery.config.resolve_worker_python", return_value="C:/Python/python.exe"), patch(
             "toolchain_env.check_toolchain", return_value=toolchain
         ), patch("discovery.production_pause.is_production_paused", return_value=False):
             out = weekly.ensure_weekly_automation_started()
@@ -617,7 +617,7 @@ class TestWeeklyDaemonLifecycle(unittest.TestCase):
 
     def test_live_daemon_not_duplicated(self) -> None:
         toolchain = {"ok": True}
-        with patch("discovery.config.resolve_python_exe", return_value="C:/Python/python.exe"), patch(
+        with patch("discovery.config.resolve_worker_python", return_value="C:/Python/python.exe"), patch(
             "toolchain_env.check_toolchain", return_value=toolchain
         ), patch("discovery.production_pause.is_production_paused", return_value=False):
             first = weekly.ensure_weekly_automation_started()
@@ -631,7 +631,7 @@ class TestWeeklyDaemonLifecycle(unittest.TestCase):
         import time
 
         toolchain = {"ok": True}
-        with patch("discovery.config.resolve_python_exe", return_value="C:/Python/python.exe"), patch(
+        with patch("discovery.config.resolve_worker_python", return_value="C:/Python/python.exe"), patch(
             "toolchain_env.check_toolchain", return_value=toolchain
         ), patch("discovery.production_pause.is_production_paused", return_value=True):
             weekly.ensure_weekly_automation_started()

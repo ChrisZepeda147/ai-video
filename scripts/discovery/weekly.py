@@ -710,7 +710,12 @@ def production_queue_busy(store, *, owner: str | None = None, heal: bool = False
 
 
 def weekly_preflight() -> dict[str, Any]:
-    from discovery.config import cursor_api_key, project_root, resolve_python_exe
+    from discovery.config import (
+        cursor_api_key,
+        project_root,
+        resolve_worker_python,
+        resolve_worker_python_issue,
+    )
     from discovery.cursor_bridge import agent_available
 
     try:
@@ -724,8 +729,9 @@ def weekly_preflight() -> dict[str, Any]:
             return "toolchain_env missing"
 
     issues: list[str] = []
-    if not resolve_python_exe():
-        issues.append("Python not found — set AI_VIDEO_PYTHON in scripts/.env")
+    worker_python = resolve_worker_python()
+    if not worker_python:
+        issues.append(resolve_worker_python_issue())
     worker = project_root() / "scripts" / "run_direct_job.py"
     if not worker.is_file():
         issues.append(f"Missing detached montage worker: {worker}")
@@ -735,6 +741,7 @@ def weekly_preflight() -> dict[str, Any]:
     ok = len(issues) == 0
     return {
         "ok": ok,
+        "worker_python": worker_python or None,
         "agent_available": agent_available(),
         "api_key_set": bool(cursor_api_key()),
         "issues": issues,

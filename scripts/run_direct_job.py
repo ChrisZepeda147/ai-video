@@ -29,12 +29,12 @@ def _start_weekly_outer_watchdog(job_key: str) -> threading.Timer | None:
     store = DiscoveryStore(default_db_path())
     try:
         weekly = store._conn.execute(
-            "SELECT slug FROM weekly_slots WHERE job_key = ? LIMIT 1",
+            "SELECT id, slot, day FROM weekly_slots WHERE job_key = ? LIMIT 1",
             (job_key,),
         ).fetchone()
         if not weekly:
             return None
-        slug = str(weekly["slug"] or "")
+        slug = f"weekly-slot-{weekly['id']}"
     finally:
         store.close()
 

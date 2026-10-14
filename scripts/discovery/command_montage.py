@@ -16,7 +16,8 @@ from discovery.config import (
     default_db_path,
     montage_job_timeout_sec,
     project_root,
-    resolve_python_exe,
+    resolve_worker_python,
+    resolve_worker_python_issue,
     weekly_montage_job_timeout_sec,
 )
 from discovery.motivation_build import _build_command
@@ -645,16 +646,24 @@ def run_direct_montage_command(
 def spawn_direct_montage_job(store, job_key: str) -> None:
     """Start montage in a detached process so API reload does not kill the render."""
     root = project_root()
-    python = resolve_python_exe()
+    python = resolve_worker_python()
+    if not python:
+        raise RuntimeError(resolve_worker_python_issue())
     script = root / "scripts" / "run_direct_job.py"
     if not script.is_file():
         raise FileNotFoundError(f"Missing {script}")
 
+    print(f'WEEKLY_WORKER_PYTHON path="{python}" job_key={job_key}', flush=True)
+    try:
+        from discovery.weekly import _append_fill_log
+
+        _append_fill_log(f'WEEKLY_WORKER_PYTHON path="{python}" job_key={job_key}')
+    except Exception:
+        pass
+
     env = dict(subprocess_env() if subprocess_env else os.environ)
     env["AI_VIDEO_PYTHON"] = python
-    exe = Path(python)
-    pythonw = exe.with_name("pythonw.exe")
-    launch_python = str(pythonw) if pythonw.is_file() else python
+    launch_python = python
     flags = CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
     store._conn.execute(
