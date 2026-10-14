@@ -1035,6 +1035,11 @@ def weekly_automation_tick(
     owner: str | None = None,
 ) -> dict[str, Any]:
     """One step toward 3/3: oldest incomplete calendar day first, then slot 1→3."""
+    from discovery.production_pause import is_production_paused
+
+    if is_production_paused():
+        return {"day": date.today().isoformat(), "action": "production_paused"}
+
     owner_filter = normalize_owner(owner) if owner else None
     weekly_reconcile_pipeline(store)
 
@@ -1137,6 +1142,11 @@ def _weekly_automation_daemon() -> None:
     _append_fill_log("weekly automation daemon started")
     tick = _automation_tick_sec()
     while _automation_running:
+        from discovery.production_pause import is_production_paused
+
+        if is_production_paused():
+            _append_fill_log("automation paused (production_pause.json)")
+            break
         _, wakeup, _ = _automation_threading()
         store = DiscoveryStore(default_db_path())
         instant_retry = False
@@ -1155,10 +1165,23 @@ def _weekly_automation_daemon() -> None:
         wakeup.clear()
 
 
+def stop_weekly_automation() -> None:
+    """Stop in-process automation loop (API / worker thread)."""
+    global _automation_running
+    _, wakeup, _ = _automation_threading()
+    _automation_running = False
+    wakeup.set()
+
+
 def ensure_weekly_automation_started() -> dict[str, Any]:
     """Start the always-on tick loop (one montage at a time, instant retry on fail)."""
     global _automation_running
     import threading
+
+    from discovery.production_pause import is_production_paused
+
+    if is_production_paused():
+        return {"started": False, "reason": "production_paused", "fill_day": True}
 
     lock, wakeup, _ = _automation_threading()
     with lock:
