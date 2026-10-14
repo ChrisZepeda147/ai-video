@@ -1888,6 +1888,9 @@ def _wait_for_command_job(store, job_key: str, *, deadline: float) -> None:
     from discovery.command_jobs import get_command_job
 
     while _time.monotonic() < deadline:
+        from discovery.command_jobs import reconcile_running_montage_liveness
+
+        reconcile_running_montage_liveness(store)
         job = get_command_job(store, job_key)
         if job and str(job.get("status") or "") in {"completed", "failed", "cancelled"}:
             return
@@ -1913,6 +1916,9 @@ def _wait_for_production_idle(store, *, deadline: float) -> bool:
     import time as _time
 
     while _time.monotonic() < deadline:
+        from discovery.command_jobs import reconcile_running_montage_liveness
+
+        reconcile_running_montage_liveness(store)
         reconcile_zombie_weekly_slots(store)
         reconcile_slots(store)
         if count_running_command_jobs(store) == 0 and count_running_weekly_slots(store) == 0:

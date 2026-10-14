@@ -10,10 +10,16 @@ from contextlib import ExitStack
 from unittest.mock import patch
 
 from discovery import weekly
-from discovery.command_jobs import create_command_job, now_iso, reconcile_stale_command_jobs
+from discovery.command_jobs import (
+    create_command_job,
+    now_iso,
+    reconcile_running_montage_liveness,
+    reconcile_stale_command_jobs,
+)
 from discovery.command_montage import parse_montage_command
 from discovery.motivation_command_brief import compose_from_slot
 from discovery.store import DiscoveryStore
+from discovery.weekly import production_queue_busy
 
 MONTAGE_CMD = """
 Make a new 9:16 motivational Short using the luxury-clips-montage workflow.
@@ -77,6 +83,46 @@ class TestWeeklyPipeline(unittest.TestCase):
             "SELECT status FROM cursor_command_jobs WHERE job_key = ?", (job_key,)
         ).fetchone()
         self.assertEqual(st["status"], "running")
+
+    @patch("discovery.command_jobs._windows_process_alive", return_value=False)
+    def test_liveness_fails_dead_worker_pid_immediately(self, _alive) -> None:
+        weekly.save_slots(
+            self.store,
+            week_start="2026-09-28",
+            owner="chris",
+            slots=[
+                {"day": "mon", "slot": 1, "speaker": "David Goggins", "visual_direction": "ocean"},
+            ],
+        )
+        record = create_command_job(self.store, user_command=MONTAGE_CMD)
+        job_key = str(record["job_key"])
+        slot_id = int(
+            self.store._conn.execute("SELECT id FROM weekly_slots WHERE slot = 1").fetchone()["id"]
+        )
+        self.store._conn.execute(
+            "UPDATE weekly_slots SET job_key = ?, status = 'running' WHERE id = ?",
+            (job_key, slot_id),
+        )
+        self.store._conn.execute(
+            """
+            UPDATE cursor_command_jobs
+            SET status = 'running', started_at = ?, worker_pid = 99999
+            WHERE job_key = ?
+            """,
+            (now_iso(), job_key),
+        )
+        self.store._conn.commit()
+        n = reconcile_running_montage_liveness(self.store)
+        self.assertEqual(n, 1)
+        job = self.store._conn.execute(
+            "SELECT status FROM cursor_command_jobs WHERE job_key = ?", (job_key,)
+        ).fetchone()
+        self.assertEqual(job["status"], "failed")
+        slot = self.store._conn.execute(
+            "SELECT status FROM weekly_slots WHERE id = ?", (slot_id,)
+        ).fetchone()
+        self.assertEqual(slot["status"], "queued")
+        self.assertFalse(production_queue_busy(self.store, heal=False))
 
     def test_weekly_montage_stale_fails_near_timeout_not_90m(self) -> None:
         weekly.save_slots(
