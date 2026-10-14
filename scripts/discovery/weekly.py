@@ -1071,6 +1071,7 @@ def ordered_incomplete_backlog_slots(
     *,
     owner: str,
     calendar_days: list[str],
+    allowed_slot_ids: set[int] | None = None,
 ) -> list[tuple[str, dict[str, Any]]]:
     """Chronological backlog: oldest day first, slots 1→3; skips done only."""
     owner_norm = normalize_owner(owner)
@@ -1078,10 +1079,28 @@ def ordered_incomplete_backlog_slots(
     for day_iso in calendar_days:
         for slot_row in slots_for_calendar_day(store, day=day_iso, owner=owner_norm):
             slot_id = int(slot_row["id"])
+            if allowed_slot_ids is not None and slot_id not in allowed_slot_ids:
+                continue
             if _slot_status(store, slot_id) == "done":
                 continue
             out.append((day_iso, slot_row))
     return out
+
+
+def _backlog_calendar_days_for_owner(
+    store,
+    *,
+    owner: str | None,
+    day: str | None = None,
+) -> list[str]:
+    """Due days in chronological order (optionally ensure ``day`` is included)."""
+    owner_norm = normalize_owner(owner) if owner else None
+    backlog = automation_calendar_days_to_fill(store, owner=owner_norm)
+    if day:
+        day_iso = date.fromisoformat(day).isoformat()
+        if day_iso not in backlog:
+            backlog = sorted(set(backlog) | {day_iso})
+    return backlog
 
 
 def _backlog_pass_pick_slot(
@@ -1091,12 +1110,16 @@ def _backlog_pass_pick_slot(
     calendar_days: list[str],
     advance: bool,
     requeue_failed: bool,
+    allowed_slot_ids: set[int] | None = None,
     _pass_reset: bool = False,
 ) -> tuple[str, dict[str, Any]] | None:
     """One attempt per slot per pass across all calendar_days (serial montage)."""
     owner_norm = normalize_owner(owner)
     ordered = ordered_incomplete_backlog_slots(
-        store, owner=owner_norm, calendar_days=calendar_days
+        store,
+        owner=owner_norm,
+        calendar_days=calendar_days,
+        allowed_slot_ids=allowed_slot_ids,
     )
     if not ordered:
         return None
@@ -1147,6 +1170,7 @@ def _backlog_pass_pick_slot(
             calendar_days=calendar_days,
             advance=advance,
             requeue_failed=requeue_failed,
+            allowed_slot_ids=allowed_slot_ids,
             _pass_reset=True,
         )
     return None
@@ -1157,6 +1181,7 @@ def pick_next_backlog_pass_slot(
     *,
     owner: str,
     calendar_days: list[str],
+    allowed_slot_ids: set[int] | None = None,
 ) -> tuple[str, dict[str, Any]] | None:
     """Next slot for one automation attempt (global pass across backlog days)."""
     return _backlog_pass_pick_slot(
@@ -1165,6 +1190,7 @@ def pick_next_backlog_pass_slot(
         calendar_days=calendar_days,
         advance=True,
         requeue_failed=True,
+        allowed_slot_ids=allowed_slot_ids,
     )
 
 
@@ -1173,6 +1199,7 @@ def peek_next_backlog_pass_slot(
     *,
     owner: str,
     calendar_days: list[str],
+    allowed_slot_ids: set[int] | None = None,
 ) -> tuple[str, dict[str, Any]] | None:
     """Read-only next slot for automation (no pass / requeue side effects)."""
     return _backlog_pass_pick_slot(
@@ -1181,6 +1208,7 @@ def peek_next_backlog_pass_slot(
         calendar_days=calendar_days,
         advance=False,
         requeue_failed=False,
+        allowed_slot_ids=allowed_slot_ids,
     )
 
 
@@ -1228,9 +1256,13 @@ def run_weekly_fill_day(
 
         if is_production_paused():
             break
-        result = weekly_automation_tick(store, day=day, owner=owner_norm)
+        result = weekly_automation_tick(store, owner=owner_norm)
         if result.get("action") in {"week_complete", "day_complete"}:
             break
+        if result.get("action") == "attempted":
+            st = str(result.get("status") or "")
+            if st in {"queued", "failed"}:
+                continue
         if result.get("action") == "preflight_blocked":
             return {
                 "day": day,
@@ -1541,7 +1573,17 @@ def _weekly_automation_daemon() -> None:
             _, wakeup, _ = _automation_threading()
             store = DiscoveryStore(default_db_path())
             try:
-                weekly_automation_tick(store)
+                instant_cap = 32
+                for _ in range(instant_cap):
+                    if not _automation_running:
+                        break
+                    result = weekly_automation_tick(store)
+                    action = str(result.get("action") or "")
+                    if action == "attempted":
+                        st = str(result.get("status") or "")
+                        if st in {"queued", "failed"}:
+                            continue
+                    break
             except Exception as exc:  # noqa: BLE001
                 _append_fill_log(f"automation daemon error: {exc}")
             finally:
@@ -2559,6 +2601,8 @@ def run_weekly_due_batch(
         ordered = [s for s in ordered if int(s["id"]) in want]
     ordered = ordered[:cap]
     allowed_ids = {int(s["id"]) for s in ordered}
+    # One batch invocation walks incomplete slots on this calendar day (pass 1→3, then pass 2…).
+    calendar_days = [date.fromisoformat(day).isoformat()]
 
     while _time.monotonic() < deadline:
         if all(_slot_status(store, int(s["id"])) == "done" for s in ordered):
@@ -2569,16 +2613,20 @@ def run_weekly_due_batch(
                 break
             continue
 
-        slot_row = pick_next_round_robin_slot(
-            store, day=day, owner=owner_norm, allowed_slot_ids=allowed_ids
+        picked = pick_next_backlog_pass_slot(
+            store,
+            owner=owner_norm,
+            calendar_days=calendar_days,
+            allowed_slot_ids=allowed_ids,
         )
-        if not slot_row:
+        if not picked:
             if all(_slot_status(store, int(s["id"])) == "done" for s in ordered):
                 break
             if not _wait_for_production_idle(store, deadline=deadline):
                 break
             continue
 
+        _day_iso, slot_row = picked
         slot_id = int(slot_row["id"])
         slot_row = _fetch_slot_record(store, slot_id) or slot_row
         command = slot_command_text(slot_row)
@@ -2611,6 +2659,9 @@ def run_weekly_due_batch(
         if day_fill_complete(store, day=day, owner=owner_norm):
             clear_round_robin_cursor(owner=owner_norm, day=day)
             break
+
+        if status in {"queued", "failed"}:
+            continue
 
         if status == "running":
             if not _wait_for_production_idle(store, deadline=deadline):

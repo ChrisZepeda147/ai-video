@@ -442,3 +442,11 @@ def speech_max_candidate_attempts() -> int:
         return max(6, min(32, int(os.environ.get("SPEECH_MAX_CANDIDATES", "16"))))
     except ValueError:
         return 16
+
+
+def speech_candidate_timeout_sec() -> int:
+    """Wall clock per speech source try (prevents one hung download from eating the full weekly slot)."""
+    try:
+        return max(90, min(900, int(os.environ.get("SPEECH_CANDIDATE_TIMEOUT_SEC", "420"))))
+    except ValueError:
+        return 420

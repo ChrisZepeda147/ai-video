@@ -1559,9 +1559,13 @@ def prepare_speech(
     job_dir = audio_dir.parent
     stats = SpeechAcquireStats(speaker=speaker)
     blocked_ids = load_failed_source_ids(job_dir)
-    from discovery.config import speech_max_candidate_attempts
+    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import TimeoutError as FuturesTimeoutError
+
+    from discovery.config import speech_candidate_timeout_sec, speech_max_candidate_attempts
 
     speech_try_cap = speech_max_candidate_attempts()
+    per_candidate_timeout = speech_candidate_timeout_sec()
     if len(blocked_ids) >= speech_try_cap:
         raise MotivationJobError(
             "SPEECH_EXHAUSTED",
@@ -1657,7 +1661,22 @@ def prepare_speech(
             candidate_delay(after_429=subtitle_429_streak, normal=subtitle_429_streak == 0)
             error_code: str | None = None
             try:
-                source_mp3, error_code = download_one_audio(candidate, audio_dir, clear_dir=True)
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    fut = pool.submit(
+                        download_one_audio,
+                        candidate,
+                        audio_dir,
+                        clear_dir=True,
+                    )
+                    try:
+                        source_mp3, error_code = fut.result(timeout=per_candidate_timeout)
+                    except FuturesTimeoutError:
+                        source_mp3 = None
+                        error_code = "download_timeout"
+                        print(
+                            f"  skip (download_timeout): exceeded {per_candidate_timeout}s on "
+                            f"{candidate.video_id}"
+                        )
             except Exception as exc:  # noqa: BLE001
                 error_code = classify_download_error(exc)
                 print(f"  skip ({error_code}): {exc}")

@@ -51,10 +51,18 @@ def _isolate_weekly_automation() -> None:
 
 class TestWeeklyPipeline(unittest.TestCase):
     def setUp(self) -> None:
+        _isolate_weekly_automation()
+        self.addCleanup(_isolate_weekly_automation)
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.store = DiscoveryStore(Path(tmp.name) / "catalog.sqlite")
         self.addCleanup(self.store.close)
+        self.rr_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.rr_dir.cleanup)
+        self.rr_path = Path(self.rr_dir.name) / "weekly-round-robin.json"
+        self.rr_patch = patch("discovery.weekly._round_robin_state_path", return_value=self.rr_path)
+        self.rr_patch.start()
+        self.addCleanup(self.rr_patch.stop)
 
     def test_preflight_ok_without_cursor_agent(self) -> None:
         toolchain = {"ok": True, "ffmpeg": True, "ffprobe": True, "yt_dlp": True}
