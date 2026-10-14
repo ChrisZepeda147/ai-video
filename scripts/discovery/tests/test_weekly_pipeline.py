@@ -298,6 +298,7 @@ class TestWeeklyPipeline(unittest.TestCase):
                 owner="chris",
                 limit=3,
                 submit_fn=submit,
+                allow_manual=True,
             )
         self.assertEqual(result["count"], 3)
         slot_one_id = int(
@@ -315,60 +316,23 @@ class TestWeeklyPipeline(unittest.TestCase):
         ).fetchone()
         self.assertEqual(failed["status"], "done")
 
-    def test_fill_day_requeues_failed_until_done(self) -> None:
-        toolchain = {"ok": True}
-        attempts: dict[int, int] = {}
-
-        slot_one_id = None
-
-        def submit(store, user_command, slot_id=None, **_kw):
-            nonlocal slot_one_id
-            sid = int(slot_id or 0)
-            if slot_one_id is None:
-                row = store._conn.execute(
-                    "SELECT id FROM weekly_slots WHERE slot = 1"
-                ).fetchone()
-                slot_one_id = int(row["id"]) if row else sid
-            attempts[sid] = attempts.get(sid, 0) + 1
-            if sid == slot_one_id and attempts[sid] == 1:
-                weekly.mark_slot(store, sid, status="failed", error="boom")
-                raise RuntimeError("boom")
-            record = create_command_job(store, user_command=user_command)
-            job_key = str(record["job_key"])
-            weekly.mark_slot(store, sid, status="running", job_key=job_key)
-            self.store._conn.execute(
-                "UPDATE cursor_command_jobs SET status = 'completed', completed_at = ? WHERE job_key = ?",
-                (now_iso(), job_key),
-            )
-            self.store._conn.commit()
-            weekly._sync_slot_from_job(store, sid, job_key)
-            return {"job_key": job_key, "status": "completed"}
-
+    def test_fill_day_kicks_daemon_not_blocking_batch(self) -> None:
         weekly.save_slots(
             self.store,
             week_start="2026-10-12",
             owner="chris",
             slots=[
                 {"day": "mon", "slot": 1, "speaker": "A", "visual_direction": "v1"},
-                {"day": "mon", "slot": 2, "speaker": "B", "visual_direction": "v2"},
-                {"day": "mon", "slot": 3, "speaker": "C", "visual_direction": "v3"},
             ],
         )
-        with patch("discovery.config.resolve_worker_python", return_value="C:/Python/python.exe"), patch(
-            "toolchain_env.check_toolchain", return_value=toolchain
-        ), patch("discovery.weekly.weekly_submit_command", side_effect=submit):
+        with patch("discovery.weekly.kickoff_weekly_automation", return_value={"kicked": True}) as kick:
             result = weekly.run_weekly_fill_day(
                 self.store,
                 day="2026-10-12",
                 owner="chris",
             )
-        self.assertTrue(result.get("complete"))
-        stats = result.get("today_stats") or {}
-        self.assertEqual(int(stats.get("done") or 0), 3)
-        self.assertGreaterEqual(
-            attempts.get(slot_one_id or 0, 0),
-            2,
-        )
+        kick.assert_called_once()
+        self.assertTrue(result.get("kicked"))
 
     def test_automation_backlog_mon_before_tue(self) -> None:
         weekly.save_slots(
@@ -815,6 +779,81 @@ class TestWeeklyDaemonLifecycle(unittest.TestCase):
         after = weekly.get_backlog_pass_state(owner="chris")
         self.assertEqual(before, after)
         self.assertIsNotNone(snap.get("next_slot_id"))
+
+
+class TestWeeklyProductionEntryPoints(unittest.TestCase):
+    def setUp(self) -> None:
+        _isolate_weekly_automation()
+        self.addCleanup(_isolate_weekly_automation)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.store = DiscoveryStore(Path(tmp.name) / "catalog.sqlite")
+        self.addCleanup(self.store.close)
+        self.rr_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.rr_dir.cleanup)
+        self.rr_path = Path(self.rr_dir.name) / "weekly-round-robin.json"
+        self.rr_patch = patch("discovery.weekly._round_robin_state_path", return_value=self.rr_path)
+        self.rr_patch.start()
+        self.addCleanup(self.rr_patch.stop)
+
+    def test_kickoff_does_not_call_manual_batch(self) -> None:
+        with patch("discovery.weekly.run_weekly_due_batch") as batch, patch(
+            "discovery.weekly.ensure_weekly_automation_started",
+            return_value={"started": True},
+        ), patch("discovery.weekly.request_daily_fill_kick", return_value={}), patch(
+            "discovery.weekly.automation_health_snapshot",
+            return_value={"next_slot_id": 62},
+        ):
+            out = weekly.kickoff_weekly_automation(
+                self.store, day="2026-10-12", owner="chris"
+            )
+        batch.assert_not_called()
+        self.assertTrue(out.get("kicked"))
+
+    def test_restart_default_kicks_not_batch(self) -> None:
+        weekly.save_slots(
+            self.store,
+            week_start="2026-10-12",
+            owner="chris",
+            slots=[{"day": "mon", "slot": 1, "speaker": "A", "visual_direction": "v"}],
+        )
+        with patch("discovery.production_pause.kill_local_montage_workers", return_value=0), patch(
+            "discovery.weekly.run_weekly_due_batch"
+        ) as batch, patch(
+            "discovery.weekly.kickoff_weekly_automation",
+            return_value={"kicked": True},
+        ) as kick:
+            weekly.restart_weekly_day_batch(
+                self.store, day="2026-10-12", owner="chris", kill_workers=False
+            )
+        kick.assert_called_once()
+        batch.assert_not_called()
+
+    def test_retry_slot_kicks_not_batch(self) -> None:
+        weekly.save_slots(
+            self.store,
+            week_start="2026-10-12",
+            owner="chris",
+            slots=[{"day": "mon", "slot": 1, "speaker": "A", "visual_direction": "v"}],
+        )
+        sid = int(
+            self.store._conn.execute("SELECT id FROM weekly_slots LIMIT 1").fetchone()["id"]
+        )
+        weekly.mark_slot(self.store, sid, status="failed", error="x")
+        with patch("discovery.weekly.run_weekly_due_batch") as batch, patch(
+            "discovery.weekly.kickoff_weekly_automation",
+            return_value={"kicked": True},
+        ) as kick:
+            weekly.run_weekly_retry_slot(self.store, sid)
+        kick.assert_called_once()
+        batch.assert_not_called()
+
+    def test_manual_batch_rejected_without_flag(self) -> None:
+        out = weekly.run_weekly_due_batch(
+            self.store, day="2026-10-12", owner="chris", dry_run=False
+        )
+        self.assertTrue(out.get("deferred"))
+        self.assertEqual(out.get("reason"), "manual_batch_disabled")
 
 
 if __name__ == "__main__":

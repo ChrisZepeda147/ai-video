@@ -263,6 +263,7 @@ class TestWeekly(unittest.TestCase):
                 limit=3,
                 serial=False,
                 submit_fn=fake_submit,
+                allow_manual=True,
             )
         self.assertEqual(result["count"], 3)
         self.assertEqual(len(calls), 3)
@@ -305,13 +306,16 @@ class TestWeekly(unittest.TestCase):
             return {"count": 0}
 
         with patch("discovery.production_pause.kill_local_montage_workers", return_value=0), patch(
+            "discovery.weekly.kickoff_weekly_automation",
+            return_value={"kicked": True, "automation": {"started": True}},
+        ) as mock_kick, patch(
             "discovery.weekly.run_weekly_due_batch", side_effect=fake_batch
         ) as mock_run:
             out = weekly.restart_weekly_day_batch(
                 self.store,
                 day="2026-09-30",
                 owner="chris",
-                run_after=True,
+                run_after=False,
                 kill_workers=False,
             )
         self.assertEqual(out["jobs_cancelled"], 1)
@@ -324,7 +328,9 @@ class TestWeekly(unittest.TestCase):
             "SELECT status FROM cursor_command_jobs WHERE job_key = 'cmd_stuck'"
         ).fetchone()
         self.assertEqual(job["status"], "cancelled")
-        mock_run.assert_called_once()
+        mock_kick.assert_called_once()
+        mock_run.assert_not_called()
+        self.assertTrue(out.get("kicked"))
 
 
 if __name__ == "__main__":

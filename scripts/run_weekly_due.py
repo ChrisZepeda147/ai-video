@@ -119,6 +119,7 @@ def main() -> int:
                     wait_complete=args.wait_complete,
                     wait_timeout_sec=max(60, args.wait_timeout_minutes * 60),
                     retry_failed=args.retry_failed or args.fill_day,
+                    allow_manual=True,
                 )
             label = owner_key or "all"
             if result.get("error"):

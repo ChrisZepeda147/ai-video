@@ -349,9 +349,10 @@ export function WeeklyWorkspace() {
         setStatus(`Could not start: ${d.error}`);
       } else if (d.deferred) {
         setStatus(`Deferred (${d.reason ?? "busy"}) — wait for current montage, then Run again.`);
-      } else if (d.started && d.fill_day) {
+      } else if (d.kicked || (d.started && d.fill_day)) {
+        const next = d.next_slot_id ? ` Next slot id ${d.next_slot_id}.` : "";
         setStatus(
-          `Fill running for ${target.label} — retries failures until all 3 slots are done. Refresh to watch progress.`,
+          `Automation kicked for ${target.label} — daemon runs global backlog pass (one slot at a time).${next} Refresh to watch progress.`,
         );
       } else if ((d.count ?? 0) === 0) {
         const issues = d.preflight?.issues?.filter(Boolean).join(" · ");
@@ -376,18 +377,18 @@ export function WeeklyWorkspace() {
     const label = DAY_LABEL[activeDay as WeekDayId] ?? activeDay;
     if (
       !window.confirm(
-        `Stop any stuck montage worker, reset incomplete ${label} videos, and run the batch again?`,
+        `Stop any stuck montage worker and reset incomplete ${label} videos? Automation will pick the next global backlog slot (not forced ${label} first).`,
       )
     ) {
       return;
     }
     setBusy(true);
-    setStatus(`Restarting ${label} batch — stopping workers, then rendering 1→2→3…`);
+    setStatus(`Restarting ${label} — stopping workers, re-queuing slots, waking automation…`);
     try {
       const res = await postWeeklyRestartDay({
         day: batchDayIso,
         owner,
-        run_after: true,
+        run_after: false,
         kill_workers: true,
       });
       if (!res.ok) {
@@ -395,14 +396,13 @@ export function WeeklyWorkspace() {
         return;
       }
       const d = res.data;
-      const batch = d.batch;
-      if (batch?.error) {
-        setStatus(`Restart partial: ${batch.error}`);
-      } else if (batch?.deferred) {
-        setStatus("Restart queued DB state — montage deferred (queue busy). Run again in a minute.");
+      if (d.kicked) {
+        setStatus(
+          `Restart done — cancelled ${d.jobs_cancelled} job(s), reset ${d.slots_reset} slot(s). Automation kicked; next slot id ${d.next_slot_id ?? "—"}.`,
+        );
       } else {
         setStatus(
-          `Restart done — cancelled ${d.jobs_cancelled} job(s), reset ${d.slots_reset} slot(s), completed ${batch?.count ?? 0} montage(s).`,
+          `Restart done — cancelled ${d.jobs_cancelled} job(s), reset ${d.slots_reset} slot(s).`,
         );
       }
       await load();
@@ -413,11 +413,15 @@ export function WeeklyWorkspace() {
 
   async function retrySlot(slotId: number) {
     setBusy(true);
-    setStatus("Retrying slot — direct montage (may take up to ~45 min)…");
+    setStatus("Retry slot — marking retryable and waking automation (global pass picks order)…");
     try {
       const res = await postWeeklyRetrySlot(slotId);
       if (res.ok) await load();
-      setStatus(res.ok ? "Retry batch finished — refresh slot status above." : res.message);
+      setStatus(
+        res.ok
+          ? "Retry pending — automation will schedule this slot on the next eligible pass."
+          : res.message,
+      );
     } finally {
       setBusy(false);
     }
