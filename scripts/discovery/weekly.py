@@ -540,13 +540,10 @@ def reconcile_zombie_weekly_slots(store) -> int:
                     reset_job_key=True,
                 )
             else:
-                mark_slot(
+                prepare_slot_for_retry(
                     store,
                     slot_id,
-                    status="failed",
-                    job_key=None,
-                    error="Batch interrupted (no active job — often API restart). Run this day again.",
-                    reset_job_key=True,
+                    error="Batch interrupted (no active job — often API restart). Retrying.",
                 )
             cleared += 1
             plan_ids.add(int(row["plan_id"]))
@@ -609,12 +606,12 @@ def reconcile_slots(store) -> dict[str, int]:
             done += 1
             plan_ids.add(int(row["plan_id"]))
         elif status in {"failed", "cancelled"}:
-            mark_slot(
+            prepare_slot_for_retry(
                 store,
                 int(row["id"]),
-                status="failed",
                 error=command_job_error_summary(dict(job)),
             )
+            request_daily_fill_kick(store, slot_id=int(row["id"]))
             failed += 1
             plan_ids.add(int(row["plan_id"]))
     for pid in plan_ids:
@@ -785,7 +782,7 @@ def _fill_round_sleep_sec() -> int:
 def _fill_slot_wait_sec() -> int:
     import os as _os
 
-    from discovery.config import montage_job_timeout_sec
+    from discovery.config import weekly_montage_job_timeout_sec
 
     override = _os.environ.get("WEEKLY_FILL_SLOT_WAIT_SEC", "").strip()
     if override:
@@ -793,7 +790,7 @@ def _fill_slot_wait_sec() -> int:
             return max(600, int(override))
         except ValueError:
             pass
-    return montage_job_timeout_sec() + 300
+    return weekly_montage_job_timeout_sec() + 300
 
 
 def _slot_retry_sleep_sec() -> int:
@@ -1153,7 +1150,8 @@ def _weekly_automation_daemon() -> None:
         try:
             result = weekly_automation_tick(store)
             instant_retry = (
-                result.get("action") == "attempted" and result.get("status") == "failed"
+                result.get("action") == "attempted"
+                and result.get("status") != "done"
             )
         except Exception as exc:  # noqa: BLE001
             _append_fill_log(f"automation daemon error: {exc}")
@@ -1243,8 +1241,13 @@ def maybe_run_daily_fill(store) -> dict[str, Any] | None:
     return ensure_weekly_automation_started()
 
 
+def reset_weekly_slot_acquire_state(store, slot_id: int) -> None:
+    """Explicit reset: drop speech/B-roll sidecars (manual restart / developer fresh run)."""
+    _reset_weekly_slot_acquire_state(store, slot_id)
+
+
 def _reset_weekly_slot_acquire_state(store, slot_id: int) -> None:
-    """Drop speech/B-roll exclude sidecars so a re-run does not inherit a dead search."""
+    """Drop speech/B-roll exclude sidecars (only for explicit fresh reset)."""
     row = _fetch_slot_record(store, slot_id)
     if not row:
         return
@@ -1256,9 +1259,19 @@ def _reset_weekly_slot_acquire_state(store, slot_id: int) -> None:
         return
     slug = f"weekly-{owner}-{week}-{day}-{slot_no}"
     try:
-        from discovery.motivation_paths import default_job_date, job_dir_for, motivation_jobs_root
+        from discovery.config import project_root
+        from discovery.motivation_paths import (
+            default_job_date,
+            job_dir_for,
+            motivation_jobs_root,
+            resolve_job_dir,
+        )
 
-        job_dir = job_dir_for(slug, motivation_jobs_root(), job_date=default_job_date())
+        root = project_root()
+        jobs_root = motivation_jobs_root(root)
+        job_dir = resolve_job_dir(slug, jobs_root) or job_dir_for(
+            slug, jobs_root, job_date=default_job_date()
+        )
     except Exception:
         return
     if not job_dir.is_dir():
@@ -1269,27 +1282,62 @@ def _reset_weekly_slot_acquire_state(store, slot_id: int) -> None:
             path.unlink(missing_ok=True)
 
 
-def requeue_slot(store, slot_id: int) -> bool:
-    """Reset a failed slot to queued so 7am or Run due can pick it up again."""
+def prepare_slot_for_retry(
+    store,
+    slot_id: int,
+    *,
+    error: str | None = None,
+    fresh_reset: bool = False,
+) -> bool:
+    """Return slot to queued for another attempt; preserve clips + acquire sidecars by default."""
+    ensure_weekly_tables(store)
+    row = store._conn.execute(
+        "SELECT status FROM weekly_slots WHERE id = ?", (slot_id,)
+    ).fetchone()
+    if not row:
+        return False
+    status = str(row["status"] or "")
+    if status == "done":
+        return False
+    if status not in {"failed", "running", "rerunning"}:
+        return False
+    if fresh_reset:
+        _reset_weekly_slot_acquire_state(store, slot_id)
+    ts = _now()
+    err_val = (error or "")[:500] if error is not None else None
+    if err_val is not None:
+        store._conn.execute(
+            """
+            UPDATE weekly_slots
+            SET status = 'queued', job_key = NULL, error_message = ?,
+                render_started_at = NULL, updated_at = ?
+            WHERE id = ?
+            """,
+            (err_val, ts, slot_id),
+        )
+    else:
+        store._conn.execute(
+            """
+            UPDATE weekly_slots
+            SET status = 'queued', job_key = NULL,
+                render_started_at = NULL, updated_at = ?
+            WHERE id = ?
+            """,
+            (ts, slot_id),
+        )
+    store._conn.commit()
+    return True
+
+
+def requeue_slot(store, slot_id: int, *, fresh_reset: bool = False) -> bool:
+    """Reset a failed slot to queued so automation or Run due can pick it up again."""
     ensure_weekly_tables(store)
     row = store._conn.execute(
         "SELECT status FROM weekly_slots WHERE id = ?", (slot_id,)
     ).fetchone()
     if not row or str(row["status"]) != "failed":
         return False
-    _reset_weekly_slot_acquire_state(store, slot_id)
-    ts = _now()
-    store._conn.execute(
-        """
-        UPDATE weekly_slots
-        SET status = 'queued', job_key = NULL, error_message = NULL,
-            render_started_at = NULL, updated_at = ?
-        WHERE id = ?
-        """,
-        (ts, slot_id),
-    )
-    store._conn.commit()
-    return True
+    return prepare_slot_for_retry(store, slot_id, fresh_reset=fresh_reset)
 
 
 def today_slot_stats(store, *, day: str, owner: str | None = None) -> dict[str, int]:
@@ -1542,9 +1590,9 @@ def _wait_for_command_job(store, job_key: str, *, deadline: float) -> None:
 
     job = get_command_job(store, job_key)
     if job and str(job.get("status") or "") == "running":
-        from discovery.config import montage_job_timeout_minutes
+        from discovery.config import weekly_montage_job_timeout_minutes
 
-        mins = montage_job_timeout_minutes()
+        mins = weekly_montage_job_timeout_minutes()
         _fail_running_command_job(
             store,
             job_key,
@@ -1675,11 +1723,9 @@ def _sync_slot_from_job(store, slot_id: int, job_key: str) -> None:
             error="",
         )
     elif st in {"failed", "cancelled"}:
-        mark_slot(
+        prepare_slot_for_retry(
             store,
             slot_id,
-            status="failed",
-            job_key=job_key,
             error=command_job_error_summary(job),
         )
         request_daily_fill_kick(store, slot_id=slot_id)
@@ -1814,9 +1860,11 @@ def restart_weekly_day_batch(
             continue
         if st not in {"running", "rerunning", "failed", "queued"}:
             continue
+        slot_id = int(row["id"])
+        reset_weekly_slot_acquire_state(store, slot_id)
         mark_slot(
             store,
-            int(row["id"]),
+            slot_id,
             status="queued",
             job_key=None,
             error="",
@@ -1824,7 +1872,7 @@ def restart_weekly_day_batch(
         )
         store._conn.execute(
             "UPDATE weekly_slots SET render_started_at = NULL WHERE id = ?",
-            (int(row["id"]),),
+            (slot_id,),
         )
         slots_reset += 1
     store._conn.commit()

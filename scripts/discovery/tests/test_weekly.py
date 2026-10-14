@@ -136,6 +136,34 @@ class TestWeekly(unittest.TestCase):
         due = weekly.due_slots(self.store, day="2026-09-28", owner="chris")
         self.assertEqual(len(due), 1)
 
+    def test_requeue_preserves_acquire_sidecars(self) -> None:
+        from discovery.config import project_root
+        from discovery.motivation_paths import default_job_date, job_dir_for, motivation_jobs_root
+
+        weekly.save_slots(
+            self.store,
+            week_start="2026-10-12",
+            owner="chris",
+            slots=[{"day": "mon", "slot": 1, "speaker": "A", "visual_direction": "v"}],
+        )
+        slot = weekly.due_slots(self.store, day="2026-10-12", owner="chris")[0]
+        slot_id = int(slot["id"])
+        root = project_root()
+        job_dir = job_dir_for(
+            "weekly-chris-2026-10-12-mon-1",
+            motivation_jobs_root(root),
+            job_date=default_job_date(),
+        )
+        job_dir.mkdir(parents=True, exist_ok=True)
+        sidecar = job_dir / "broll_acquire.json"
+        sidecar.write_text('{"failed_source_ids": ["abc123"]}', encoding="utf-8")
+        weekly.mark_slot(self.store, slot_id, status="failed", error="boom")
+        self.assertTrue(weekly.requeue_slot(self.store, slot_id))
+        self.assertTrue(sidecar.is_file())
+        self.assertIn("abc123", sidecar.read_text(encoding="utf-8"))
+        weekly.reset_weekly_slot_acquire_state(self.store, slot_id)
+        self.assertFalse(sidecar.is_file())
+
     def test_run_batch_defers_when_command_running(self) -> None:
         from discovery.command_jobs import now_iso
 

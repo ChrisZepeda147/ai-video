@@ -309,10 +309,23 @@ def analytics_exploit_ratio() -> float:
     return min(1.0, max(0.0, _float_env("DISCOVERY_ANALYTICS_EXPLOIT_RATIO", DEFAULT_ANALYTICS_EXPLOIT_RATIO)))
 
 
-def montage_job_timeout_minutes() -> int:
-    """Wall clock for one build_motivation_job (weekly slot)."""
+def weekly_montage_job_timeout_minutes() -> int:
+    """Wall clock for one automated weekly slot build_motivation_job attempt."""
     try:
-        raw = int(os.environ.get("WEEKLY_MONTAGE_TIMEOUT_MINUTES", "45"))
+        raw = int(os.environ.get("WEEKLY_MONTAGE_TIMEOUT_MINUTES", "30"))
+    except ValueError:
+        raw = 30
+    return max(15, min(120, raw))
+
+
+def weekly_montage_job_timeout_sec() -> int:
+    return weekly_montage_job_timeout_minutes() * 60
+
+
+def montage_job_timeout_minutes() -> int:
+    """Wall clock for manual / non-weekly direct montage."""
+    try:
+        raw = int(os.environ.get("MONTAGE_JOB_TIMEOUT_MINUTES", "45"))
     except ValueError:
         raw = 45
     return max(15, min(120, raw))
@@ -322,15 +335,16 @@ def montage_job_timeout_sec() -> int:
     return montage_job_timeout_minutes() * 60
 
 
-def montage_stale_minutes() -> int:
-    """Mark running montage jobs failed if worker hung (slightly above timeout)."""
+def montage_stale_minutes(*, weekly: bool = True) -> int:
+    """Mark running montage jobs failed if worker hung (slightly above attempt timeout)."""
     try:
         raw = int(os.environ.get("WEEKLY_MONTAGE_STALE_MINUTES", "0"))
     except ValueError:
         raw = 0
     if raw > 0:
         return max(20, min(180, raw))
-    return montage_job_timeout_minutes() + 5
+    base = weekly_montage_job_timeout_minutes() if weekly else montage_job_timeout_minutes()
+    return base + 5
 
 
 def speech_max_candidate_attempts() -> int:
