@@ -1046,9 +1046,18 @@ export type WeeklyDayMorningStatus = {
   day: string;
   expected: number;
   filled: number;
-  outcome: "finished" | "in_progress" | "failed" | "not_finished" | "pending" | "empty";
-  morning_submitted: boolean;
-  catchup_ran: boolean;
+  outcome:
+    | "finished"
+    | "in_progress"
+    | "failed"
+    | "empty"
+    | "scheduled"
+    | "automation_queued"
+    | "automation_retrying"
+    | "paused";
+  status_line?: string;
+  remaining?: number;
+  automation_active?: boolean;
   past_morning_cutoff: boolean;
   stats: { queued: number; rerunning?: number; running: number; done: number; failed: number };
   batch_started_at?: string | null;
@@ -1066,6 +1075,14 @@ export type WeeklyHealthResponse = {
   running_command_jobs: number;
   agent_model: string;
   last_run: Record<string, unknown> | null;
+  automation_running?: boolean;
+  automation_thread_alive?: boolean;
+  production_paused?: boolean;
+  backlog_days?: string[];
+  next_slot_id?: number | null;
+  next_slot_day?: string | null;
+  next_slot_number?: number | null;
+  next_slot_owner?: string | null;
   failed_digest?: Array<{
     id: number;
     day: string;

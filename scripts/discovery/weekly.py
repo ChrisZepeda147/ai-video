@@ -937,6 +937,8 @@ def _round_robin_select_slot(
         if status == "failed":
             if requeue_failed:
                 requeue_slot(store, slot_id)
+            elif not advance_cursor:
+                return row
             else:
                 continue
         if advance_cursor:
@@ -1297,7 +1299,7 @@ def automation_daemon_alive() -> bool:
 
 
 def _clear_automation_daemon_state(*, reason: str) -> None:
-    global _automation_running, _automation_thread
+    global _automation_running, _automation_thread  # noqa: PLW0603
     _automation_running = False
     _automation_thread = None
     _append_fill_log(f"WEEKLY_AUTOMATION_DAEMON_STOP reason={reason}")
@@ -1305,13 +1307,13 @@ def _clear_automation_daemon_state(*, reason: str) -> None:
 
 def repair_stale_automation_state() -> bool:
     """Reset flag when _automation_running but daemon thread is dead."""
-    global _automation_running
+    global _automation_running, _automation_thread
     if _automation_running and not automation_daemon_alive():
         _append_fill_log("WEEKLY_AUTOMATION_STALE_STATE_RECOVERED")
         _clear_automation_daemon_state(reason="stale_flag_without_live_thread")
         return True
     if not _automation_running and _automation_thread is not None and not automation_daemon_alive():
-        _automation_thread = None  # type: ignore[misc]
+        _automation_thread = None
         return True
     return False
 
@@ -1448,7 +1450,9 @@ def weekly_api_startup_recover(store) -> dict[str, Any]:
     start = ensure_weekly_automation_started()
     backlog = automation_calendar_days_to_fill(store)
     kicked = False
-    if backlog and start.get("started") or start.get("reason") == "automation_already_running":
+    if backlog and (
+        start.get("started") or start.get("reason") == "automation_already_running"
+    ):
         request_daily_fill_kick(store)
         kicked = True
     return {
@@ -1774,24 +1778,33 @@ def maybe_run_morning_catchup(store) -> dict[str, Any] | None:
 
 
 def weekly_health(store, *, day: str | None = None, owner: str | None = None) -> dict[str, Any]:
+    from discovery.production_pause import is_production_paused
+
     day = day or date.today().isoformat()
     if owner:
         owner = normalize_owner(owner)
-    pipe = weekly_reconcile_pipeline(store)
-    reconcile = pipe.get("slots") or reconcile_slots(store)
+    repair_stale_automation_state()
     preflight = weekly_preflight()
     due = due_slots(store, day=day, owner=owner)
     stats = today_slot_stats(store, day=day, owner=owner)
     busy = production_queue_busy(store, owner=None)
     last_run = _read_last_run()
+    auto = automation_health_snapshot(store, owner=owner)
+    paused = is_production_paused()
     return {
         "day": day,
         "owner": owner,
         "preflight": preflight,
-        "reconcile": {**pipe, "slots": reconcile},
+        "reconcile": reconcile_slots(store),
         "due_count": len(due),
         "today_stats": stats,
-        "day_morning": day_morning_status(store, day=day, owner=owner),
+        "day_morning": day_morning_status(
+            store,
+            day=day,
+            owner=owner,
+            automation_thread_alive=auto["automation_thread_alive"],
+            production_paused=paused,
+        ),
         "queue_busy": busy,
         "running_weekly_slots": count_running_weekly_slots(store),
         "running_command_jobs": count_running_command_jobs(store),
@@ -1799,6 +1812,7 @@ def weekly_health(store, *, day: str | None = None, owner: str | None = None) ->
         "last_run": last_run,
         "failed_digest": failed_slots_digest(store, owner=owner),
         "log_tail": tail_weekly_log(lines=40),
+        **auto,
     }
 
 

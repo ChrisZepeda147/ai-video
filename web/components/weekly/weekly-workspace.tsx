@@ -196,22 +196,44 @@ export function WeeklyWorkspace() {
 
   const dayOutcomeLabel = useMemo(() => {
     if (!dayMorning) return null;
+    const line = dayMorning.status_line?.trim();
     switch (dayMorning.outcome) {
       case "finished":
-        return { text: "Yes — finished", className: "border-emerald-800/60 bg-emerald-950/40 text-emerald-200" };
-      case "in_progress":
-        return { text: "Rerunning / in progress", className: "border-amber-800/60 bg-amber-950/40 text-amber-200" };
-      case "failed":
-        return { text: "Failed — run again or retry slot", className: "border-red-800/60 bg-red-950/40 text-red-200" };
-      case "not_finished":
         return {
-          text: "No — 7am batch did not finish (still queued)",
+          text: line || "Finished — 3/3 videos ready",
+          className: "border-emerald-800/60 bg-emerald-950/40 text-emerald-200",
+        };
+      case "in_progress":
+      case "automation_retrying":
+        return {
+          text: line || "Automation running",
+          className: "border-amber-800/60 bg-amber-950/40 text-amber-200",
+        };
+      case "automation_queued":
+        return {
+          text: line || "Automation queued",
+          className: "border-amber-800/60 bg-amber-950/40 text-amber-200",
+        };
+      case "scheduled":
+        return {
+          text: line || "Waiting for scheduled start",
+          className: "border-zinc-700 bg-zinc-900/60 text-zinc-300",
+        };
+      case "paused":
+        return {
+          text: line || "Production paused",
           className: "border-red-800/60 bg-red-950/40 text-red-200",
         };
-      case "pending":
-        return { text: "Waiting for 7am", className: "border-zinc-700 bg-zinc-900/60 text-zinc-300" };
+      case "failed":
+        return {
+          text: line || "Failed — run again or retry slot",
+          className: "border-red-800/60 bg-red-950/40 text-red-200",
+        };
       default:
-        return { text: "No plan for this day", className: "border-zinc-800 bg-zinc-900/40 text-zinc-500" };
+        return {
+          text: line || "No plan for this day",
+          className: "border-zinc-800 bg-zinc-900/40 text-zinc-500",
+        };
     }
   }, [dayMorning]);
 
@@ -697,8 +719,9 @@ export function WeeklyWorkspace() {
                     {" · "}
                   </>
                 ) : null}
-                7am submitted: {dayMorning.morning_submitted ? "yes" : "no"}
-                {dayMorning.catchup_ran ? " · catch-up ran on API start" : ""}
+                Automation: {dayMorning.automation_active ? "active" : health?.automation_thread_alive ? "active" : "starting"}
+                {" · "}
+                Remaining: {dayMorning.remaining ?? Math.max(0, 3 - (dayMorning.stats.done ?? 0))}
                 {" · "}
                 {dayMorning.stats.done}/3 done
                 {dayMorning.stats.running ? ` · ${dayMorning.stats.running} running` : ""}

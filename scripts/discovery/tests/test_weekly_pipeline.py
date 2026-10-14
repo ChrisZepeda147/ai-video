@@ -506,5 +506,87 @@ class TestWeeklyRoundRobin(unittest.TestCase):
         self.assertEqual(calls, [ids[2]])
 
 
+class TestWeeklyDaemonLifecycle(unittest.TestCase):
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.store = DiscoveryStore(Path(tmp.name) / "catalog.sqlite")
+        self.addCleanup(self.store.close)
+        weekly.stop_weekly_automation()
+        weekly.repair_stale_automation_state()
+
+    def tearDown(self) -> None:
+        weekly.stop_weekly_automation()
+        import time
+
+        time.sleep(0.05)
+        weekly.repair_stale_automation_state()
+
+    def test_stale_flag_starts_new_daemon(self) -> None:
+        weekly._automation_running = True  # noqa: SLF001
+        weekly._automation_thread = None  # noqa: SLF001
+        toolchain = {"ok": True}
+        with patch("discovery.config.resolve_python_exe", return_value="C:/Python/python.exe"), patch(
+            "toolchain_env.check_toolchain", return_value=toolchain
+        ), patch("discovery.production_pause.is_production_paused", return_value=False):
+            out = weekly.ensure_weekly_automation_started()
+        self.assertTrue(out.get("started"))
+        self.assertTrue(weekly.automation_daemon_alive())
+        weekly.stop_weekly_automation()
+
+    def test_live_daemon_not_duplicated(self) -> None:
+        toolchain = {"ok": True}
+        with patch("discovery.config.resolve_python_exe", return_value="C:/Python/python.exe"), patch(
+            "toolchain_env.check_toolchain", return_value=toolchain
+        ), patch("discovery.production_pause.is_production_paused", return_value=False):
+            first = weekly.ensure_weekly_automation_started()
+            second = weekly.ensure_weekly_automation_started()
+        self.assertTrue(first.get("started"))
+        self.assertEqual(second.get("reason"), "automation_already_running")
+        self.assertTrue(weekly.automation_daemon_alive())
+        weekly.stop_weekly_automation()
+
+    def test_daemon_finally_clears_state(self) -> None:
+        import time
+
+        toolchain = {"ok": True}
+        with patch("discovery.config.resolve_python_exe", return_value="C:/Python/python.exe"), patch(
+            "toolchain_env.check_toolchain", return_value=toolchain
+        ), patch("discovery.production_pause.is_production_paused", return_value=True):
+            weekly.ensure_weekly_automation_started()
+        time.sleep(0.3)
+        self.assertFalse(weekly.automation_daemon_alive())
+        self.assertFalse(weekly._automation_running)  # noqa: SLF001
+
+    def test_day_status_not_7am_failed_when_queued(self) -> None:
+        weekly.save_slots(
+            self.store,
+            week_start="2026-10-12",
+            owner="chris",
+            slots=[{"day": "wed", "slot": 1, "speaker": "J", "visual_direction": "v"}],
+        )
+        day = weekly.slot_date("2026-10-12", "wed")
+        with patch("discovery.weekly.past_morning_cutoff", return_value=True), patch(
+            "discovery.weekly.automation_daemon_alive", return_value=True
+        ):
+            st = weekly.day_morning_status(self.store, day=day, owner="chris")
+        self.assertEqual(st["outcome"], "in_progress")
+        self.assertNotIn("7am", st.get("status_line") or "")
+
+    def test_health_peek_has_no_submit_side_effect(self) -> None:
+        weekly.save_slots(
+            self.store,
+            week_start="2026-10-12",
+            owner="chris",
+            slots=[{"day": "wed", "slot": 1, "speaker": "J", "visual_direction": "v"}],
+        )
+        day = weekly.slot_date("2026-10-12", "wed")
+        before = weekly.get_round_robin_cursor(owner="chris", day=day)
+        snap = weekly.automation_health_snapshot(self.store, owner="chris")
+        after = weekly.get_round_robin_cursor(owner="chris", day=day)
+        self.assertEqual(before, after)
+        self.assertIsNotNone(snap.get("next_slot_id"))
+
+
 if __name__ == "__main__":
     unittest.main()
