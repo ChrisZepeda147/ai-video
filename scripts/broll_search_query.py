@@ -115,6 +115,25 @@ def expand_broll_search_queries(query: str) -> list[str]:
     text = (query or "").strip()
     if not text:
         return []
+    if "," in text and not is_storyboard_query(text):
+        parts = [part.strip(" .") for part in text.split(",") if part.strip()]
+        if 1 < len(parts) <= 4:
+            found: list[str] = []
+            seen: set[str] = set()
+            for part in parts:
+                for search in _searches_for_beat(part) or []:
+                    if search not in seen:
+                        seen.add(search)
+                        found.append(search)
+                if not _searches_for_beat(part):
+                    fallback = part
+                    if "60fps" not in fallback.lower() and "50fps" not in fallback.lower():
+                        fallback = f"{fallback} cinematic 60fps"
+                    if fallback not in seen:
+                        seen.add(fallback)
+                        found.append(fallback)
+            if found:
+                return found
     if STORYBOARD_MARK.search(text) or "->" in text:
         found = _collect_beat_searches(text)
         if found:

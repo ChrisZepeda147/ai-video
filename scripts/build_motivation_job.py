@@ -1993,6 +1993,25 @@ def _discover_broll_candidates_for_search(
         min_duration=float(min_duration),
     )
     candidates = pick_usable_fps_candidates(candidates, limit=limit)
+    if not candidates and pool:
+        fallback = rank_broll_candidates(
+            filter_unwanted(
+                pool,
+                limit=max(limit, 8),
+                exclude_music=True,
+                exclude_trailers=True,
+                exclude_live=True,
+                background_gameplay_only=False,
+                min_views=min_views,
+                min_duration=float(min_duration),
+            )
+        )
+        if fallback:
+            print(
+                f"BROLL_DISCOVER metadata_fps_empty — trying {min(limit, len(fallback))} "
+                "title-ranked candidate(s) with download-time format probe"
+            )
+            candidates = fallback[:limit]
     if reuse_policy == "prefer_new":
         candidates.sort(key=lambda item: item.video_id in used)
     return rank_broll_candidates(candidates)
@@ -3064,6 +3083,9 @@ def ensure_broll_clips(
         frame_gate=frame_gate,
         jobs_root=jobs_root,
     )
+    retry_fresh_search = skip_broll_search_cache or (
+        len(acquire.get("queries_tried") or []) > 0 and inv.usable_count == 0
+    )
     montage_timer().stats.starting_usable = inv.usable_count
     montage_timer().stats.required_clips = needed_clips
     log_broll_progress("ensure_broll", inv, status="progress")
@@ -3243,7 +3265,7 @@ def ensure_broll_clips(
                     reuse_policy=reuse_policy,
                     exclude_source_ids=exclude,
                     jobs_root=jobs_root,
-                    force_search=skip_broll_search_cache,
+                    force_search=retry_fresh_search,
                 )
             queue_cursors[search_query] = 0
             if ranked_queues[search_query]:
