@@ -269,10 +269,12 @@ def _start_weekly_morning_catchup() -> None:
     import time
 
     from discovery.config import default_db_path
-    from discovery.weekly import maybe_run_daily_fill, weekly_reconcile_pipeline
+    from discovery.weekly import ensure_weekly_automation_started, weekly_reconcile_pipeline
 
     def _run() -> None:
         log = logging.getLogger("uvicorn.error")
+        if os.environ.get("WEEKLY_DAILY_FILL", "1").strip().lower() in {"0", "false", "no"}:
+            return
         db = default_db_path()
         if not Path(db).is_file():
             return
@@ -281,43 +283,15 @@ def _start_weekly_morning_catchup() -> None:
             pipe = weekly_reconcile_pipeline(store)
             if pipe.get("stale", {}).get("stale_failed"):
                 log.info("Weekly reconcile: stale jobs failed=%s", pipe["stale"])
-            result = maybe_run_daily_fill(store)
+            result = ensure_weekly_automation_started()
         except Exception as exc:
-            log.warning("Weekly daily fill kickoff failed: %s", exc)
+            log.warning("Weekly automation start failed: %s", exc)
             return
         finally:
             store.close()
-        if result and result.get("started"):
-            log.info("Weekly daily fill started: %s", result)
-        elif result and result.get("owners_needing"):
-            log.info("Weekly daily fill deferred (busy): %s", result)
+        log.info("Weekly automation: %s", result)
 
-    threading.Thread(target=_run, name="weekly-daily-fill", daemon=True).start()
-
-    def _poll_loop() -> None:
-        log = logging.getLogger("uvicorn.error")
-        if os.environ.get("WEEKLY_FILL_POLL", "1").strip().lower() in {"0", "false", "no"}:
-            return
-        try:
-            minutes = max(5, int(os.environ.get("WEEKLY_FILL_POLL_MINUTES", "10")))
-        except ValueError:
-            minutes = 10
-        while True:
-            time.sleep(minutes * 60)
-            db = default_db_path()
-            if not Path(db).is_file():
-                continue
-            store = DiscoveryStore(db)
-            try:
-                result = maybe_run_daily_fill(store)
-                if result and result.get("started"):
-                    log.info("Weekly fill poller started: %s", result)
-            except Exception as exc:
-                log.warning("Weekly fill poller: %s", exc)
-            finally:
-                store.close()
-
-    threading.Thread(target=_poll_loop, name="weekly-fill-poller", daemon=True).start()
+    threading.Thread(target=_run, name="weekly-automation-start", daemon=True).start()
 
 
 @app.on_event("startup")
@@ -1919,7 +1893,13 @@ def weekly_restart_day_endpoint(
             owner=str(owner),
             run_after=bool(run_after),
             kill_workers=bool(kill_workers),
-            wait_timeout_sec=max(60, int(body.get("wait_timeout_minutes") or 240) * 60),
+            wait_timeout_sec=max(
+                60,
+                int(body.get("wait_timeout_minutes") or 0) * 60
+                or __import__(
+                    "discovery.config", fromlist=["montage_job_timeout_sec"]
+                ).montage_job_timeout_sec(),
+            ),
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -1959,7 +1939,13 @@ def weekly_run_due_endpoint(
             dry_run=False,
             serial=bool(serial),
             wait_complete=bool(wait_complete),
-            wait_timeout_sec=max(60, int(body.get("wait_timeout_minutes") or 240) * 60),
+            wait_timeout_sec=max(
+                60,
+                int(body.get("wait_timeout_minutes") or 0) * 60
+                or __import__(
+                    "discovery.config", fromlist=["montage_job_timeout_sec"]
+                ).montage_job_timeout_sec(),
+            ),
             retry_failed=bool(body.get("retry_failed")),
         )
     except ValueError as exc:

@@ -50,11 +50,11 @@ Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | ForEach-Object {
         ($cmd -match "ffmpeg" -and $cmd -match "motivational")
     )
     if (-not $matchWorker) { return }
-    $pid = [int]$_.ProcessId
-    if ($killed -contains $pid) { return }
-    Write-Host "Stopping worker PID $pid"
-    Stop-ProcessTree -ProcessId $pid
-    $killed += $pid
+    $procId = [int]$_.ProcessId
+    if ($killed -contains $procId) { return }
+    Write-Host "Stopping worker PID $procId"
+    Stop-ProcessTree -ProcessId $procId
+    $killed += $procId
 }
 
 if ($killed.Count -gt 0) {

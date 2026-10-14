@@ -12,7 +12,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from discovery.config import default_db_path, project_root, resolve_python_exe
+from discovery.config import (
+    default_db_path,
+    montage_job_timeout_sec,
+    project_root,
+    resolve_python_exe,
+    weekly_montage_job_timeout_sec,
+)
 from discovery.motivation_build import _build_command
 from discovery.reuse_policy import normalize_reuse_policy, parse_reuse_policy
 from discovery.store import DiscoveryStore
@@ -25,6 +31,65 @@ def _subprocess_run(*popenargs, **kwargs):
     if sys.platform == "win32" and "creationflags" not in kwargs:
         kwargs["creationflags"] = CREATE_NO_WINDOW
     return subprocess.run(*popenargs, **kwargs)
+
+
+def _kill_process_tree(pid: int) -> None:
+    if pid <= 0:
+        return
+    if sys.platform == "win32":
+        try:
+            _subprocess_run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True,
+                timeout=30,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        return
+    import signal
+
+    try:
+        os.killpg(os.getpgid(pid), signal.SIGKILL)
+    except (OSError, ProcessLookupError):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            pass
+
+
+def _montage_timeout_sec_for_job(store, job_key: str) -> int:
+    row = store._conn.execute(
+        "SELECT 1 FROM weekly_slots WHERE job_key = ? LIMIT 1",
+        (job_key,),
+    ).fetchone()
+    if row:
+        return weekly_montage_job_timeout_sec()
+    return montage_job_timeout_sec()
+
+
+def _run_montage_build(cmd: list[str], *, cwd: Path, env: dict[str, str], timeout_sec: int):
+    popen_kwargs: dict[str, Any] = {
+        "cwd": cwd,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+        "env": env,
+    }
+    if sys.platform == "win32":
+        popen_kwargs["creationflags"] = CREATE_NO_WINDOW
+    proc = subprocess.Popen(cmd, **popen_kwargs)
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout_sec)
+    except subprocess.TimeoutExpired:
+        _kill_process_tree(proc.pid)
+        try:
+            proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        raise
+    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
 
 
 try:
@@ -307,15 +372,51 @@ def run_direct_montage_command(
                     "hook": plan.get("hook"),
                 }
                 cmd, slug, rel_output = _build_command(body, root)
-                result = _subprocess_run(
-                    cmd,
-                    cwd=root,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    env=env,
-                )
+                montage_timeout = _montage_timeout_sec_for_job(thread_store, job_key)
+                try:
+                    result = _run_montage_build(
+                        cmd,
+                        cwd=root,
+                        env=env,
+                        timeout_sec=montage_timeout,
+                    )
+                except subprocess.TimeoutExpired:
+                    mins = max(1, montage_timeout // 60)
+                    weekly_job = montage_timeout == weekly_montage_job_timeout_sec()
+                    limit_note = (
+                        "WEEKLY_MONTAGE_TIMEOUT_MINUTES"
+                        if weekly_job
+                        else "MONTAGE_JOB_TIMEOUT_MINUTES"
+                    )
+                    msg = (
+                        f"Montage exceeded {mins}m wall clock ({limit_note}). "
+                        "Weekly will retry this slot with preserved clips/acquire state."
+                    )
+                    try:
+                        from discovery.production_pause import kill_local_montage_workers
+
+                        kill_local_montage_workers(root)
+                    except Exception:
+                        pass
+                    truncated = "\n\n".join(logs)[-120_000:]
+                    thread_store._conn.execute(
+                        """
+                        UPDATE cursor_command_jobs
+                        SET status = 'failed', stdout_log = ?, stderr_log = ?, error_message = ?,
+                            error_summary = ?, completed_at = ?
+                        WHERE job_key = ?
+                        """,
+                        (
+                            truncated,
+                            msg,
+                            msg,
+                            msg[:500],
+                            _now_iso(),
+                            job_key,
+                        ),
+                    )
+                    thread_store._conn.commit()
+                    return
                 part_log = "\n".join(p for p in (result.stdout, result.stderr) if p).strip()
                 if part_log:
                     logs.append(f"=== build {index + 1}/{video_count} ({slug}) ===\n{part_log}")
@@ -398,6 +499,12 @@ def run_direct_montage_command(
             )
             thread_store._conn.commit()
         finally:
+            try:
+                from discovery.weekly import sync_weekly_slots_for_job
+
+                sync_weekly_slots_for_job(thread_store, job_key)
+            except Exception:
+                pass
             thread_store.close()
 
     if block:

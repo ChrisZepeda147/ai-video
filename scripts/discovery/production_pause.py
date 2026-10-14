@@ -13,6 +13,37 @@ from discovery.store import DiscoveryStore
 from discovery.weekly import mark_slot, reconcile_slots
 
 
+def production_pause_path() -> Path:
+    return project_root() / "data" / "production_pause.json"
+
+
+def is_production_paused() -> bool:
+    path = production_pause_path()
+    if not path.is_file():
+        return False
+    try:
+        import json
+
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return bool(data.get("paused"))
+    except Exception:
+        return False
+
+
+def set_production_paused(*, paused: bool, reason: str = "") -> None:
+    import json
+
+    path = production_pause_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if paused:
+        path.write_text(
+            json.dumps({"paused": True, "reason": reason, "at": _now_iso()}, indent=2),
+            encoding="utf-8",
+        )
+    elif path.is_file():
+        path.unlink(missing_ok=True)
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -68,6 +99,13 @@ def pause_local_production(
 
     store._conn.commit()
     reconcile_slots(store)
+    set_production_paused(paused=True, reason=msg)
+    try:
+        from discovery.weekly import stop_weekly_automation
+
+        stop_weekly_automation()
+    except Exception:
+        pass
     return {
         "jobs_cancelled": len(job_keys),
         "job_keys": job_keys,

@@ -307,3 +307,48 @@ def visual_prompt_dup_threshold() -> float:
 def analytics_exploit_ratio() -> float:
     """Fraction of concept guidance from proven patterns (rest is experiments)."""
     return min(1.0, max(0.0, _float_env("DISCOVERY_ANALYTICS_EXPLOIT_RATIO", DEFAULT_ANALYTICS_EXPLOIT_RATIO)))
+
+
+def weekly_montage_job_timeout_minutes() -> int:
+    """Wall clock for one automated weekly slot build_motivation_job attempt."""
+    try:
+        raw = int(os.environ.get("WEEKLY_MONTAGE_TIMEOUT_MINUTES", "30"))
+    except ValueError:
+        raw = 30
+    return max(15, min(120, raw))
+
+
+def weekly_montage_job_timeout_sec() -> int:
+    return weekly_montage_job_timeout_minutes() * 60
+
+
+def montage_job_timeout_minutes() -> int:
+    """Wall clock for manual / non-weekly direct montage."""
+    try:
+        raw = int(os.environ.get("MONTAGE_JOB_TIMEOUT_MINUTES", "45"))
+    except ValueError:
+        raw = 45
+    return max(15, min(120, raw))
+
+
+def montage_job_timeout_sec() -> int:
+    return montage_job_timeout_minutes() * 60
+
+
+def montage_stale_minutes(*, weekly: bool = True) -> int:
+    """Mark running montage jobs failed if worker hung (slightly above attempt timeout)."""
+    try:
+        raw = int(os.environ.get("WEEKLY_MONTAGE_STALE_MINUTES", "0"))
+    except ValueError:
+        raw = 0
+    if raw > 0:
+        return max(20, min(180, raw))
+    base = weekly_montage_job_timeout_minutes() if weekly else montage_job_timeout_minutes()
+    return base + 5
+
+
+def speech_max_candidate_attempts() -> int:
+    try:
+        return max(6, min(32, int(os.environ.get("SPEECH_MAX_CANDIDATES", "16"))))
+    except ValueError:
+        return 16
