@@ -50,6 +50,8 @@ SCENE_SEARCHES: tuple[tuple[str, str], ...] = (
     ("autumn", "autumn lake forest cinematic 60fps"),
     ("dolomite", "dolomites sunrise cinematic 60fps"),
     ("dolomites", "dolomites sunrise cinematic 60fps"),
+    ("orange", "mountain sunrise orange peaks cinematic 60fps"),
+    ("peaks", "mountain peak sunrise cinematic 60fps"),
     ("canyon", "canyon sunrise cinematic 60fps"),
     ("forest", "misty forest cinematic 60fps"),
 )

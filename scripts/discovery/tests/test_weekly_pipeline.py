@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from contextlib import ExitStack
 from unittest.mock import patch
@@ -77,6 +77,41 @@ class TestWeeklyPipeline(unittest.TestCase):
             "SELECT status FROM cursor_command_jobs WHERE job_key = ?", (job_key,)
         ).fetchone()
         self.assertEqual(st["status"], "running")
+
+    def test_weekly_montage_stale_fails_near_timeout_not_90m(self) -> None:
+        weekly.save_slots(
+            self.store,
+            week_start="2026-09-28",
+            owner="chris",
+            slots=[
+                {"day": "mon", "slot": 1, "speaker": "David Goggins", "visual_direction": "ocean"},
+            ],
+        )
+        record = create_command_job(self.store, user_command=MONTAGE_CMD)
+        job_key = str(record["job_key"])
+        slot_id = int(
+            self.store._conn.execute("SELECT id FROM weekly_slots WHERE slot = 1").fetchone()["id"]
+        )
+        self.store._conn.execute(
+            "UPDATE weekly_slots SET job_key = ?, status = 'running' WHERE id = ?",
+            (job_key, slot_id),
+        )
+        started = datetime.now(timezone.utc) - timedelta(minutes=36)
+        self.store._conn.execute(
+            """
+            UPDATE cursor_command_jobs
+            SET status = 'running', started_at = ?, worker_pid = NULL
+            WHERE job_key = ?
+            """,
+            (started.isoformat(), job_key),
+        )
+        self.store._conn.commit()
+        result = reconcile_stale_command_jobs(self.store)
+        self.assertEqual(result["stale_failed"], 1)
+        st = self.store._conn.execute(
+            "SELECT status FROM cursor_command_jobs WHERE job_key = ?", (job_key,)
+        ).fetchone()
+        self.assertEqual(st["status"], "failed")
 
     @patch("discovery.command_montage.spawn_direct_montage_job")
     def test_slot_lifecycle_running_before_render(self, _spawn) -> None:

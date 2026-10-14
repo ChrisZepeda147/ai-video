@@ -298,6 +298,56 @@ def _stale_job_minutes() -> int:
         return 90
 
 
+def touch_command_job_progress(job_key: str, note: str) -> None:
+    """Lightweight heartbeat from montage stdout (MONTAGE_STAGE, speech/broll attempts)."""
+    text = (note or "").strip()[:500]
+    if not text:
+        return
+    try:
+        store = DiscoveryStore(default_db_path())
+        try:
+            store._conn.execute(
+                """
+                UPDATE cursor_command_jobs
+                SET progress_at = ?, progress_note = ?
+                WHERE job_key = ? AND status = 'running'
+                """,
+                (now_iso(), text, job_key),
+            )
+            store._conn.commit()
+        finally:
+            store.close()
+    except Exception:
+        pass
+
+
+def _windows_process_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+    try:
+        import subprocess
+
+        r = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        out = (r.stdout or "").strip()
+        if not out or "No tasks are running" in out:
+            return False
+        return str(pid) in out
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def reconcile_stale_command_jobs(store) -> dict[str, int]:
     """Mark hung running/queued jobs failed (API reload kills daemon agent threads)."""
     max_age = _stale_job_minutes()
@@ -305,7 +355,8 @@ def reconcile_stale_command_jobs(store) -> dict[str, int]:
     failed = restarted = 0
     rows = store._conn.execute(
         """
-        SELECT job_key, status, started_at, created_at, user_command, stdout_log
+        SELECT job_key, status, started_at, created_at, user_command, stdout_log,
+               worker_pid, progress_at
         FROM cursor_command_jobs
         WHERE status IN ('running', 'queued')
         """
@@ -321,19 +372,78 @@ def reconcile_stale_command_jobs(store) -> dict[str, int]:
         age_min = (now - anchor.astimezone(timezone.utc)).total_seconds() / 60.0
         cmd = str(row["user_command"] or "")
         is_montage = should_use_direct_montage(cmd)
-        stale_min = max_age
+        weekly_row = None
         if is_montage:
-            from discovery.config import montage_stale_minutes
-
             weekly_row = store._conn.execute(
                 "SELECT 1 FROM weekly_slots WHERE job_key = ? LIMIT 1",
                 (job_key,),
             ).fetchone()
-            stale_min = max(
-                stale_min,
-                montage_stale_minutes(weekly=bool(weekly_row)),
+        stale_min = max_age
+        if is_montage:
+            from discovery.config import montage_stale_minutes
+
+            stale_min = montage_stale_minutes(weekly=bool(weekly_row))
+        worker_pid = int(row["worker_pid"] or 0)
+        progress_at = _parse_iso_ts(row["progress_at"])
+        if status == "running" and is_montage and worker_pid and not _windows_process_alive(worker_pid):
+            msg = (
+                f"Weekly montage worker PID {worker_pid} exited but job stayed running. "
+                "Marked failed for automatic retry."
             )
+            store._conn.execute(
+                """
+                UPDATE cursor_command_jobs
+                SET status = 'failed', error_message = ?, completed_at = ?, worker_pid = NULL
+                WHERE job_key = ?
+                """,
+                (msg, now_iso(), job_key),
+            )
+            failed += 1
+            try:
+                from discovery.weekly import sync_weekly_slots_for_job
+
+                sync_weekly_slots_for_job(store, job_key)
+            except Exception:
+                pass
+            continue
+        stuck_silent_min = 12
+        if (
+            status == "running"
+            and is_montage
+            and weekly_row
+            and progress_at
+            and age_min >= stale_min - 3
+        ):
+            prog_age = (now - progress_at.astimezone(timezone.utc)).total_seconds() / 60.0
+            if prog_age >= stuck_silent_min and worker_pid:
+                from discovery.command_montage import _kill_process_tree
+
+                _kill_process_tree(worker_pid)
+                msg = (
+                    f"Montage stuck (no progress {int(prog_age)}m, age {int(age_min)}m). "
+                    "Killed worker for weekly retry."
+                )
+                store._conn.execute(
+                    """
+                    UPDATE cursor_command_jobs
+                    SET status = 'failed', error_message = ?, completed_at = ?, worker_pid = NULL
+                    WHERE job_key = ?
+                    """,
+                    (msg, now_iso(), job_key),
+                )
+                failed += 1
+                try:
+                    from discovery.weekly import sync_weekly_slots_for_job
+
+                    sync_weekly_slots_for_job(store, job_key)
+                except Exception:
+                    pass
+                continue
         if status == "running" and age_min >= stale_min:
+            if worker_pid and is_montage:
+                from discovery.command_montage import _kill_process_tree
+
+                _kill_process_tree(worker_pid)
             msg = (
                 f"Stale after {int(age_min)}m (likely API restart or agent hung). "
                 "Retry from Weekly or Command."
@@ -341,7 +451,7 @@ def reconcile_stale_command_jobs(store) -> dict[str, int]:
             store._conn.execute(
                 """
                 UPDATE cursor_command_jobs
-                SET status = 'failed', error_message = ?, completed_at = ?
+                SET status = 'failed', error_message = ?, completed_at = ?, worker_pid = NULL
                 WHERE job_key = ?
                 """,
                 (msg, now_iso(), job_key),

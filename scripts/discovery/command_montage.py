@@ -24,6 +24,7 @@ from discovery.reuse_policy import normalize_reuse_policy, parse_reuse_policy
 from discovery.store import DiscoveryStore
 
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
 
 
 def _subprocess_run(*popenargs, **kwargs):
@@ -57,6 +58,49 @@ def _kill_process_tree(pid: int) -> None:
             pass
 
 
+def _process_tree_alive(root_pid: int) -> bool:
+    if root_pid <= 0:
+        return False
+    if sys.platform == "win32":
+        try:
+            result = _subprocess_run(
+                ["tasklist", "/FI", f"PID eq {root_pid}", "/NH"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            out = (result.stdout or "").strip()
+            if not out or "No tasks are running" in out:
+                return False
+            return str(root_pid) in out
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+    try:
+        os.kill(root_pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _montage_stdout_is_progress(line: str) -> bool:
+    text = line.strip()
+    if not text:
+        return False
+    if text.startswith("MONTAGE_STAGE=") or text.startswith("MONTAGE_TIMING="):
+        return True
+    markers = (
+        "Speech candidates:",
+        "Speech fallback",
+        "Speech extra search",
+        "Speech search ladder",
+        "Trying speech:",
+        "MONTAGE_STAGE",
+        "ensure_broll",
+        "BROLL_",
+    )
+    return any(m in text for m in markers)
+
+
 def _montage_timeout_sec_for_job(store, job_key: str) -> int:
     row = store._conn.execute(
         "SELECT 1 FROM weekly_slots WHERE job_key = ? LIMIT 1",
@@ -67,29 +111,74 @@ def _montage_timeout_sec_for_job(store, job_key: str) -> int:
     return montage_job_timeout_sec()
 
 
-def _run_montage_build(cmd: list[str], *, cwd: Path, env: dict[str, str], timeout_sec: int):
+def _run_montage_build(
+    cmd: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    timeout_sec: int,
+    job_key: str = "",
+    slug: str = "",
+    weekly_timeout: bool = False,
+):
     popen_kwargs: dict[str, Any] = {
         "cwd": cwd,
         "stdout": subprocess.PIPE,
-        "stderr": subprocess.PIPE,
+        "stderr": subprocess.STDOUT,
         "text": True,
         "encoding": "utf-8",
         "errors": "replace",
         "env": env,
+        "bufsize": 1,
     }
     if sys.platform == "win32":
-        popen_kwargs["creationflags"] = CREATE_NO_WINDOW
+        popen_kwargs["creationflags"] = CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
     proc = subprocess.Popen(cmd, **popen_kwargs)
-    try:
-        stdout, stderr = proc.communicate(timeout=timeout_sec)
-    except subprocess.TimeoutExpired:
+    stdout_lines: list[str] = []
+    timed_out = threading.Event()
+
+    def _on_timeout() -> None:
+        timed_out.set()
+        if weekly_timeout:
+            print(
+                f"WEEKLY_MONTAGE_TIMEOUT job_key={job_key} slug={slug} seconds={timeout_sec}",
+                flush=True,
+            )
         _kill_process_tree(proc.pid)
         try:
-            proc.communicate(timeout=10)
+            proc.wait(timeout=12)
         except subprocess.TimeoutExpired:
             proc.kill()
-        raise
-    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+
+    timer = threading.Timer(timeout_sec, _on_timeout)
+    timer.daemon = True
+    timer.start()
+    try:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            stdout_lines.append(line)
+            if job_key and _montage_stdout_is_progress(line):
+                try:
+                    from discovery.command_jobs import touch_command_job_progress
+
+                    touch_command_job_progress(job_key, line.strip()[:240])
+                except Exception:
+                    pass
+            if timed_out.is_set():
+                break
+        proc.wait(timeout=30 if timed_out.is_set() else None)
+    finally:
+        timer.cancel()
+
+    if timed_out.is_set():
+        if weekly_timeout:
+            cleared = not _process_tree_alive(proc.pid)
+            if cleared:
+                print(f"WEEKLY_MONTAGE_PROCESS_TREE_CLEARED job_key={job_key}", flush=True)
+        raise subprocess.TimeoutExpired(cmd, timeout_sec)
+
+    stdout = "".join(stdout_lines)
+    return subprocess.CompletedProcess(cmd, proc.returncode or 0, stdout, "")
 
 
 try:
@@ -346,6 +435,24 @@ def run_direct_montage_command(
 
             env = dict(subprocess_env() if subprocess_env else os.environ)
             env["PUBLISHING_OWNER"] = str(plan.get("owner") or "chris")
+            env["AI_VIDEO_COMMAND_JOB_KEY"] = job_key
+            is_weekly_job = bool(
+                thread_store._conn.execute(
+                    "SELECT 1 FROM weekly_slots WHERE job_key = ? LIMIT 1",
+                    (job_key,),
+                ).fetchone()
+            )
+            if is_weekly_job:
+                env["WEEKLY_MONTAGE_JOB"] = "1"
+            touch_command_job_progress = None
+            try:
+                from discovery.command_jobs import touch_command_job_progress as _touch
+
+                touch_command_job_progress = _touch
+            except Exception:
+                pass
+            if touch_command_job_progress:
+                touch_command_job_progress(job_key, "montage_worker_started")
 
             broll_query = str(plan["broll_query"])
             if plan.get("opener_note") and "drone" not in broll_query.lower():
@@ -373,16 +480,19 @@ def run_direct_montage_command(
                 }
                 cmd, slug, rel_output = _build_command(body, root)
                 montage_timeout = _montage_timeout_sec_for_job(thread_store, job_key)
+                weekly_job = montage_timeout == weekly_montage_job_timeout_sec()
                 try:
                     result = _run_montage_build(
                         cmd,
                         cwd=root,
                         env=env,
                         timeout_sec=montage_timeout,
+                        job_key=job_key,
+                        slug=slug,
+                        weekly_timeout=weekly_job,
                     )
                 except subprocess.TimeoutExpired:
                     mins = max(1, montage_timeout // 60)
-                    weekly_job = montage_timeout == weekly_montage_job_timeout_sec()
                     limit_note = (
                         "WEEKLY_MONTAGE_TIMEOUT_MINUTES"
                         if weekly_job
@@ -392,6 +502,16 @@ def run_direct_montage_command(
                         f"Montage exceeded {mins}m wall clock ({limit_note}). "
                         "Weekly will retry this slot with preserved clips/acquire state."
                     )
+                    if weekly_job:
+                        print(
+                            f"WEEKLY_MONTAGE_TIMEOUT job_key={job_key} slug={slug} "
+                            f"seconds={montage_timeout}",
+                            flush=True,
+                        )
+                        print(
+                            f"WEEKLY_MONTAGE_PROCESS_TREE_CLEARED job_key={job_key}",
+                            flush=True,
+                        )
                     try:
                         from discovery.production_pause import kill_local_montage_workers
 
@@ -500,6 +620,14 @@ def run_direct_montage_command(
             thread_store._conn.commit()
         finally:
             try:
+                thread_store._conn.execute(
+                    "UPDATE cursor_command_jobs SET worker_pid = NULL WHERE job_key = ?",
+                    (job_key,),
+                )
+                thread_store._conn.commit()
+            except Exception:
+                pass
+            try:
                 from discovery.weekly import sync_weekly_slots_for_job
 
                 sync_weekly_slots_for_job(thread_store, job_key)
@@ -540,7 +668,7 @@ def spawn_direct_montage_job(store, job_key: str) -> None:
     store._conn.commit()
 
     try:
-        subprocess.Popen(
+        proc = subprocess.Popen(
             [launch_python, str(script), "--job-key", job_key],
             cwd=root,
             env=env,
@@ -549,6 +677,15 @@ def spawn_direct_montage_job(store, job_key: str) -> None:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+        store._conn.execute(
+            """
+            UPDATE cursor_command_jobs
+            SET worker_pid = ?, progress_at = ?, progress_note = ?
+            WHERE job_key = ?
+            """,
+            (proc.pid, _now_iso(), "worker_spawned", job_key),
+        )
+        store._conn.commit()
     except OSError as exc:
         msg = f"Failed to launch direct montage worker: {exc}"[:500]
         store._conn.execute(

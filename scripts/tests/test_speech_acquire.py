@@ -9,6 +9,8 @@ from unittest.mock import patch
 
 from speech_acquire import (
     SpeechAcquireStats,
+    speech_search_queries,
+    speech_search_query_ladder,
     validate_downloaded_audio,
 )
 
@@ -37,6 +39,13 @@ class TestSpeechAcquire(unittest.TestCase):
             result = validate_downloaded_audio(path, min_seconds=30.0, probe_duration_fn=probe)
             self.assertTrue(result.ok)
             self.assertAlmostEqual(result.duration, 42.0)
+
+    def test_speech_ladder_rotates_on_attempt_offset(self) -> None:
+        ladder = speech_search_query_ladder("David Goggins", "")
+        self.assertGreaterEqual(len(ladder), 3)
+        q0, f0 = speech_search_queries("David Goggins", "", attempt_offset=0)
+        q1, f1 = speech_search_queries("David Goggins", "", attempt_offset=1)
+        self.assertNotEqual(q0, q1)
 
     def test_failure_details_aggregate(self) -> None:
         stats = SpeechAcquireStats(speaker="Jocko")

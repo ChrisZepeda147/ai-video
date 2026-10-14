@@ -1568,7 +1568,16 @@ def prepare_speech(
             f"Speech acquisition already tried {len(blocked_ids)} sources for this job folder. "
             "Pin a --speech-url, clear the job audio folder, or pick a different speaker clip.",
         )
-    primary_query, fallback_query = speech_search_queries(speaker, speech_query)
+    speech_attempt_offset = max(0, len(blocked_ids) // 2)
+    primary_query, fallback_query = speech_search_queries(
+        speaker,
+        speech_query,
+        attempt_offset=speech_attempt_offset,
+    )
+    print(
+        f"Speech search ladder offset={speech_attempt_offset} "
+        f"primary={primary_query!r} fallback={fallback_query!r}"
+    )
     candidate_batches: list[tuple[str, list[VideoCandidate]]] = []
     if speech_url:
         candidate_batches.append(("pinned", discover_urls([speech_url])))
@@ -1788,6 +1797,30 @@ def prepare_speech(
         stats.fallback_count = len(fallback)
         if fallback:
             _run_batch(fallback, "fallback")
+        if chosen is None:
+            from speech_acquire import extra_speech_search_queries
+
+            tried_queries = {primary_query, fallback_query}
+            for extra_q in extra_speech_search_queries(
+                speaker,
+                speech_query,
+                attempt_offset=speech_attempt_offset,
+                skip=tried_queries,
+            ):
+                tried_queries.add(extra_q)
+                extra = search_speeches(
+                    query=extra_q,
+                    speaker=speaker,
+                    limit=6,
+                    reuse_policy=reuse_policy,
+                    agent_vet=agent_speech_vet,
+                    exclude_ids=blocked_ids | tried_video_ids,
+                )
+                stats.fallback_count += len(extra)
+                if extra:
+                    print(f"Speech extra search candidates: {len(extra)} (search: {extra_q})")
+                    if _run_batch(extra, "fallback"):
+                        break
 
     if last_code == "FFMPEG_NOT_FOUND":
         raise MotivationJobError("FFMPEG_NOT_FOUND", format_toolchain_report())
@@ -3190,7 +3223,7 @@ def ensure_broll_clips(
     if inv.usable_count > 0 and not inv.satisfies_count():
         start_idx = 0
     elif inv.usable_count == 0 and saved_q_idx > 0:
-        start_idx = 0
+        start_idx = min(saved_q_idx + 1, max(0, len(ladder) - 1))
     else:
         start_idx = min(saved_q_idx, max(0, len(ladder) - 1))
     source_cap = 3 if not split_full_source else 4

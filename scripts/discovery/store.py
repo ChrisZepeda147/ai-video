@@ -148,6 +148,9 @@ class DiscoveryStore:
 
         command_migrations = [
             ("cursor_command_jobs", "error_summary", "TEXT"),
+            ("cursor_command_jobs", "worker_pid", "INTEGER"),
+            ("cursor_command_jobs", "progress_at", "TEXT"),
+            ("cursor_command_jobs", "progress_note", "TEXT"),
         ]
         for table, column, col_type in command_migrations:
             if not self._column_exists(table, column):

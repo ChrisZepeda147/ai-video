@@ -178,15 +178,68 @@ def find_candidate_audio(audio_dir: Path, video_id: str) -> Path | None:
     return all_mp3[-1] if len(all_mp3) == 1 else None
 
 
-def speech_search_queries(speaker: str, speech_query: str) -> tuple[str, str]:
+def speech_search_query_ladder(speaker: str, speech_query: str) -> list[str]:
+    """Distinct YouTube searches for the same speaker (weekly retries rotate through these)."""
     base = (speech_query or f"{speaker} motivational speech").strip()
-    primary = base
     tokens = [t for t in re.split(r"[^a-z0-9]+", speaker.lower()) if t]
-    lead = tokens[0] if tokens else speaker
-    fallback = f"{lead} interview speech motivation discipline talk"
-    if "interview" not in base.lower() and "podcast" not in base.lower():
-        primary = f"{lead} interview motivational speech"
+    lead = tokens[0] if tokens else speaker.strip()
+    full = " ".join(tokens) if tokens else speaker.strip()
+    candidates = [
+        base,
+        f"{lead} interview motivational speech",
+        f"{full} motivation discipline speech",
+        f"{full} discipline speech interview",
+        f"{full} mindset podcast motivation",
+        f"{lead} motivation speech discipline talk",
+        f"{lead} interview discipline podcast",
+    ]
+    seen: set[str] = set()
+    ladder: list[str] = []
+    for q in candidates:
+        q = " ".join(q.split()).strip()
+        if not q or q.lower() in seen:
+            continue
+        seen.add(q.lower())
+        ladder.append(q)
+    return ladder
+
+
+def speech_search_queries(
+    speaker: str,
+    speech_query: str,
+    *,
+    attempt_offset: int = 0,
+) -> tuple[str, str]:
+    ladder = speech_search_query_ladder(speaker, speech_query)
+    if not ladder:
+        return (speech_query or f"{speaker} motivational speech", "")
+    n = len(ladder)
+    off = max(0, attempt_offset) % n
+    primary = ladder[off]
+    fallback = ladder[(off + 1) % n]
     return primary, fallback
+
+
+def extra_speech_search_queries(
+    speaker: str,
+    speech_query: str,
+    *,
+    attempt_offset: int,
+    skip: set[str],
+) -> list[str]:
+    """Additional queries after primary+fallback batches fail."""
+    ladder = speech_search_query_ladder(speaker, speech_query)
+    if not ladder:
+        return []
+    n = len(ladder)
+    off = max(0, attempt_offset) % n
+    ordered = [ladder[(off + i) % n] for i in range(n)]
+    out: list[str] = []
+    for q in ordered[2:]:
+        if q.lower() in {s.lower() for s in skip}:
+            continue
+        out.append(q)
+    return out[:3]
 
 
 def rank_speech_candidate(item) -> tuple[int, int, int]:
