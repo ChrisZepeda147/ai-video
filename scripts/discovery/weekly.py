@@ -828,6 +828,122 @@ def _append_fill_log(line: str) -> None:
         handle.write(f"{stamp}  {line}\n")
 
 
+def _round_robin_state_path() -> Path:
+    return project_root() / "data" / "logs" / "weekly-round-robin.json"
+
+
+def round_robin_key(owner: str, day_iso: str) -> str:
+    return f"{normalize_owner(owner)}:{day_iso}"
+
+
+def _read_round_robin_state() -> dict[str, int]:
+    import json as _json
+
+    path = _round_robin_state_path()
+    if not path.is_file():
+        return {}
+    try:
+        raw = _json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, int] = {}
+    for key, val in raw.items():
+        try:
+            out[str(key)] = int(val)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _write_round_robin_state(state: dict[str, int]) -> None:
+    import json as _json
+
+    path = _round_robin_state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_json.dumps(state, indent=2), encoding="utf-8")
+
+
+def clear_round_robin_cursor(*, owner: str, day: str) -> None:
+    key = round_robin_key(owner, day)
+    state = _read_round_robin_state()
+    if key in state:
+        del state[key]
+        _write_round_robin_state(state)
+
+
+def set_round_robin_cursor(*, owner: str, day: str, next_slot: int) -> None:
+    key = round_robin_key(owner, day)
+    state = _read_round_robin_state()
+    state[key] = int(next_slot)
+    _write_round_robin_state(state)
+
+
+def get_round_robin_cursor(*, owner: str, day: str) -> int | None:
+    val = _read_round_robin_state().get(round_robin_key(owner, day))
+    return int(val) if val is not None else None
+
+
+def _advance_round_robin_cursor(slot_numbers: list[int], attempted_slot: int) -> int:
+    if not slot_numbers:
+        return 1
+    try:
+        idx = slot_numbers.index(attempted_slot)
+    except ValueError:
+        return slot_numbers[0]
+    return slot_numbers[(idx + 1) % len(slot_numbers)]
+
+
+def pick_next_round_robin_slot(
+    store,
+    *,
+    day: str,
+    owner: str,
+    allowed_slot_ids: set[int] | None = None,
+) -> dict[str, Any] | None:
+    """Next unfinished slot for one attempt (round-robin; persists cursor across API restarts)."""
+    owner_norm = normalize_owner(owner)
+    ordered = slots_for_calendar_day(store, day=day, owner=owner_norm)
+    if allowed_slot_ids is not None:
+        ordered = [s for s in ordered if int(s["id"]) in allowed_slot_ids]
+    if not ordered:
+        return None
+
+    slot_numbers = sorted({int(s.get("slot") or 0) for s in ordered if int(s.get("slot") or 0) > 0})
+    if not slot_numbers:
+        return None
+
+    by_no = {int(s.get("slot") or 0): s for s in ordered}
+    key = round_robin_key(owner_norm, day)
+    state = _read_round_robin_state()
+    cursor = int(state.get(key, slot_numbers[0]))
+    if cursor not in slot_numbers:
+        cursor = slot_numbers[0]
+
+    start_idx = slot_numbers.index(cursor)
+    for offset in range(len(slot_numbers)):
+        slot_no = slot_numbers[(start_idx + offset) % len(slot_numbers)]
+        row = by_no.get(slot_no)
+        if not row:
+            continue
+        slot_id = int(row["id"])
+        status = _slot_status(store, slot_id)
+        if status == "done":
+            continue
+        if status == "running":
+            return None
+        if status == "failed":
+            requeue_slot(store, slot_id)
+        next_cursor = _advance_round_robin_cursor(slot_numbers, slot_no)
+        state[key] = next_cursor
+        _write_round_robin_state(state)
+        return row
+
+    clear_round_robin_cursor(owner=owner_norm, day=day)
+    return None
+
+
 def run_weekly_fill_day(
     store,
     *,
@@ -864,14 +980,15 @@ def run_weekly_fill_day(
         }
 
     rounds = 0
-    max_rounds = _fill_max_rounds()
     tick = _automation_tick_sec()
 
-    while rounds < max_rounds:
+    while not day_fill_complete(store, day=day, owner=owner_norm):
         rounds += 1
-        if week_automation_complete(store, owner=owner_norm):
+        from discovery.production_pause import is_production_paused
+
+        if is_production_paused():
             break
-        result = weekly_automation_tick(store, owner=owner_norm)
+        result = weekly_automation_tick(store, day=day, owner=owner_norm)
         if result.get("action") in {"week_complete", "day_complete"}:
             break
         if result.get("action") == "preflight_blocked":
@@ -882,8 +999,6 @@ def run_weekly_fill_day(
                 "rounds": rounds,
                 "error": "; ".join(result.get("error") or []),
             }
-        if result.get("action") == "attempted" and result.get("status") == "failed":
-            continue
         if result.get("action") in {"idle", "queue_busy", "submit_busy"} and tick:
             _time.sleep(tick)
         if result.get("action") == "slot_running" and tick:
@@ -1031,7 +1146,7 @@ def weekly_automation_tick(
     day: str | None = None,
     owner: str | None = None,
 ) -> dict[str, Any]:
-    """One step toward 3/3: oldest incomplete calendar day first, then slot 1→3."""
+    """One montage attempt: oldest incomplete day, round-robin slot (one try per pass)."""
     from discovery.production_pause import is_production_paused
 
     if is_production_paused():
@@ -1072,54 +1187,59 @@ def weekly_automation_tick(
                 requeue_failed_slots_for_calendar_day(store, day=day_iso, owner=owner_norm)
 
                 for slot_row in slots_for_calendar_day(store, day=day_iso, owner=owner_norm):
-                    slot_id = int(slot_row["id"])
-                    slot_no = int(slot_row.get("slot") or 0)
-                    status = _slot_status(store, slot_id)
-                    if status == "done":
-                        continue
-                    if status == "running":
+                    if _slot_status(store, int(slot_row["id"])) == "running":
                         return {
                             "day": day_iso,
                             "action": "slot_running",
                             "owner": owner_norm,
-                            "slot": slot_no,
+                            "slot": int(slot_row.get("slot") or 0),
                         }
-                    if status == "failed":
-                        requeue_slot(store, slot_id)
 
-                    command = slot_command_text(slot_row)
-                    wait_sec = _fill_slot_wait_sec()
-                    _append_fill_log(
-                        f"automation submit {owner_norm} day={day_iso} slot={slot_no} id={slot_id}"
+                slot_row = pick_next_round_robin_slot(
+                    store, day=day_iso, owner=owner_norm
+                )
+                if not slot_row:
+                    if day_fill_complete(store, day=day_iso, owner=owner_norm):
+                        clear_round_robin_cursor(owner=owner_norm, day=day_iso)
+                        continue
+                    return {"day": day_iso, "action": "idle", "owner": owner_norm}
+
+                slot_id = int(slot_row["id"])
+                slot_no = int(slot_row.get("slot") or 0)
+                command = slot_command_text(slot_row)
+                wait_sec = _fill_slot_wait_sec()
+                _append_fill_log(
+                    f"automation submit {owner_norm} day={day_iso} slot={slot_no} id={slot_id} "
+                    f"(round-robin cursor→{get_round_robin_cursor(owner=owner_norm, day=day_iso)})"
+                )
+                try:
+                    weekly_submit_command(
+                        store,
+                        user_command=command,
+                        slot_id=slot_id,
+                        wait_montage=True,
+                        wait_timeout_sec=wait_sec,
                     )
-                    try:
-                        weekly_submit_command(
-                            store,
-                            user_command=command,
-                            slot_id=slot_id,
-                            wait_montage=True,
-                            wait_timeout_sec=wait_sec,
-                        )
-                    except Exception as exc:  # noqa: BLE001
-                        mark_slot(
-                            store,
-                            slot_id,
-                            status="failed",
-                            error=str(exc)[:500],
-                            reset_job_key=True,
-                        )
-                        _append_fill_log(
-                            f"automation exception day={day_iso} slot={slot_no}: {str(exc)[:160]}"
-                        )
+                except Exception as exc:  # noqa: BLE001
+                    prepare_slot_for_retry(
+                        store,
+                        slot_id,
+                        error=str(exc)[:500],
+                    )
+                    _append_fill_log(
+                        f"automation exception day={day_iso} slot={slot_no}: {str(exc)[:160]}"
+                    )
 
-                    final = _slot_status(store, slot_id)
-                    return {
-                        "day": day_iso,
-                        "action": "attempted",
-                        "owner": owner_norm,
-                        "slot": slot_no,
-                        "status": final,
-                    }
+                final = _slot_status(store, slot_id)
+                if day_fill_complete(store, day=day_iso, owner=owner_norm):
+                    clear_round_robin_cursor(owner=owner_norm, day=day_iso)
+                return {
+                    "day": day_iso,
+                    "action": "attempted",
+                    "owner": owner_norm,
+                    "slot": slot_no,
+                    "status": final,
+                }
 
         if week_automation_complete(store, owner=owner_filter):
             return {"day": calendar_days[-1], "action": "week_complete"}
@@ -1146,19 +1266,12 @@ def _weekly_automation_daemon() -> None:
             break
         _, wakeup, _ = _automation_threading()
         store = DiscoveryStore(default_db_path())
-        instant_retry = False
         try:
-            result = weekly_automation_tick(store)
-            instant_retry = (
-                result.get("action") == "attempted"
-                and result.get("status") != "done"
-            )
+            weekly_automation_tick(store)
         except Exception as exc:  # noqa: BLE001
             _append_fill_log(f"automation daemon error: {exc}")
         finally:
             store.close()
-        if instant_retry:
-            continue
         wakeup.wait(timeout=tick)
         wakeup.clear()
 
@@ -2044,103 +2157,69 @@ def run_weekly_due_batch(
     submitted: list[dict[str, str]] = []
     deadline = _time.monotonic() + max(60, wait_timeout_sec)
     retry_sleep = _slot_retry_sleep_sec()
-    max_attempts = _slot_max_attempts_per_slot()
 
     ordered = slots_for_calendar_day(store, day=day, owner=owner_norm)
     if slot_ids:
         want = {int(x) for x in slot_ids}
         ordered = [s for s in ordered if int(s["id"]) in want]
     ordered = ordered[:cap]
+    allowed_ids = {int(s["id"]) for s in ordered}
 
-    for slot in ordered:
-        if _time.monotonic() >= deadline:
+    while _time.monotonic() < deadline:
+        if all(_slot_status(store, int(s["id"])) == "done" for s in ordered):
             break
-
-        slot_id = int(slot["id"])
-        if _slot_status(store, slot_id) == "done":
-            continue
-
-        attempts = 0
-        while _time.monotonic() < deadline and attempts < max_attempts:
-            reconcile_slots(store)
-            status = _slot_status(store, slot_id)
-            if status == "done":
-                break
-            if status == "failed":
-                requeue_slot(store, slot_id)
-                status = _slot_status(store, slot_id)
-            if status == "running":
-                if not _wait_for_production_idle(store, deadline=deadline):
-                    break
-                status = _slot_status(store, slot_id)
-                if status == "done":
-                    break
-                if status == "failed":
-                    continue
-
-            if status not in {"queued", "rerunning"}:
-                break
-
+        reconcile_slots(store)
+        if production_queue_busy(store, owner=None):
             if not _wait_for_production_idle(store, deadline=deadline):
                 break
+            continue
 
-            slot_row = _fetch_slot_record(store, slot_id) or slot
-            command = slot_command_text(slot_row)
-            attempts += 1
-            try:
-                result = submit_fn(
-                    store,
-                    user_command=command,
-                    slot_id=slot_id,
-                    agent_model=None,
-                    wait_montage=wait_complete,
-                    wait_timeout_sec=wait_timeout_sec,
-                )
-            except Exception as exc:  # noqa: BLE001
-                mark_slot(
-                    store,
-                    slot_id,
-                    status="failed",
-                    error=str(exc)[:500],
-                    reset_job_key=True,
-                )
-                _append_fill_log(
-                    f"slot {slot_id} attempt {attempts} exception: {str(exc)[:120]}"
-                )
-                if retry_sleep:
-                    _time.sleep(retry_sleep)
-                continue
-
-            refresh_plan_completion(store, plan_id=int(slot_row["plan_id"]))
-            status = _slot_status(store, slot_id)
-            if status == "done":
-                job_key = str(result.get("job_key") or "")
-                submitted.append({"slot_id": str(slot_id), "job_key": job_key})
+        slot_row = pick_next_round_robin_slot(
+            store, day=day, owner=owner_norm, allowed_slot_ids=allowed_ids
+        )
+        if not slot_row:
+            if all(_slot_status(store, int(s["id"])) == "done" for s in ordered):
                 break
+            if not _wait_for_production_idle(store, deadline=deadline):
+                break
+            continue
 
-            if status == "failed":
-                _append_fill_log(f"slot {slot_id} attempt {attempts} failed — retry")
-                requeue_slot(store, slot_id)
-                if retry_sleep:
-                    _time.sleep(retry_sleep)
-                continue
-
-            if status == "running":
-                _append_fill_log(f"slot {slot_id} still running after submit — wait")
-                if not _wait_for_production_idle(store, deadline=deadline):
-                    break
-                continue
-
-            job_key = str(result.get("job_key") or "")
-            if job_key and status == "done":
-                submitted.append({"slot_id": str(slot_id), "job_key": job_key})
-            break
-
-        if _slot_status(store, slot_id) != "done":
-            _append_fill_log(
-                f"slot {slot_id} not done after {attempts} attempt(s) — stopping batch"
+        slot_id = int(slot_row["id"])
+        slot_row = _fetch_slot_record(store, slot_id) or slot_row
+        command = slot_command_text(slot_row)
+        try:
+            result = submit_fn(
+                store,
+                user_command=command,
+                slot_id=slot_id,
+                agent_model=None,
+                wait_montage=wait_complete,
+                wait_timeout_sec=wait_timeout_sec,
             )
+        except Exception as exc:  # noqa: BLE001
+            prepare_slot_for_retry(
+                store,
+                slot_id,
+                error=str(exc)[:500],
+            )
+            _append_fill_log(f"slot {slot_id} exception: {str(exc)[:120]}")
+            if retry_sleep:
+                _time.sleep(retry_sleep)
+            continue
+
+        refresh_plan_completion(store, plan_id=int(slot_row["plan_id"]))
+        status = _slot_status(store, slot_id)
+        if status == "done":
+            job_key = str(result.get("job_key") or "")
+            submitted.append({"slot_id": str(slot_id), "job_key": job_key})
+
+        if day_fill_complete(store, day=day, owner=owner_norm):
+            clear_round_robin_cursor(owner=owner_norm, day=day)
             break
+
+        if status == "running":
+            if not _wait_for_production_idle(store, deadline=deadline):
+                break
 
     out = {
         "day": day,

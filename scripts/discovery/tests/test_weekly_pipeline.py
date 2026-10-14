@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from contextlib import ExitStack
 from unittest.mock import patch
 
 from discovery import weekly
@@ -200,7 +201,8 @@ class TestWeeklyPipeline(unittest.TestCase):
         )
         self.assertGreaterEqual(calls.count(slot_one_id), 2)
         first_slot_two = calls.index(slot_two_id)
-        self.assertGreaterEqual(calls[:first_slot_two].count(slot_one_id), 2)
+        self.assertEqual(first_slot_two, 1)
+        self.assertEqual(calls[0], slot_one_id)
         failed = self.store._conn.execute(
             "SELECT status FROM weekly_slots WHERE slot = 1"
         ).fetchone()
@@ -210,10 +212,18 @@ class TestWeeklyPipeline(unittest.TestCase):
         toolchain = {"ok": True}
         attempts: dict[int, int] = {}
 
+        slot_one_id = None
+
         def submit(store, user_command, slot_id=None, **_kw):
+            nonlocal slot_one_id
             sid = int(slot_id or 0)
+            if slot_one_id is None:
+                row = store._conn.execute(
+                    "SELECT id FROM weekly_slots WHERE slot = 1"
+                ).fetchone()
+                slot_one_id = int(row["id"]) if row else sid
             attempts[sid] = attempts.get(sid, 0) + 1
-            if sid == 1 and attempts[sid] == 1:
+            if sid == slot_one_id and attempts[sid] == 1:
                 weekly.mark_slot(store, sid, status="failed", error="boom")
                 raise RuntimeError("boom")
             record = create_command_job(store, user_command=user_command)
@@ -248,7 +258,10 @@ class TestWeeklyPipeline(unittest.TestCase):
         self.assertTrue(result.get("complete"))
         stats = result.get("today_stats") or {}
         self.assertEqual(int(stats.get("done") or 0), 3)
-        self.assertGreaterEqual(attempts.get(1, 0), 2)
+        self.assertGreaterEqual(
+            attempts.get(slot_one_id or 0, 0),
+            2,
+        )
 
     def test_automation_backlog_mon_before_tue(self) -> None:
         weekly.save_slots(
@@ -268,6 +281,229 @@ class TestWeeklyPipeline(unittest.TestCase):
             through=__import__("datetime").date.fromisoformat(tue),
         )
         self.assertEqual(backlog, [mon, tue])
+
+
+class TestWeeklyRoundRobin(unittest.TestCase):
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.store = DiscoveryStore(Path(tmp.name) / "catalog.sqlite")
+        self.addCleanup(self.store.close)
+        self.rr_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.rr_dir.cleanup)
+        self.rr_path = Path(self.rr_dir.name) / "weekly-round-robin.json"
+        self.rr_patch = patch("discovery.weekly._round_robin_state_path", return_value=self.rr_path)
+        self.rr_patch.start()
+        self.addCleanup(self.rr_patch.stop)
+
+    def _save_three(self, week_start: str = "2026-10-12") -> dict[int, int]:
+        weekly.save_slots(
+            self.store,
+            week_start=week_start,
+            owner="chris",
+            slots=[
+                {"day": "mon", "slot": 1, "speaker": "A", "visual_direction": "v1"},
+                {"day": "mon", "slot": 2, "speaker": "B", "visual_direction": "v2"},
+                {"day": "mon", "slot": 3, "speaker": "C", "visual_direction": "v3"},
+            ],
+        )
+        out: dict[int, int] = {}
+        for n in (1, 2, 3):
+            row = self.store._conn.execute(
+                "SELECT id FROM weekly_slots WHERE slot = ?", (n,)
+            ).fetchone()
+            out[n] = int(row["id"])
+        return out
+
+    def _slot_id(self, slot_no: int) -> int:
+        row = self.store._conn.execute(
+            "SELECT id FROM weekly_slots WHERE slot = ?", (slot_no,)
+        ).fetchone()
+        return int(row["id"])
+
+    def _apply_preflight(self, stack: ExitStack) -> None:
+        toolchain = {"ok": True}
+        stack.enter_context(
+            patch("discovery.config.resolve_python_exe", return_value="C:/Python/python.exe")
+        )
+        stack.enter_context(patch("toolchain_env.check_toolchain", return_value=toolchain))
+        stack.enter_context(patch("discovery.weekly.production_queue_busy", return_value=False))
+
+    def test_failed_v1_waits_for_v2_v3_before_retry(self) -> None:
+        ids = self._save_three()
+        calls: list[int] = []
+
+        def submit(store, user_command, slot_id=None, **_kw):
+            sid = int(slot_id or 0)
+            calls.append(sid)
+            if sid == ids[1]:
+                weekly.prepare_slot_for_retry(store, sid, error="fail v1")
+                return {"job_key": "cmd_x", "status": "failed"}
+            record = create_command_job(store, user_command=user_command)
+            job_key = str(record["job_key"])
+            weekly.mark_slot(store, sid, status="running", job_key=job_key)
+            store._conn.execute(
+                "UPDATE cursor_command_jobs SET status = 'completed', completed_at = ? WHERE job_key = ?",
+                (now_iso(), job_key),
+            )
+            store._conn.commit()
+            weekly._sync_slot_from_job(store, sid, job_key)
+            return {"job_key": job_key, "status": "completed"}
+
+        day = weekly.slot_date("2026-10-12", "mon")
+        with ExitStack() as stack:
+            self._apply_preflight(stack)
+            stack.enter_context(
+                patch("discovery.weekly.weekly_submit_command", side_effect=submit)
+            )
+            for _ in range(4):
+                weekly.weekly_automation_tick(self.store, day=day, owner="chris")
+
+        self.assertGreaterEqual(len(calls), 4)
+        self.assertEqual(calls[0], ids[1])
+        self.assertEqual(calls[1], ids[2])
+        self.assertEqual(calls[2], ids[3])
+        self.assertEqual(calls[3], ids[1])
+
+    def test_done_slots_skipped_on_later_passes(self) -> None:
+        ids = self._save_three()
+        weekly.mark_slot(self.store, ids[2], status="done")
+        calls: list[int] = []
+
+        def submit(store, user_command, slot_id=None, **_kw):
+            calls.append(int(slot_id or 0))
+            weekly.prepare_slot_for_retry(store, int(slot_id or 0), error="nope")
+            return {"job_key": "cmd_x", "status": "failed"}
+
+        day = weekly.slot_date("2026-10-12", "mon")
+        with ExitStack() as stack:
+            self._apply_preflight(stack)
+            stack.enter_context(
+                patch("discovery.weekly.weekly_submit_command", side_effect=submit)
+            )
+            for _ in range(4):
+                weekly.weekly_automation_tick(self.store, day=day, owner="chris")
+
+        self.assertNotIn(ids[2], calls)
+        self.assertEqual(calls[:2], [ids[1], ids[3]])
+
+    def test_two_failures_then_success_rotates(self) -> None:
+        ids = self._save_three()
+        calls: list[int] = []
+
+        def submit(store, user_command, slot_id=None, **_kw):
+            sid = int(slot_id or 0)
+            calls.append(sid)
+            if sid in {ids[1], ids[2]}:
+                weekly.prepare_slot_for_retry(store, sid, error="fail")
+                return {"job_key": "cmd_x", "status": "failed"}
+            record = create_command_job(store, user_command=user_command)
+            job_key = str(record["job_key"])
+            weekly.mark_slot(store, sid, status="running", job_key=job_key)
+            store._conn.execute(
+                "UPDATE cursor_command_jobs SET status = 'completed', completed_at = ? WHERE job_key = ?",
+                (now_iso(), job_key),
+            )
+            store._conn.commit()
+            weekly._sync_slot_from_job(store, sid, job_key)
+            return {"job_key": job_key, "status": "completed"}
+
+        day = weekly.slot_date("2026-10-12", "mon")
+        with ExitStack() as stack:
+            self._apply_preflight(stack)
+            stack.enter_context(
+                patch("discovery.weekly.weekly_submit_command", side_effect=submit)
+            )
+            for _ in range(5):
+                weekly.weekly_automation_tick(self.store, day=day, owner="chris")
+
+        self.assertEqual(calls[:3], [ids[1], ids[2], ids[3]])
+        self.assertEqual(calls[3], ids[1])
+        self.assertEqual(calls[4], ids[2])
+
+    def test_all_fail_repeatedly_keeps_going(self) -> None:
+        ids = self._save_three()
+        n_ticks = 12
+
+        def submit(store, user_command, slot_id=None, **_kw):
+            weekly.prepare_slot_for_retry(store, int(slot_id or 0), error="fail")
+            return {"job_key": "cmd_x", "status": "failed"}
+
+        day = weekly.slot_date("2026-10-12", "mon")
+        with ExitStack() as stack:
+            self._apply_preflight(stack)
+            stack.enter_context(
+                patch("discovery.weekly.weekly_submit_command", side_effect=submit)
+            )
+            for _ in range(n_ticks):
+                result = weekly.weekly_automation_tick(self.store, day=day, owner="chris")
+                self.assertEqual(result.get("action"), "attempted")
+
+        for n in (1, 2, 3):
+            st = self.store._conn.execute(
+                "SELECT status FROM weekly_slots WHERE slot = ?", (n,)
+            ).fetchone()
+            self.assertEqual(str(st["status"]), "queued")
+
+    def test_assets_persist_across_round_robin_retries(self) -> None:
+        from discovery.config import project_root
+        from discovery.motivation_paths import default_job_date, job_dir_for, motivation_jobs_root
+
+        ids = self._save_three()
+        root = project_root()
+        job_dir = job_dir_for(
+            "weekly-chris-2026-10-12-mon-1",
+            motivation_jobs_root(root),
+            job_date=default_job_date(),
+        )
+        job_dir.mkdir(parents=True, exist_ok=True)
+        sidecar = job_dir / "broll_acquire.json"
+        sidecar.write_text('{"failed_source_ids": ["xyz"]}', encoding="utf-8")
+
+        def submit(store, user_command, slot_id=None, **_kw):
+            if int(slot_id or 0) == ids[1]:
+                weekly.prepare_slot_for_retry(store, ids[1], error="fail")
+            return {"job_key": "cmd_x", "status": "failed"}
+
+        day = weekly.slot_date("2026-10-12", "mon")
+        with ExitStack() as stack:
+            self._apply_preflight(stack)
+            stack.enter_context(
+                patch("discovery.weekly.weekly_submit_command", side_effect=submit)
+            )
+            weekly.weekly_automation_tick(self.store, day=day, owner="chris")
+            weekly.weekly_automation_tick(self.store, day=day, owner="chris")
+
+        self.assertTrue(sidecar.is_file())
+        self.assertIn("xyz", sidecar.read_text(encoding="utf-8"))
+
+    def test_api_restart_resumes_round_robin_cursor(self) -> None:
+        ids = self._save_three()
+        day = weekly.slot_date("2026-10-12", "mon")
+        calls: list[int] = []
+
+        def submit(store, user_command, slot_id=None, **_kw):
+            calls.append(int(slot_id or 0))
+            weekly.prepare_slot_for_retry(store, int(slot_id or 0), error="fail")
+            return {"job_key": "cmd_x", "status": "failed"}
+
+        with ExitStack() as stack:
+            self._apply_preflight(stack)
+            stack.enter_context(
+                patch("discovery.weekly.weekly_submit_command", side_effect=submit)
+            )
+            weekly.weekly_automation_tick(self.store, day=day, owner="chris")
+        self.assertEqual(calls, [ids[1]])
+        self.assertEqual(weekly.get_round_robin_cursor(owner="chris", day=day), 2)
+
+        calls.clear()
+        with ExitStack() as stack:
+            self._apply_preflight(stack)
+            stack.enter_context(
+                patch("discovery.weekly.weekly_submit_command", side_effect=submit)
+            )
+            weekly.weekly_automation_tick(self.store, day=day, owner="chris")
+        self.assertEqual(calls, [ids[2]])
 
 
 if __name__ == "__main__":
