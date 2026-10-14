@@ -855,6 +855,92 @@ def _round_robin_state_path() -> Path:
     return project_root() / "data" / "logs" / "weekly-round-robin.json"
 
 
+def _automation_kick_signal_path() -> Path:
+    return project_root() / "data" / "logs" / "weekly-automation-kick.json"
+
+
+def _running_in_weekly_montage_worker() -> bool:
+    import os as _os
+
+    return _os.environ.get("WEEKLY_MONTAGE_WORKER", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
+def _is_weekly_automation_daemon_thread() -> bool:
+    import threading
+
+    me = threading.current_thread()
+    return me.name == "weekly-automation"
+
+
+def _signal_automation_kick(*, source: str, slot_id: int | None = None) -> None:
+    import json as _json
+
+    path = _automation_kick_signal_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"at": _now(), "source": source}
+    if slot_id is not None:
+        payload["slot_id"] = int(slot_id)
+    path.write_text(_json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _consume_automation_kick_signal() -> bool:
+    import json as _json
+
+    path = _automation_kick_signal_path()
+    if not path.is_file():
+        return False
+    try:
+        _json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    try:
+        path.unlink()
+    except OSError:
+        return True
+    return True
+
+
+def reconcile_weekly_terminal_jobs(store) -> int:
+    """Sync weekly slots when detached worker wrote terminal job status (API reload safe)."""
+    from discovery.command_jobs import get_command_job
+
+    ensure_weekly_tables(store)
+    rows = store._conn.execute(
+        """
+        SELECT id, job_key FROM weekly_slots
+        WHERE status IN ('running', 'rerunning') AND job_key IS NOT NULL AND job_key != ''
+        """
+    ).fetchall()
+    synced = 0
+    for row in rows:
+        key = str(row["job_key"] or "").strip()
+        if not key:
+            continue
+        job = get_command_job(store, key)
+        if not job:
+            continue
+        st = str(job.get("status") or "")
+        if st not in {"completed", "failed", "cancelled"}:
+            continue
+        sync_weekly_slots_for_job(store, key)
+        synced += 1
+    return synced
+
+
+def _automation_work_pending(store) -> bool:
+    if automation_calendar_days_to_fill(store):
+        return True
+    if count_running_weekly_slots(store) > 0:
+        return True
+    if production_queue_busy(store, owner=None, heal=False):
+        return True
+    return False
+
+
 _BACKLOG_PASS_PREFIX = "__pass:"
 
 
@@ -1436,6 +1522,7 @@ def weekly_automation_tick(
         return {"day": date.today().isoformat(), "action": "production_paused"}
 
     owner_filter = normalize_owner(owner) if owner else None
+    reconcile_weekly_terminal_jobs(store)
     weekly_reconcile_pipeline(store)
 
     preflight = weekly_preflight()
@@ -1503,7 +1590,7 @@ def weekly_automation_tick(
                     store,
                     user_command=command,
                     slot_id=slot_id,
-                    wait_montage=True,
+                    wait_montage=False,
                     wait_timeout_sec=wait_sec,
                     submit_caller="automation_backlog",
                     submit_owner=owner_norm,
@@ -1587,18 +1674,26 @@ def _weekly_automation_daemon() -> None:
                 stop_reason = "production_pause"
                 break
             _, wakeup, _ = _automation_threading()
+            if _consume_automation_kick_signal():
+                pass
             store = DiscoveryStore(default_db_path())
             try:
+                reconcile_weekly_terminal_jobs(store)
                 instant_cap = 32
                 for _ in range(instant_cap):
                     if not _automation_running:
                         break
                     result = weekly_automation_tick(store)
                     action = str(result.get("action") or "")
+                    if action in {"queue_busy", "submit_busy", "slot_running"}:
+                        break
                     if action == "attempted":
                         st = str(result.get("status") or "")
                         if st in {"queued", "failed"}:
                             continue
+                    if action in {"idle", "week_complete"}:
+                        if not _automation_work_pending(store):
+                            break
                     break
             except Exception as exc:  # noqa: BLE001
                 _append_fill_log(f"automation daemon error: {exc}")
@@ -1661,11 +1756,23 @@ def request_daily_fill_kick(
     day: str | None = None,
     owner: str | None = None,
 ) -> dict[str, Any]:
-    """Wake automation immediately after a failure (no debounce)."""
+    """Wake API automation after terminal job / failure (cross-process safe)."""
     _, wakeup, _ = _automation_threading()
+    _signal_automation_kick(source="request_daily_fill_kick", slot_id=slot_id)
+    if _is_weekly_automation_daemon_thread():
+        wakeup.set()
+        return {"kicked": True, "reason": "daemon_wakeup", "thread_alive": True}
+    if _running_in_weekly_montage_worker():
+        return {"kicked": True, "reason": "worker_signal_only", "deferred_to_api": True}
+    repair_stale_automation_state()
     out = ensure_weekly_automation_started()
+    if store is not None:
+        try:
+            reconcile_weekly_terminal_jobs(store)
+        except Exception:
+            pass
     wakeup.set()
-    return out
+    return {**out, "kicked": True}
 
 
 def weekly_fill_running() -> bool:
@@ -2347,6 +2454,7 @@ def _sync_slot_from_job(store, slot_id: int, job_key: str) -> None:
             video_id=job.get("production_video_id"),
             error="",
         )
+        request_daily_fill_kick(store, slot_id=slot_id)
     elif st in {"failed", "cancelled"}:
         prepare_slot_for_retry(
             store,

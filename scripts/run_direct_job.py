@@ -89,6 +89,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--job-key", required=True)
     args = parser.parse_args()
+    os.environ["WEEKLY_MONTAGE_WORKER"] = "1"
     load_env()
     log_path = project_root() / "data" / "logs" / "weekly-montage-worker.log"
     watchdog = _start_weekly_outer_watchdog(args.job_key)

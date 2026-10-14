@@ -781,6 +781,122 @@ class TestWeeklyDaemonLifecycle(unittest.TestCase):
         self.assertIsNotNone(snap.get("next_slot_id"))
 
 
+class TestWeeklyDaemonContinuity(unittest.TestCase):
+    def setUp(self) -> None:
+        _isolate_weekly_automation()
+        self.addCleanup(_isolate_weekly_automation)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.store = DiscoveryStore(Path(tmp.name) / "catalog.sqlite")
+        self.addCleanup(self.store.close)
+        self.kick_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.kick_dir.cleanup)
+        self.kick_path = Path(self.kick_dir.name) / "weekly-automation-kick.json"
+        self.kick_patch = patch(
+            "discovery.weekly._automation_kick_signal_path", return_value=self.kick_path
+        )
+        self.kick_patch.start()
+        self.addCleanup(self.kick_patch.stop)
+        self.rr_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.rr_dir.cleanup)
+        self.rr_path = Path(self.rr_dir.name) / "weekly-round-robin.json"
+        self.rr_patch = patch("discovery.weekly._round_robin_state_path", return_value=self.rr_path)
+        self.rr_patch.start()
+        self.addCleanup(self.rr_patch.stop)
+
+    def _save_mon_three(self) -> list[int]:
+        weekly.save_slots(
+            self.store,
+            week_start="2026-10-12",
+            owner="chris",
+            slots=[
+                {"day": "mon", "slot": 1, "speaker": "A", "visual_direction": "v1"},
+                {"day": "mon", "slot": 2, "speaker": "B", "visual_direction": "v2"},
+                {"day": "mon", "slot": 3, "speaker": "C", "visual_direction": "v3"},
+            ],
+        )
+        return [
+            int(r["id"])
+            for r in self.store._conn.execute(
+                "SELECT id FROM weekly_slots ORDER BY slot"
+            ).fetchall()
+        ]
+
+    def test_queue_busy_does_not_stop_daemon_thread(self) -> None:
+        import time
+
+        ids = self._save_mon_three()
+        day = weekly.slot_date("2026-10-12", "mon")
+        weekly.mark_slot(self.store, ids[0], status="running", job_key="cmd_busy")
+        toolchain = {"ok": True}
+        with patch("discovery.config.resolve_worker_python", return_value="C:/Python/python.exe"), patch(
+            "toolchain_env.check_toolchain", return_value=toolchain
+        ), patch("discovery.production_pause.is_production_paused", return_value=False):
+            weekly.ensure_weekly_automation_started()
+            time.sleep(0.4)
+            self.assertTrue(weekly.automation_daemon_alive())
+            weekly.stop_weekly_automation()
+
+    def test_worker_kick_restarts_dead_daemon(self) -> None:
+        toolchain = {"ok": True}
+        with patch("discovery.config.resolve_worker_python", return_value="C:/Python/python.exe"), patch(
+            "toolchain_env.check_toolchain", return_value=toolchain
+        ), patch("discovery.production_pause.is_production_paused", return_value=False), patch(
+            "discovery.weekly._running_in_weekly_montage_worker", return_value=True
+        ):
+            out = weekly.request_daily_fill_kick(self.store, slot_id=62)
+        self.assertTrue(out.get("deferred_to_api"))
+        self.assertTrue(self.kick_path.is_file())
+        with patch("discovery.config.resolve_worker_python", return_value="C:/Python/python.exe"), patch(
+            "toolchain_env.check_toolchain", return_value=toolchain
+        ), patch("discovery.production_pause.is_production_paused", return_value=False):
+            weekly.repair_stale_automation_state()
+            start = weekly.ensure_weekly_automation_started()
+        self.assertTrue(start.get("started") or start.get("thread_alive"))
+        self.assertTrue(weekly.automation_daemon_alive())
+        weekly.stop_weekly_automation()
+
+    def test_terminal_job_sync_kicks_without_run_week(self) -> None:
+        from discovery.command_jobs import create_command_job
+
+        ids = self._save_mon_three()
+        sid = ids[0]
+        record = create_command_job(
+            self.store,
+            user_command=(
+                "Make a new 9:16 motivational Short using the luxury-clips-montage workflow. "
+                "Run python scripts/build_motivation_job.py"
+            ),
+        )
+        job_key = str(record["job_key"])
+        self.store._conn.execute(
+            "UPDATE cursor_command_jobs SET status = 'completed' WHERE job_key = ?",
+            (job_key,),
+        )
+        self.store._conn.commit()
+        weekly.mark_slot(self.store, sid, status="running", job_key=job_key)
+        toolchain = {"ok": True}
+        with patch("discovery.config.resolve_worker_python", return_value="C:/Python/python.exe"), patch(
+            "toolchain_env.check_toolchain", return_value=toolchain
+        ), patch("discovery.production_pause.is_production_paused", return_value=False):
+            weekly.ensure_weekly_automation_started()
+            weekly.reconcile_weekly_terminal_jobs(self.store)
+        self.assertTrue(self.kick_path.is_file())
+        weekly.stop_weekly_automation()
+
+    def test_completion_kick_only_one_daemon(self) -> None:
+        toolchain = {"ok": True}
+        with patch("discovery.config.resolve_worker_python", return_value="C:/Python/python.exe"), patch(
+            "toolchain_env.check_toolchain", return_value=toolchain
+        ), patch("discovery.production_pause.is_production_paused", return_value=False):
+            first = weekly.ensure_weekly_automation_started()
+            second = weekly.request_daily_fill_kick(self.store)
+        self.assertTrue(first.get("started"))
+        self.assertEqual(second.get("reason"), "automation_already_running")
+        self.assertTrue(weekly.automation_daemon_alive())
+        weekly.stop_weekly_automation()
+
+
 class TestWeeklyProductionEntryPoints(unittest.TestCase):
     def setUp(self) -> None:
         _isolate_weekly_automation()
