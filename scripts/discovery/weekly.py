@@ -563,13 +563,24 @@ def reconcile_zombie_weekly_slots(store) -> int:
 
 def weekly_reconcile_pipeline(store) -> dict[str, Any]:
     """Stale jobs → slot status sync → resume stuck queued."""
-    from discovery.command_jobs import reconcile_stale_command_jobs, resume_weekly_queued_jobs
+    from discovery.command_jobs import (
+        reconcile_running_montage_liveness,
+        reconcile_stale_command_jobs,
+        resume_weekly_queued_jobs,
+    )
 
+    liveness = reconcile_running_montage_liveness(store)
     zombies = reconcile_zombie_weekly_slots(store)
     stale = reconcile_stale_command_jobs(store)
     slots = reconcile_slots(store)
     resumed = resume_weekly_queued_jobs(store)
-    return {"stale": stale, "slots": slots, "resumed": resumed, "zombies": zombies}
+    return {
+        "stale": stale,
+        "slots": slots,
+        "resumed": resumed,
+        "zombies": zombies,
+        "liveness": liveness,
+    }
 
 
 def reconcile_slots(store) -> dict[str, int]:
@@ -686,8 +697,13 @@ def count_running_command_jobs(store) -> int:
     return int(row["n"] if row else 0)
 
 
-def production_queue_busy(store, *, owner: str | None = None) -> bool:
+def production_queue_busy(store, *, owner: str | None = None, heal: bool = False) -> bool:
     """True when a weekly slot or Cursor command job is already running."""
+    if heal:
+        from discovery.command_jobs import reconcile_running_montage_liveness
+
+        reconcile_running_montage_liveness(store)
+        reconcile_zombie_weekly_slots(store)
     if count_running_command_jobs(store) > 0:
         return True
     return count_running_weekly_slots(store, owner=owner) > 0
@@ -1216,7 +1232,7 @@ def weekly_automation_tick(
         return {"day": calendar_days[0], "action": "submit_busy"}
 
     try:
-        if production_queue_busy(store, owner=None):
+        if production_queue_busy(store, owner=None, heal=True):
             return {"day": calendar_days[0], "action": "queue_busy"}
 
         owners = [owner_filter] if owner_filter else list(OWNERS)
@@ -2192,6 +2208,8 @@ def restart_weekly_day_batch(
         killed = kill_local_montage_workers(project_root())
 
     weekly_reconcile_pipeline(store)
+    repair = ensure_weekly_automation_started()
+    request_daily_fill_kick(store)
     out: dict[str, Any] = {
         "day": day,
         "owner": owner_norm,
@@ -2199,6 +2217,7 @@ def restart_weekly_day_batch(
         "job_keys": cancelled,
         "slots_reset": slots_reset,
         "workers_killed": killed,
+        "automation": repair,
     }
     if run_after:
         out["batch"] = run_weekly_due_batch(
@@ -2318,7 +2337,7 @@ def run_weekly_due_batch(
 
     weekly_reconcile_pipeline(store)
     reconcile = reconcile_slots(store)
-    if production_queue_busy(store, owner=None):
+    if production_queue_busy(store, owner=None, heal=True):
         return {
             "day": day,
             "owner": owner_norm,
@@ -2346,7 +2365,7 @@ def run_weekly_due_batch(
         if all(_slot_status(store, int(s["id"])) == "done" for s in ordered):
             break
         reconcile_slots(store)
-        if production_queue_busy(store, owner=None):
+        if production_queue_busy(store, owner=None, heal=True):
             if not _wait_for_production_idle(store, deadline=deadline):
                 break
             continue

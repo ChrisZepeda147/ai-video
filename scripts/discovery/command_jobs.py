@@ -348,6 +348,71 @@ def _windows_process_alive(pid: int) -> bool:
         return False
 
 
+def reconcile_running_montage_liveness(store) -> int:
+    """Immediately fail weekly montage jobs with dead/missing worker PID (no stale wait)."""
+    now = datetime.now(timezone.utc)
+    failed = 0
+    rows = store._conn.execute(
+        """
+        SELECT job_key, user_command, started_at, created_at, worker_pid
+        FROM cursor_command_jobs
+        WHERE status = 'running'
+        """
+    ).fetchall()
+    for row in rows:
+        job_key = str(row["job_key"])
+        cmd = str(row["user_command"] or "")
+        if not should_use_direct_montage(cmd):
+            continue
+        weekly_row = store._conn.execute(
+            "SELECT 1 FROM weekly_slots WHERE job_key = ? LIMIT 1",
+            (job_key,),
+        ).fetchone()
+        if not weekly_row:
+            continue
+        worker_pid = int(row["worker_pid"] or 0)
+        anchor = _parse_iso_ts(row["started_at"]) or _parse_iso_ts(row["created_at"])
+        age_sec = 0.0
+        if anchor:
+            if anchor.tzinfo is None:
+                anchor = anchor.replace(tzinfo=timezone.utc)
+            age_sec = (now - anchor.astimezone(timezone.utc)).total_seconds()
+        ghost = False
+        msg = ""
+        if worker_pid and not _windows_process_alive(worker_pid):
+            ghost = True
+            msg = (
+                f"Weekly montage worker PID {worker_pid} is not running. "
+                "Marked failed for automatic retry."
+            )
+        elif not worker_pid and age_sec > 180:
+            ghost = True
+            msg = (
+                "Weekly montage job has no worker_pid after spawn grace. "
+                "Marked failed for automatic retry."
+            )
+        if not ghost:
+            continue
+        store._conn.execute(
+            """
+            UPDATE cursor_command_jobs
+            SET status = 'failed', error_message = ?, completed_at = ?, worker_pid = NULL
+            WHERE job_key = ?
+            """,
+            (msg, now_iso(), job_key),
+        )
+        failed += 1
+        try:
+            from discovery.weekly import sync_weekly_slots_for_job
+
+            sync_weekly_slots_for_job(store, job_key)
+        except Exception:
+            pass
+    if failed:
+        store._conn.commit()
+    return failed
+
+
 def reconcile_stale_command_jobs(store) -> dict[str, int]:
     """Mark hung running/queued jobs failed (API reload kills daemon agent threads)."""
     max_age = _stale_job_minutes()
