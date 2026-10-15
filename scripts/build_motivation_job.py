@@ -72,6 +72,7 @@ from broll_search_query import (
     broaden_broll_query_ladder,
     expand_broll_search_queries,
     gate_subject_for_query,
+    is_scenic_broll_query,
     relaxed_search_alternatives,
 )
 from broll_acquire_workspace import cleanup_workspace, finalize_parts, source_workspace
@@ -2113,16 +2114,19 @@ def _discover_broll_candidates_for_search(
         if outside and cabin:
             print(f"Ranked {len(outside)} exterior title(s) ahead of {len(cabin)} interior/walkaround")
             pool = [*outside, *cabin]
-    candidates = filter_unwanted(
-        pool,
-        limit=max(limit * 4, 24),
+    search_results = len(raw)
+    after_title_match = len(pool)
+    scenic_soft = is_scenic_broll_query(search_query, subject)
+    filter_kw = dict(
         exclude_music=True,
         exclude_trailers=True,
         exclude_live=True,
         background_gameplay_only=False,
         min_views=min_views,
         min_duration=float(min_duration),
+        soft_min_views=scenic_soft,
     )
+    candidates = filter_unwanted(pool, limit=max(limit * 4, 24), **filter_kw)
     skip_fps_prefilter = os.environ.get("MONTAGE_BROLL_SKIP_FPS_PREFILTER", "").strip().lower() in {
         "1",
         "true",
@@ -2130,16 +2134,7 @@ def _discover_broll_candidates_for_search(
     }
     if skip_fps_prefilter:
         candidates = rank_broll_candidates(
-            filter_unwanted(
-                pool,
-                limit=max(limit * 2, 12),
-                exclude_music=True,
-                exclude_trailers=True,
-                exclude_live=True,
-                background_gameplay_only=False,
-                min_views=min_views,
-                min_duration=float(min_duration),
-            )
+            filter_unwanted(pool, limit=max(limit * 2, 12), **filter_kw)
         )[:limit]
         if candidates:
             print(
@@ -2147,19 +2142,10 @@ def _discover_broll_candidates_for_search(
                 f"keeping {len(candidates)} candidate(s) for download-time probe"
             )
     else:
-        candidates = pick_usable_fps_candidates(candidates, limit=limit)
+        candidates = pick_usable_fps_candidates(candidates, limit=limit, probe=False)
     if not candidates and pool:
         fallback = rank_broll_candidates(
-            filter_unwanted(
-                pool,
-                limit=max(limit, 8),
-                exclude_music=True,
-                exclude_trailers=True,
-                exclude_live=True,
-                background_gameplay_only=False,
-                min_views=min_views,
-                min_duration=float(min_duration),
-            )
+            filter_unwanted(pool, limit=max(limit, 8), **filter_kw)
         )
         if fallback:
             print(
@@ -2167,31 +2153,42 @@ def _discover_broll_candidates_for_search(
                 "title-ranked candidate(s) with download-time format probe"
             )
             candidates = fallback[:limit]
+    after_prefilter = len(candidates)
+    print(
+        f"BROLL_PREFILTER search_results={search_results} "
+        f"after_title_match={after_title_match} after_prefilter={after_prefilter}"
+        + (" scenic_soft_views=1" if scenic_soft else "")
+    )
     if not candidates:
+        relaxed_reason = "post_filter_empty" if search_results > 0 else "search_empty"
+        if relaxed_reason == "post_filter_empty":
+            print(
+                f"BROLL_SEARCH relaxed_try reason={relaxed_reason} query={search_query!r} "
+                f"search_results={search_results} after_title_match={after_title_match}"
+            )
         for alt_query in relaxed_search_alternatives(search_query):
             if alt_query.lower() == search_query.lower():
                 continue
-            print(f"BROLL_SEARCH relaxed_try query={alt_query!r}")
+            if relaxed_reason == "search_empty":
+                print(f"BROLL_SEARCH relaxed_try query={alt_query!r}")
             alt_raw = discover_search(query=alt_query, limit=max(limit * 4, 16))
             if not alt_raw:
                 continue
             alt_pool = list(alt_raw)
+            alt_scenic = is_scenic_broll_query(alt_query, subject)
             alt_filtered = filter_unwanted(
                 alt_pool,
                 limit=max(limit * 4, 24),
-                exclude_music=True,
-                exclude_trailers=True,
-                exclude_live=True,
-                background_gameplay_only=False,
-                min_views=min_views,
-                min_duration=float(min_duration),
+                soft_min_views=alt_scenic,
+                **{k: v for k, v in filter_kw.items() if k != "soft_min_views"},
             )
-            candidates = pick_usable_fps_candidates(alt_filtered, limit=limit)
+            candidates = pick_usable_fps_candidates(alt_filtered, limit=limit, probe=False)
             if not candidates and alt_filtered:
                 candidates = rank_broll_candidates(alt_filtered)[:limit]
             if candidates:
                 print(
-                    f"BROLL_SEARCH relaxed_hit query={alt_query!r} candidates={len(candidates)}"
+                    f"BROLL_SEARCH relaxed_hit reason={relaxed_reason} query={alt_query!r} "
+                    f"candidates={len(candidates)}"
                 )
                 break
     if reuse_policy == "prefer_new":
@@ -2361,8 +2358,16 @@ def download_broll_candidates(
         to_download.append((candidate, part_start, parts_for_source))
     search_query = query or subject
     filtered: list[tuple[VideoCandidate, dict[str, Any], int, int]] = []
+    import time as _time
+
     for candidate, part_start, parts_for_source in to_download:
+        probe_start = _time.perf_counter()
         ok_fmt, skip_reason, fmt_meta = inspect_usable_formats(candidate.url)
+        probe_sec = _time.perf_counter() - probe_start
+        print(
+            f"BROLL_STAGE id={candidate.video_id} stage=format_probe "
+            f"seconds={probe_sec:.2f} ok={1 if ok_fmt else 0} reason={skip_reason or 'ok'}"
+        )
         reject = hard_reject_reason(
             candidate,
             query=search_query,
@@ -2501,12 +2506,18 @@ def download_broll_candidates(
 
         try:
             source_clips = sorted(workspace.glob(f"{video_id}_part*.mp4"))
+            gate_start = _time.perf_counter()
             kept = filter_broll_clip_list(
                 source_clips,
                 subject=subject,
                 use_vision=use_vision,
                 frame_gate=frame_gate,
                 jobs_root=jobs_root,
+            )
+            print(
+                f"BROLL_STAGE id={video_id} stage=frame_gate "
+                f"seconds={_time.perf_counter() - gate_start:.2f} "
+                f"parts={len(source_clips)} kept={len(kept)}"
             )
             if not kept:
                 if job_dir:
@@ -3469,8 +3480,10 @@ def ensure_broll_clips(
         start_idx = min(saved_q_idx + 1, max(0, len(ladder) - 1))
     else:
         start_idx = min(saved_q_idx, max(0, len(ladder) - 1))
-    source_cap = 3 if not split_full_source else 4
-    max_attempts = source_cap * len(ladder)
+    source_cap = 4 if not split_full_source else 5
+    source_try_budget = max(16, needed_clips * 4, clips_limit * 2)
+    max_attempts = max(source_cap * len(ladder), (source_try_budget + source_cap - 1) // source_cap)
+    total_source_tries = 0
     ranked_queues: dict[str, list[VideoCandidate]] = {}
     queue_cursors: dict[str, int] = {}
 
@@ -3479,7 +3492,7 @@ def ensure_broll_clips(
             with montage_timer().stage_child("youtube_search"):
                 ranked_queues[search_query] = _discover_candidates_for_query(
                     search_query,
-                    limit=max(clips_limit, 12, needed_clips * 2),
+                    limit=max(clips_limit, 24, needed_clips * 4),
                     subject=subject,
                     min_views=min_views,
                     min_duration=min_duration,
@@ -3503,7 +3516,11 @@ def ensure_broll_clips(
         return None
 
     attempt = 0
-    while not inv.satisfies_count() and attempt < max_attempts:
+    while (
+        not inv.satisfies_count()
+        and attempt < max_attempts
+        and total_source_tries < source_try_budget
+    ):
         q_idx = start_idx + (attempt // source_cap)
         if q_idx >= len(ladder):
             break
@@ -3511,11 +3528,15 @@ def ensure_broll_clips(
         bump_query_index(job_dir, q_idx)
         missing_now = max(0, needed_clips - inv.usable_count)
         parts_budget = min(8, missing_now + 1)
-        parallel_n = 2 if missing_now >= 4 else 1
+        parallel_n = min(3, max(1, missing_now // 2)) if missing_now >= 3 else 1
         # Section cuts from long sources; reject is for full-file normal pass only.
         allow_long = (not split_full_source) or attempt >= max(1, max_attempts - 2)
         stagnant_pops = 0
-        while not inv.satisfies_count() and stagnant_pops < 8:
+        while (
+            not inv.satisfies_count()
+            and stagnant_pops < 20
+            and total_source_tries < source_try_budget
+        ):
             batch: list[VideoCandidate] = []
             for _ in range(parallel_n):
                 candidate = _pop_candidate(search_query)
@@ -3525,6 +3546,7 @@ def ensure_broll_clips(
                 break
             before_usable = inv.usable_count
             downloads_attempted += len(batch)
+            total_source_tries += len(batch)
             montage_timer().stats.downloads_attempted += len(batch)
             try:
                 with montage_timer().stage_child("broll_download"):

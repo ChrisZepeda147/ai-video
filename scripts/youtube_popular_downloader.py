@@ -229,6 +229,7 @@ def pick_usable_fps_candidates(
     *,
     limit: int,
     probe: bool = True,
+    reject_metadata_fps: bool = False,
 ) -> list[VideoCandidate]:
     ranked = sorted(
         candidates,
@@ -241,6 +242,7 @@ def pick_usable_fps_candidates(
     )
     kept: list[VideoCandidate] = []
     skipped = 0
+    deferred_metadata = 0
     for video in ranked:
         fps = video.fps
         if fps is None and probe:
@@ -250,13 +252,21 @@ def pick_usable_fps_candidates(
                 fps = None
             video.fps = fps
         if fps is not None and not is_usable_fps(fps):
-            skipped += 1
-            continue
+            if reject_metadata_fps:
+                skipped += 1
+                continue
+            deferred_metadata += 1
+            video.fps = None
         kept.append(video)
         if len(kept) >= limit:
             break
     if skipped:
         print(f"Filtered out {skipped} source(s) under {int(MIN_USABLE_FPS)}fps.")
+    if deferred_metadata:
+        print(
+            f"BROLL_FPS metadata_below_{int(MIN_USABLE_FPS)}={deferred_metadata} "
+            "kept_for_format_probe"
+        )
     return kept
 
 
@@ -899,7 +909,12 @@ def download_broll_source_parts(
     wall_start = time.perf_counter()
     output_dir.mkdir(parents=True, exist_ok=True)
     parts_request = max(1, parts_needed + 1)
+    meta_start = time.perf_counter()
     info = _extract_info_light(candidate.url)
+    print(
+        f"BROLL_STAGE id={candidate.video_id} stage=metadata "
+        f"seconds={time.perf_counter() - meta_start:.2f}"
+    )
     duration = candidate.duration_seconds
     if info and duration is None:
         duration = info.get("duration")
@@ -973,6 +988,7 @@ def download_broll_source_parts(
         allow_expensive_full = False
     if use_sections:
         try:
+            dl_start = time.perf_counter()
             usable_span = max((duration or 0) - start_offset - clip_length, 0.0)
             fracs = section_start_fractions(parts_request)
             part_entries: list[dict[str, Any]] = []
@@ -1004,6 +1020,11 @@ def download_broll_source_parts(
                 record["status"] = "ok"
                 record["download_mode"] = "sections"
                 print("BROLL_DOWNLOAD_MODE=sections")
+                print(
+                    f"BROLL_STAGE id={candidate.video_id} stage=download "
+                    f"seconds={time.perf_counter() - dl_start:.2f} mode=sections "
+                    f"parts={len(part_entries)}"
+                )
                 return _done()
         except Exception as exc:
             print(f"BROLL_DOWNLOAD_MODE=section_failed reason={exc}")
@@ -1014,6 +1035,7 @@ def download_broll_source_parts(
                 return _done()
 
     spaced = bool(duration and duration > clip_length * 2)
+    dl_start = time.perf_counter()
     results = download_videos(
         [candidate],
         output_dir=output_dir,
@@ -1036,6 +1058,10 @@ def download_broll_source_parts(
             "BROLL_DOWNLOAD_MODE=full_fallback"
             if use_sections
             else "BROLL_DOWNLOAD_MODE=full"
+        )
+        print(
+            f"BROLL_STAGE id={candidate.video_id} stage=download "
+            f"seconds={time.perf_counter() - dl_start:.2f} mode={record['download_mode']}"
         )
         return _done()
     record["status"] = "error"
@@ -1064,6 +1090,7 @@ def filter_unwanted(
     max_duration: float | None = None,
     exclude_sleep: bool = True,
     quiet: bool = False,
+    soft_min_views: bool = False,
 ) -> list[VideoCandidate]:
     kept: list[VideoCandidate] = []
     skipped_music = 0
@@ -1112,7 +1139,8 @@ def filter_unwanted(
         if is_vlog_or_intro(video):
             skipped_vlog += 1
             continue
-        if video.view_count is not None and video.view_count < min_views:
+        low_views = video.view_count is not None and video.view_count < min_views
+        if low_views and not soft_min_views:
             skipped_views += 1
             continue
         if video.duration_seconds is not None and video.duration_seconds < min_duration:
@@ -1129,10 +1157,19 @@ def filter_unwanted(
             skipped_other += 1
             continue
         kept.append(video)
-    kept.sort(
-        key=lambda v: (background_gameplay_score(v), v.view_count or 0),
-        reverse=True,
-    )
+    if soft_min_views and min_views > 0:
+
+        def _view_rank(v: VideoCandidate) -> tuple[int, int, int]:
+            views = v.view_count or 0
+            below = 0 if views >= min_views else 1
+            return (below, -background_gameplay_score(v), -views)
+
+        kept.sort(key=_view_rank)
+    else:
+        kept.sort(
+            key=lambda v: (background_gameplay_score(v), v.view_count or 0),
+            reverse=True,
+        )
     parts = []
     if skipped_music:
         parts.append(f"{skipped_music} music video(s)")

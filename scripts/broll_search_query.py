@@ -206,6 +206,64 @@ _WEAK_DESCRIPTORS = frozenset(
 )
 
 
+_SCENIC_MARKERS = frozenset(
+    {
+        "fjord",
+        "norway",
+        "norwegian",
+        "iceland",
+        "mountain",
+        "mountains",
+        "sunrise",
+        "sunset",
+        "landscape",
+        "valley",
+        "beach",
+        "forest",
+        "alpine",
+        "glacier",
+        "canyon",
+        "lake",
+        "ocean",
+        "coast",
+        "waterfall",
+        "dolomite",
+        "dolomites",
+        "peak",
+        "peaks",
+        "mist",
+        "misty",
+        "clouds",
+        "aurora",
+        "northern",
+        "lights",
+    }
+)
+
+
+def is_scenic_broll_query(query: str, subject: str = "") -> bool:
+    """Nature/landscape weekly visuals — soft view floor, not car/yacht subjects."""
+    text = f"{query} {subject}".lower()
+    if not text.strip():
+        return False
+    vehicle_keys = (
+        "porsche",
+        "ferrari",
+        "lamborghini",
+        "supercar",
+        "gt3",
+        "911",
+        "coupe",
+        "yacht",
+        "watch",
+        "rolex",
+        "mansion",
+    )
+    if any(v in text for v in vehicle_keys):
+        return False
+    return any(marker in text for marker in _SCENIC_MARKERS)
+
+
 def _core_subject_tokens(query: str) -> list[str]:
     tokens = re.sub(r"[^a-z0-9]+", " ", (query or "").lower()).split()
     core = [
@@ -261,6 +319,14 @@ def relaxed_search_alternatives(query: str, *, max_alts: int = 4) -> list[str]:
     if any(k in compact for k in scenic_keys):
         add("dramatic mountain sunrise cinematic drone 60fps")
         add("nature landscape sunrise cinematic 60fps")
+    if "fjord" in compact:
+        add("Norway fjord cinematic drone 60fps")
+        add("dramatic fjord clouds cinematic 60fps")
+        add("mountain fjord aerial mist cinematic 60fps")
+        add("misty mountain valley cinematic 60fps")
+    if "cloud" in compact or "mist" in compact or "fog" in compact:
+        add("dramatic fjord clouds cinematic drone 60fps")
+        add("misty mountain valley cinematic 60fps")
     return alts[:max_alts]
 
 

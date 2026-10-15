@@ -13,7 +13,9 @@ from broll_frame_gate import wants_vehicle
 from broll_search_query import (
     expand_broll_search_queries,
     gate_subject_for_query,
+    is_scenic_broll_query,
     is_storyboard_query,
+    relaxed_search_alternatives,
 )
 
 
@@ -58,6 +60,16 @@ class BrollSearchQueryTests(unittest.TestCase):
         self.assertIn("hiking", blob)
         self.assertIn("sunrise", blob)
         self.assertFalse(is_storyboard_query("Dark 5AM hike → sunrise"))
+
+    def test_fjord_query_is_scenic_and_broadens(self) -> None:
+        q = "Norwegian fjord covered in low clouds cinematic 60fps"
+        self.assertTrue(is_scenic_broll_query(q))
+        alts = relaxed_search_alternatives(q)
+        blob = " ".join(alts).lower()
+        self.assertIn("fjord", blob)
+        self.assertTrue(
+            any("dramatic fjord clouds" in a.lower() or "norway fjord" in a.lower() for a in alts)
+        )
 
     def test_to_storyboard_still_finds_road_city_car(self) -> None:
         brief = (

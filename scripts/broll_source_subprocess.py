@@ -77,11 +77,16 @@ def run_broll_source_subprocess(
         errors="replace",
     )
     timed_out = False
+    worker_start = time.perf_counter()
     try:
         proc.wait(timeout=max(timeout_sec, 1.0))
     except subprocess.TimeoutExpired:
         timed_out = True
-        print(f"BROLL_SOURCE_TIMEOUT id={video_id} seconds={timeout_sec:.0f}")
+        elapsed = time.perf_counter() - worker_start
+        print(
+            f"BROLL_SOURCE_TIMEOUT id={video_id} seconds={timeout_sec:.0f} "
+            f"elapsed={elapsed:.1f}"
+        )
         kill_process_tree(proc.pid)
         try:
             proc.wait(timeout=30)

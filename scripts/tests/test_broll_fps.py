@@ -56,7 +56,19 @@ class BrollFpsTests(unittest.TestCase):
         )
         self.assertEqual(fps, 60.0)
 
-    def test_pick_skips_known_low_fps_without_probe(self) -> None:
+    def test_pick_skips_known_low_fps_when_reject_metadata_enabled(self) -> None:
+        kept = pick_usable_fps_candidates(
+            [
+                _candidate("low", "Aventador cinematic 4K", fps=24.0, views=9_000_000),
+                _candidate("good", "Huracan 4K 60fps", fps=60.0, views=20_000),
+            ],
+            limit=2,
+            probe=False,
+            reject_metadata_fps=True,
+        )
+        self.assertEqual([item.video_id for item in kept], ["good"])
+
+    def test_pick_keeps_metadata_low_fps_for_format_probe(self) -> None:
         kept = pick_usable_fps_candidates(
             [
                 _candidate("low", "Aventador cinematic 4K", fps=24.0, views=9_000_000),
@@ -65,7 +77,30 @@ class BrollFpsTests(unittest.TestCase):
             limit=2,
             probe=False,
         )
-        self.assertEqual([item.video_id for item in kept], ["good"])
+        self.assertEqual(len(kept), 2)
+        self.assertEqual(kept[0].video_id, "good")
+        self.assertIsNone(kept[1].fps)
+
+    def test_scenic_soft_min_views_keeps_low_view_landscape(self) -> None:
+        high = _candidate("high", "Norway fjord drone 60fps", fps=60.0, views=200_000)
+        low = _candidate("low", "misty fjord clouds cinematic", fps=60.0, views=800)
+        kept = filter_unwanted(
+            [low, high],
+            limit=8,
+            exclude_music=True,
+            exclude_trailers=True,
+            exclude_live=True,
+            background_gameplay_only=False,
+            min_views=50_000,
+            min_duration=30,
+            max_duration=BROLL_MAX_SOURCE_SECONDS,
+            exclude_sleep=True,
+            quiet=True,
+            soft_min_views=True,
+        )
+        self.assertEqual(len(kept), 2)
+        self.assertEqual(kept[0].video_id, "high")
+        self.assertEqual(kept[1].video_id, "low")
 
     def test_sleep_and_eight_hour_sources_are_dropped(self) -> None:
         sleep = _candidate(
