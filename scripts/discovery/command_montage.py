@@ -611,6 +611,11 @@ def run_direct_montage_command(
                         ),
                     )
                     thread_store._conn.commit()
+                    print(
+                        f"MONTAGE_ATTEMPT_SUMMARY job_key={job_key} slug={slug} "
+                        f"outcome=fail code=MONTAGE_TIMEOUT",
+                        flush=True,
+                    )
                     _record_montage_outcome(
                         thread_store,
                         job_key=job_key,
@@ -702,6 +707,10 @@ def run_direct_montage_command(
                 ),
             )
             thread_store._conn.commit()
+            print(
+                f"MONTAGE_ATTEMPT_SUMMARY job_key={job_key} slug={last_slug} outcome=success",
+                flush=True,
+            )
             _record_montage_outcome(
                 thread_store,
                 job_key=job_key,

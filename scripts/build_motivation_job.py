@@ -12,6 +12,7 @@ import argparse
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -71,6 +72,7 @@ from broll_search_query import (
     broaden_broll_query_ladder,
     expand_broll_search_queries,
     gate_subject_for_query,
+    relaxed_search_alternatives,
 )
 from broll_acquire_workspace import cleanup_workspace, finalize_parts, source_workspace
 from broll_candidate_rank import rank_broll_candidates
@@ -1514,6 +1516,78 @@ def _take_pooled_speech(
     return candidate, item.start, duration, excerpt, excerpt
 
 
+def _youtube_id_from_url(url: str) -> str:
+    text = (url or "").strip()
+    if not text:
+        return ""
+    match = re.search(r"(?:v=|youtu\.be/|/shorts/)([A-Za-z0-9_-]{6,})", text)
+    return match.group(1) if match else ""
+
+
+def _try_reuse_existing_job_speech(
+    *,
+    audio_dir: Path,
+    url_file: Path,
+    job_dir: Path,
+    speaker: str,
+    min_seconds: float,
+    max_seconds: float,
+    speech_url: str,
+    speech_start: float | None,
+    speech_duration: float | None,
+    speech_option: int | None,
+) -> tuple[VideoCandidate, float, float, str, str] | None:
+    """Skip candidate search when a prior attempt left valid speech in this workspace."""
+    if speech_url or speech_start is not None or speech_duration is not None or speech_option:
+        return None
+    speech_mp3 = audio_dir / "speech.mp3"
+    captions = audio_dir / "subs.en.json3"
+    if not speech_mp3.is_file() or not captions.is_file():
+        return None
+    try:
+        duration = probe_duration(speech_mp3)
+    except (OSError, ValueError, subprocess.CalledProcessError):
+        return None
+    if duration < float(min_seconds) - 0.35 or duration > float(max_seconds) + 3.0:
+        return None
+    excerpt = captions_text(captions)
+    if excerpt_looks_incomplete(excerpt):
+        return None
+    source_text = captions_text(captions, start=0.0, duration=max(duration, min_seconds))
+    video_id = ""
+    title = f"{speaker} speech (job reuse)"
+    channel = speaker
+    url = ""
+    if url_file.is_file():
+        url = url_file.read_text(encoding="utf-8").strip().splitlines()[0].strip()
+        video_id = _youtube_id_from_url(url)
+    job_path = job_dir / "job.json"
+    if job_path.is_file():
+        try:
+            payload = json.loads(job_path.read_text(encoding="utf-8"))
+            video_id = video_id or str(payload.get("speech_id") or "")
+            title = str(payload.get("speech_title") or title)
+            url = url or str(payload.get("speech_url") or "")
+            if not video_id and url:
+                video_id = _youtube_id_from_url(url)
+        except (OSError, json.JSONDecodeError):
+            pass
+    if not url and video_id:
+        url = f"https://www.youtube.com/watch?v={video_id}"
+    print(
+        f"Reusing valid speech.mp3 ({duration:.1f}s) in job workspace — skipping candidate search"
+    )
+    candidate = VideoCandidate(
+        video_id=video_id or "job_reuse",
+        title=title,
+        url=url or f"https://www.youtube.com/watch?v={video_id or 'job_reuse'}",
+        channel=channel,
+        duration_seconds=int(duration),
+        view_count=0,
+    )
+    return candidate, 0.0, duration, excerpt, source_text
+
+
 def prepare_speech(
     *,
     jobs_root: Path,
@@ -1557,6 +1631,21 @@ def prepare_speech(
         return pooled
 
     job_dir = audio_dir.parent
+    reused = _try_reuse_existing_job_speech(
+        audio_dir=audio_dir,
+        url_file=url_file,
+        job_dir=job_dir,
+        speaker=speaker,
+        min_seconds=min_seconds,
+        max_seconds=max_seconds,
+        speech_url=speech_url,
+        speech_start=speech_start,
+        speech_duration=speech_duration,
+        speech_option=speech_option,
+    )
+    if reused is not None:
+        return reused
+
     stats = SpeechAcquireStats(speaker=speaker)
     blocked_ids = load_failed_source_ids(job_dir)
     from concurrent.futures import ThreadPoolExecutor
@@ -1867,7 +1956,12 @@ def prepare_speech(
                 "REUSE_RESTRICTION",
                 "All speech candidates were skipped by require_new reuse policy.",
             )
-        raise SpeechPrepareFailed(stats)
+        code = "SPEECH_NO_CANDIDATE"
+        if stats.subtitle_429 >= 2:
+            code = "SPEECH_SUBTITLE_RATE_LIMIT"
+        elif stats.no_coherent_window + stats.mid_thought_window >= max(3, stats.candidates_attempted // 2):
+            code = "SPEECH_NO_COHERENT_WINDOW"
+        raise SpeechPrepareFailed(stats, code=code)
 
     url_file.write_text(f"{chosen.url}\n", encoding="utf-8")
     print(f"Speech picked: {chosen.title} ({chosen.video_id})")
@@ -2029,7 +2123,31 @@ def _discover_broll_candidates_for_search(
         min_views=min_views,
         min_duration=float(min_duration),
     )
-    candidates = pick_usable_fps_candidates(candidates, limit=limit)
+    skip_fps_prefilter = os.environ.get("MONTAGE_BROLL_SKIP_FPS_PREFILTER", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    if skip_fps_prefilter:
+        candidates = rank_broll_candidates(
+            filter_unwanted(
+                pool,
+                limit=max(limit * 2, 12),
+                exclude_music=True,
+                exclude_trailers=True,
+                exclude_live=True,
+                background_gameplay_only=False,
+                min_views=min_views,
+                min_duration=float(min_duration),
+            )
+        )[:limit]
+        if candidates:
+            print(
+                f"BROLL_DISCOVER skip_metadata_fps_prefilter — "
+                f"keeping {len(candidates)} candidate(s) for download-time probe"
+            )
+    else:
+        candidates = pick_usable_fps_candidates(candidates, limit=limit)
     if not candidates and pool:
         fallback = rank_broll_candidates(
             filter_unwanted(
@@ -2049,6 +2167,33 @@ def _discover_broll_candidates_for_search(
                 "title-ranked candidate(s) with download-time format probe"
             )
             candidates = fallback[:limit]
+    if not candidates:
+        for alt_query in relaxed_search_alternatives(search_query):
+            if alt_query.lower() == search_query.lower():
+                continue
+            print(f"BROLL_SEARCH relaxed_try query={alt_query!r}")
+            alt_raw = discover_search(query=alt_query, limit=max(limit * 4, 16))
+            if not alt_raw:
+                continue
+            alt_pool = list(alt_raw)
+            alt_filtered = filter_unwanted(
+                alt_pool,
+                limit=max(limit * 4, 24),
+                exclude_music=True,
+                exclude_trailers=True,
+                exclude_live=True,
+                background_gameplay_only=False,
+                min_views=min_views,
+                min_duration=float(min_duration),
+            )
+            candidates = pick_usable_fps_candidates(alt_filtered, limit=limit)
+            if not candidates and alt_filtered:
+                candidates = rank_broll_candidates(alt_filtered)[:limit]
+            if candidates:
+                print(
+                    f"BROLL_SEARCH relaxed_hit query={alt_query!r} candidates={len(candidates)}"
+                )
+                break
     if reuse_policy == "prefer_new":
         candidates.sort(key=lambda item: item.video_id in used)
     return rank_broll_candidates(candidates)
@@ -2806,6 +2951,34 @@ def _inventory(
         )
 
 
+def _classify_broll_insufficient_funnel(
+    *,
+    inv: BrollInventory,
+    downloads_attempted: int,
+    downloads_ok: int,
+    log_blob: str = "",
+) -> str:
+    text = log_blob or ""
+    if downloads_attempted == 0:
+        if "BROLL_SEARCH relaxed_hit" not in text and "BROLL_SEARCH cache_hit" not in text:
+            if "POOL_MATCH candidates=0" in text or "POOL_MATCH candidates=" not in text:
+                return "search_zero_or_no_download"
+        return "downloads_never_started"
+    if "BROLL_SOURCE_TIMEOUT" in text:
+        return "source_subprocess_timeout"
+    if inv.raw > 0 and inv.usable_count == 0:
+        if "BROLL_REJECT" in text or "source_text_overlay" in text:
+            return "text_or_frame_gate_reject_all"
+        if "Filtered out" in text and "fps" in text.lower():
+            return "fps_rejected_all"
+        return "parts_created_gate_zero_usable"
+    if 0 < inv.usable_count < inv.required:
+        return "partial_below_required"
+    if downloads_ok == 0 and downloads_attempted > 0:
+        return "download_failed_no_ok"
+    return "partial_below_required"
+
+
 def _raise_broll_insufficient(
     *,
     slug: str,
@@ -2815,6 +2988,16 @@ def _raise_broll_insufficient(
     downloads_ok: int,
     log_blob: str = "",
 ) -> None:
+    funnel = _classify_broll_insufficient_funnel(
+        inv=inv,
+        downloads_attempted=downloads_attempted,
+        downloads_ok=downloads_ok,
+        log_blob=log_blob,
+    )
+    print(
+        f"BROLL_FUNNEL subcode={funnel} needed={inv.required} usable={inv.usable_count} "
+        f"raw={inv.raw} downloads_attempted={downloads_attempted} downloads_ok={downloads_ok}"
+    )
     summary = (
         f"B-roll insufficient: need {inv.required} usable clips, "
         f"have {inv.usable_count} after gate from {inv.distinct_sources} source(s)."
@@ -2826,6 +3009,7 @@ def _raise_broll_insufficient(
         summary=summary,
         details={
             "broll_query": query,
+            "funnel_subcode": funnel,
             "needed_clips": inv.required,
             "clips_on_disk": inv.raw,
             "clips_after_gate": inv.usable_count,
@@ -3280,7 +3464,7 @@ def ensure_broll_clips(
     # Zero usable + saved query_index: prior run exhausted ladder — restart acquisition.
     saved_q_idx = int(acquire.get("query_index") or 0)
     if inv.usable_count > 0 and not inv.satisfies_count():
-        start_idx = 0
+        start_idx = min(saved_q_idx, max(0, len(ladder) - 1))
     elif inv.usable_count == 0 and saved_q_idx > 0:
         start_idx = min(saved_q_idx + 1, max(0, len(ladder) - 1))
     else:

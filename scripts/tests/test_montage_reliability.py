@@ -197,6 +197,16 @@ class MontageReliabilityTests(unittest.TestCase):
         self.assertIn("mountain", joined)
         self.assertNotIn("yacht", joined)
 
+    def test_broaden_dolomites_comma_query(self) -> None:
+        from broll_search_query import broaden_broll_query_ladder, relaxed_search_alternatives
+
+        ladder = broaden_broll_query_ladder("Dolomites sunrise, giant orange peaks")
+        joined = " ".join(ladder).lower()
+        self.assertIn("dolomite", joined)
+        self.assertIn("sunrise", joined)
+        alts = relaxed_search_alternatives("norwegian fjord covered")
+        self.assertTrue(any("fjord" in a.lower() for a in alts))
+
 
 if __name__ == "__main__":
     unittest.main()

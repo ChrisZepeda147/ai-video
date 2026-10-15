@@ -54,6 +54,13 @@ SCENE_SEARCHES: tuple[tuple[str, str], ...] = (
     ("peaks", "mountain peak sunrise cinematic 60fps"),
     ("canyon", "canyon sunrise cinematic 60fps"),
     ("forest", "misty forest cinematic 60fps"),
+    ("fjord", "norwegian fjord drone cinematic 60fps"),
+    ("norwegian", "norway fjord landscape cinematic 60fps"),
+    ("norway", "norway fjord sunrise cinematic 60fps"),
+    ("alpine", "alpine mountain sunrise cinematic 60fps"),
+    ("glacier", "glacier mountain cinematic drone 60fps"),
+    ("desert", "desert sunrise cinematic drone 60fps"),
+    ("lake", "misty lake sunrise cinematic 60fps"),
 )
 
 
@@ -172,41 +179,126 @@ _MODIFIER_WORDS = frozenset(
         "epic",
         "ultra",
         "hd",
+        "giant",
+        "dramatic",
+        "orange",
+        "peaks",
+    }
+)
+
+_WEAK_DESCRIPTORS = frozenset(
+    {
+        "covered",
+        "covering",
+        "beautiful",
+        "stunning",
+        "amazing",
+        "insane",
+        "giant",
+        "huge",
+        "massive",
+        "epic",
+        "perfect",
+        "best",
+        "real",
+        "actual",
     }
 )
 
 
-def broaden_broll_query_ladder(query: str, *, max_steps: int = 6) -> list[str]:
+def _core_subject_tokens(query: str) -> list[str]:
+    tokens = re.sub(r"[^a-z0-9]+", " ", (query or "").lower()).split()
+    core = [
+        t
+        for t in tokens
+        if t not in _MODIFIER_WORDS and t not in _WEAK_DESCRIPTORS and len(t) > 2
+    ]
+    if not core:
+        core = [t for t in tokens if t not in _MODIFIER_WORDS and len(t) > 2]
+    return core
+
+
+def relaxed_search_alternatives(query: str, *, max_alts: int = 4) -> list[str]:
+    """Broader YouTube queries when the literal brief returns zero candidates."""
+    text = (query or "").strip()
+    if not text:
+        return []
+    alts: list[str] = []
+    seen: set[str] = set()
+
+    def add(q: str) -> None:
+        q = " ".join(q.split()).strip()
+        if not q or q.lower() in seen:
+            return
+        seen.add(q.lower())
+        alts.append(q)
+
+    for search in expand_broll_search_queries(text):
+        add(search)
+    core = _core_subject_tokens(text)
+    compact = " ".join(core)
+    for key, search in SCENE_SEARCHES:
+        if key in compact and search not in alts:
+            add(search)
+    if core:
+        add(" ".join(core[:3]) + " cinematic drone 60fps")
+        if len(core) >= 2:
+            add(" ".join(core[:2]) + " sunrise cinematic 60fps")
+        add(" ".join(core[:1]) + " landscape cinematic 60fps")
+    scenic_keys = (
+        "mountain",
+        "sunrise",
+        "fjord",
+        "forest",
+        "peak",
+        "ocean",
+        "beach",
+        "canyon",
+        "lake",
+        "dolomite",
+        "alpine",
+    )
+    if any(k in compact for k in scenic_keys):
+        add("dramatic mountain sunrise cinematic drone 60fps")
+        add("nature landscape sunrise cinematic 60fps")
+    return alts[:max_alts]
+
+
+def broaden_broll_query_ladder(query: str, *, max_steps: int = 8) -> list[str]:
     """Deterministic broader searches that keep the core subject tokens."""
     text = (query or "").strip()
     if not text:
         return []
     storyboard = expand_broll_search_queries(text)
-    if len(storyboard) > 1:
-        return storyboard[:max_steps]
-    tokens = re.sub(r"[^a-z0-9]+", " ", text.lower()).split()
-    core = [t for t in tokens if t not in _MODIFIER_WORDS and len(t) > 2]
-    if not core:
-        core = [t for t in tokens if len(t) > 2]
-    if not core:
-        return [text]
     ladder: list[str] = []
     seen: set[str] = set()
 
     def add(q: str) -> None:
         q = " ".join(q.split()).strip()
-        if not q or q in seen:
+        if not q or q.lower() in seen:
             return
-        seen.add(q)
+        seen.add(q.lower())
         ladder.append(q)
 
+    for step in storyboard:
+        add(step)
+    if "," in text:
+        for part in [p.strip(" .") for p in text.split(",") if p.strip()]:
+            for search in _searches_for_beat(part) or []:
+                add(search)
+            add(part if "60fps" in part.lower() else f"{part} cinematic 60fps")
+    core = _core_subject_tokens(text)
+    if not core:
+        return ladder[:max_steps] if ladder else [text]
     add(text)
-    for drop in (2, 3, 4):
+    if len(core) >= 2:
+        add(" ".join(core[:2]) + " cinematic drone 60fps")
+    add(" ".join(core[:3]) if len(core) >= 3 else " ".join(core[:2]))
+    for drop in (1, 2):
         if len(core) <= 1:
             break
-        keep = core[: max(1, len(core) - (drop - 1))]
-        add(" ".join(keep) + " cinematic")
-    if len(core) >= 2:
-        add(" ".join(core[:2]) + " cinematic")
-    add(" ".join(core[:3]) if len(core) >= 3 else " ".join(core))
+        keep = core[: max(1, len(core) - drop)]
+        add(" ".join(keep) + " cinematic 60fps")
+    for alt in relaxed_search_alternatives(text, max_alts=3):
+        add(alt)
     return ladder[:max_steps]

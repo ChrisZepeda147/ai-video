@@ -661,6 +661,31 @@ def last_remediation_changed(conn, slot_id: int, fingerprint: str) -> bool:
     )
 
 
+def _slot_broll_no_progress(conn, slot_id: int, fingerprint: str) -> bool:
+    rows = conn.execute(
+        """
+        SELECT metrics_json, remediation_result FROM montage_incidents
+        WHERE slot_id = ? AND outcome = 'failure' AND fingerprint = ?
+        ORDER BY id DESC LIMIT 3
+        """,
+        (slot_id, fingerprint),
+    ).fetchall()
+    if len(rows) < 2:
+        return False
+    usable_counts: list[int | None] = []
+    for row in rows:
+        try:
+            data = json.loads(row["metrics_json"] or "{}")
+        except json.JSONDecodeError:
+            data = {}
+        val = data.get("clips_usable")
+        usable_counts.append(int(val) if val is not None else None)
+    if usable_counts.count(usable_counts[0]) == len(usable_counts) and usable_counts[0] is not None:
+        if str(rows[0]["remediation_result"]) != "applied":
+            return True
+    return False
+
+
 def should_skip_slot_this_pass(store, slot_id: int, fingerprint: str | None = None) -> bool:
     conn = store._conn
     ensure_montage_incident_tables(conn)
@@ -679,6 +704,8 @@ def should_skip_slot_this_pass(store, slot_id: int, fingerprint: str | None = No
     if not fingerprint:
         return False
     streak = slot_same_fingerprint_streak(conn, slot_id, fingerprint)
+    if _slot_broll_no_progress(conn, slot_id, fingerprint):
+        return True
     if streak < SLOT_SAME_FINGERPRINT_MAX:
         return False
     if last_remediation_changed(conn, slot_id, fingerprint):
