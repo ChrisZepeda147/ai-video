@@ -3528,7 +3528,7 @@ def ensure_broll_clips(
         bump_query_index(job_dir, q_idx)
         missing_now = max(0, needed_clips - inv.usable_count)
         parts_budget = min(8, missing_now + 1)
-        parallel_n = min(3, max(1, missing_now // 2)) if missing_now >= 3 else 1
+        parallel_n = 2 if missing_now >= 4 else 1
         # Section cuts from long sources; reject is for full-file normal pass only.
         allow_long = (not split_full_source) or attempt >= max(1, max_attempts - 2)
         stagnant_pops = 0
