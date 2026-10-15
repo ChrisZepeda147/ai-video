@@ -1094,4 +1094,11 @@ export type WeeklyHealthResponse = {
   }>;
   log_tail?: string;
   reconcile?: { stale?: { stale_failed?: number; queued_restarted?: number }; slots?: { reconciled_done?: number; reconciled_failed?: number }; resumed?: number };
+  active_incident?: boolean;
+  incident_failure_code?: string | null;
+  incident_count_24h?: number;
+  incident_unique_slots?: number;
+  incident_last_seen?: string | null;
+  incident_path?: string | null;
+  incident_message?: string | null;
 };

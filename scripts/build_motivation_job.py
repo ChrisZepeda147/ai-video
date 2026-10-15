@@ -1563,16 +1563,34 @@ def prepare_speech(
     from concurrent.futures import TimeoutError as FuturesTimeoutError
 
     from discovery.config import speech_candidate_timeout_sec, speech_max_candidate_attempts
+    from speech_acquire import speech_search_query_ladder
 
     speech_try_cap = speech_max_candidate_attempts()
     per_candidate_timeout = speech_candidate_timeout_sec()
+    speech_state: dict[str, object] = {}
+    speech_path = job_dir / "speech_acquire.json"
+    if speech_path.is_file():
+        try:
+            speech_state = json.loads(speech_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            speech_state = {}
+    ladder_len = max(1, len(speech_search_query_ladder(speaker, speech_query)))
+    ladder_offset = int(speech_state.get("speech_ladder_offset") or 0)
+    ladder_offset += int(os.environ.get("MONTAGE_SPEECH_LADDER_OFFSET", "0") or 0)
+    speech_attempt_offset = max(0, len(blocked_ids) // 2) + ladder_offset
     if len(blocked_ids) >= speech_try_cap:
-        raise MotivationJobError(
-            "SPEECH_EXHAUSTED",
-            f"Speech acquisition already tried {len(blocked_ids)} sources for this job folder. "
-            "Pin a --speech-url, clear the job audio folder, or pick a different speaker clip.",
-        )
-    speech_attempt_offset = max(0, len(blocked_ids) // 2)
+        if speech_attempt_offset < ladder_len * 3:
+            speech_attempt_offset = speech_attempt_offset % ladder_len
+            print(
+                f"Speech blocked list at cap ({len(blocked_ids)}); "
+                f"rotating ladder offset={speech_attempt_offset} (remediation)"
+            )
+        else:
+            raise MotivationJobError(
+                "SPEECH_EXHAUSTED",
+                f"Speech acquisition already tried {len(blocked_ids)} sources for this job folder. "
+                "Pin a --speech-url, clear the job audio folder, or pick a different speaker clip.",
+            )
     primary_query, fallback_query = speech_search_queries(
         speaker,
         speech_query,
@@ -3103,8 +3121,8 @@ def ensure_broll_clips(
         jobs_root=jobs_root,
     )
     retry_fresh_search = skip_broll_search_cache or (
-        len(acquire.get("queries_tried") or []) > 0 and inv.usable_count == 0
-    )
+        os.environ.get("MONTAGE_BROLL_FRESH_SEARCH", "").strip().lower() in {"1", "true", "yes"}
+    ) or (len(acquire.get("queries_tried") or []) > 0 and inv.usable_count == 0)
     montage_timer().stats.starting_usable = inv.usable_count
     montage_timer().stats.required_clips = needed_clips
     log_broll_progress("ensure_broll", inv, status="progress")
@@ -4233,14 +4251,17 @@ def main() -> int:
         montage_timer().emit()
         return 1
     except MotivationJobError as exc:
+        from montage_incidents import normalize_failure_code
+
+        raw_code = (
+            "SPEECH_DOWNLOAD_FAILED"
+            if exc.code in {"DOWNLOAD_FAILED", "NO_CANDIDATE_FOUND", "REUSE_RESTRICTION"}
+            else exc.code
+        )
         failure = MontageFailure(
             slug=args.slug or "",
             stage="prepare_speech",
-            code=(
-                "SPEECH_DOWNLOAD_FAILED"
-                if exc.code in {"DOWNLOAD_FAILED", "NO_CANDIDATE_FOUND", "REUSE_RESTRICTION"}
-                else exc.code
-            ),
+            code=normalize_failure_code(raw_code),
             summary=str(exc),
         )
         print(failure.emit_json_line())
@@ -4255,6 +4276,14 @@ def main() -> int:
         return 1
     except (FileNotFoundError, RuntimeError, ValueError, subprocess.CalledProcessError) as exc:
         code = classify_download_error(exc)
+        failure = MontageFailure(
+            slug=args.slug or "",
+            stage="montage",
+            code=code if code in {"FFMPEG_FAILED", "RENDER_FAILED"} else "UNKNOWN_FAILURE",
+            summary=str(exc),
+        )
+        print(failure.emit_json_line())
+        emit_stage_line(failure.stage, "fail", code=failure.code)
         print(f"{code}: {exc}", file=sys.stderr)
         montage_timer().emit()
         return 1

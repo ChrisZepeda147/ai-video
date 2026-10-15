@@ -97,6 +97,9 @@ def ensure_weekly_tables(store) -> None:
         )
     if "render_started_at" not in cols:
         store._conn.execute("ALTER TABLE weekly_slots ADD COLUMN render_started_at TEXT")
+    from montage_incidents import ensure_montage_incident_tables
+
+    ensure_montage_incident_tables(store._conn)
     store._conn.commit()
 
 
@@ -1271,6 +1274,20 @@ def _backlog_pass_pick_slot(
             continue
         if status == "failed":
             if requeue_failed and advance:
+                try:
+                    from montage_incidents import should_skip_slot_this_pass
+
+                    if should_skip_slot_this_pass(store, slot_id):
+                        attempted.add(slot_id)
+                        if advance:
+                            _write_backlog_pass_state(
+                                owner=owner_norm,
+                                pass_no=pass_no,
+                                attempted_slot_ids=attempted,
+                            )
+                        continue
+                except Exception:
+                    pass
                 requeue_slot(store, slot_id)
                 status = _slot_status(store, slot_id)
             elif not advance:
@@ -1955,7 +1972,7 @@ def _reset_weekly_slot_acquire_state(store, slot_id: int) -> None:
         return
     if not job_dir.is_dir():
         return
-    for name in ("speech_acquire.json", "broll_acquire.json"):
+    for name in ("speech_acquire.json", "broll_acquire.json", "montage_remediation.json"):
         path = job_dir / name
         if path.is_file():
             path.unlink(missing_ok=True)
@@ -2216,7 +2233,7 @@ def weekly_health(store, *, day: str | None = None, owner: str | None = None) ->
     last_run = _read_last_run()
     auto = automation_health_snapshot(store, owner=owner)
     paused = is_production_paused()
-    return {
+    out = {
         "day": day,
         "owner": owner,
         "preflight": preflight,
@@ -2239,6 +2256,29 @@ def weekly_health(store, *, day: str | None = None, owner: str | None = None) ->
         "log_tail": tail_weekly_log(lines=40),
         **auto,
     }
+    try:
+        import sys
+        from pathlib import Path as _Path
+
+        scripts = _Path(__file__).resolve().parents[1]
+        if str(scripts) not in sys.path:
+            sys.path.insert(0, str(scripts))
+        from montage_incidents import health_incident_summary
+
+        out.update(health_incident_summary(store))
+    except Exception:
+        out.update(
+            {
+                "active_incident": False,
+                "incident_failure_code": None,
+                "incident_count_24h": 0,
+                "incident_unique_slots": 0,
+                "incident_last_seen": None,
+                "incident_path": None,
+                "incident_message": None,
+            }
+        )
+    return out
 
 
 def _last_run_path() -> Path:

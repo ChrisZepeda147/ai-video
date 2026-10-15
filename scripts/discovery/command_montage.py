@@ -209,6 +209,55 @@ def _montage_actionable_error(
     return resolve_actionable_error(stdout, stderr, exit_code=exit_code)
 
 
+def _montage_job_dir(root: Path, slug: str) -> Path | None:
+    jobs_root = root / "downloads" / "motivational"
+    try:
+        from discovery.motivation_paths import resolve_job_dir
+
+        return resolve_job_dir(slug, jobs_root)
+    except Exception:
+        return None
+
+
+def _record_montage_outcome(
+    store,
+    *,
+    job_key: str,
+    slug: str,
+    outcome: str,
+    stdout_log: str = "",
+    stderr_log: str = "",
+    exit_code: int | None = None,
+    timed_out: bool = False,
+    worker_crashed: bool = False,
+    worker_python: str = "",
+) -> None:
+    scripts = project_root() / "scripts"
+    path = str(scripts)
+    if path not in sys.path:
+        sys.path.insert(0, path)
+    from montage_incidents import record_montage_terminal
+
+    root = project_root()
+    job_dir = _montage_job_dir(root, slug)
+    try:
+        record_montage_terminal(
+            store,
+            job_key=job_key,
+            slug=slug,
+            outcome=outcome,
+            stdout_log=stdout_log,
+            stderr_log=stderr_log,
+            exit_code=exit_code,
+            timed_out=timed_out,
+            worker_crashed=worker_crashed,
+            worker_python=worker_python,
+            job_dir=job_dir,
+        )
+    except Exception as exc:
+        print(f"MONTAGE_INCIDENT_RECORD_ERROR {exc}", flush=True)
+
+
 def is_direct_montage_command(text: str) -> bool:
     lower = (text or "").lower()
     return "luxury-clips-montage" in lower or "build_motivation_job.py" in lower
@@ -399,6 +448,9 @@ def run_direct_montage_command(
 
     def _run() -> None:
         thread_store = DiscoveryStore(default_db_path())
+        worker_python = sys.executable
+        last_slug = ""
+        plan: dict[str, Any] | None = None
         try:
             job = thread_store._conn.execute(
                 "SELECT * FROM cursor_command_jobs WHERE job_key = ?",
@@ -437,6 +489,7 @@ def run_direct_montage_command(
             env = dict(subprocess_env() if subprocess_env else os.environ)
             env["PUBLISHING_OWNER"] = str(plan.get("owner") or "chris")
             env["AI_VIDEO_COMMAND_JOB_KEY"] = job_key
+            worker_python = str(env.get("AI_VIDEO_PYTHON") or sys.executable)
             is_weekly_job = bool(
                 thread_store._conn.execute(
                     "SELECT 1 FROM weekly_slots WHERE job_key = ? LIMIT 1",
@@ -480,6 +533,14 @@ def run_direct_montage_command(
                     "hook": plan.get("hook"),
                 }
                 cmd, slug, rel_output = _build_command(body, root)
+                job_dir = _montage_job_dir(root, slug)
+                if job_dir and job_dir.is_dir():
+                    try:
+                        from montage_incidents import remediation_env_from_sidecar
+
+                        env.update(remediation_env_from_sidecar(job_dir))
+                    except Exception:
+                        pass
                 montage_timeout = _montage_timeout_sec_for_job(thread_store, job_key)
                 weekly_job = montage_timeout == weekly_montage_job_timeout_sec()
                 try:
@@ -520,6 +581,19 @@ def run_direct_montage_command(
                     except Exception:
                         pass
                     truncated = "\n\n".join(logs)[-120_000:]
+                    try:
+                        from montage_incidents import synthesize_failure
+
+                        fail = synthesize_failure(
+                            stdout=truncated,
+                            stderr=msg,
+                            slug=slug,
+                            timed_out=True,
+                        )
+                        truncated = (truncated + "\n" + fail.emit_json_line()).strip()
+                        summary = fail.to_summary()
+                    except Exception:
+                        summary = msg[:500]
                     thread_store._conn.execute(
                         """
                         UPDATE cursor_command_jobs
@@ -531,12 +605,22 @@ def run_direct_montage_command(
                             truncated,
                             msg,
                             msg,
-                            msg[:500],
+                            summary,
                             _now_iso(),
                             job_key,
                         ),
                     )
                     thread_store._conn.commit()
+                    _record_montage_outcome(
+                        thread_store,
+                        job_key=job_key,
+                        slug=slug,
+                        outcome="failure",
+                        stdout_log=truncated,
+                        stderr_log=msg,
+                        timed_out=True,
+                        worker_python=worker_python,
+                    )
                     return
                 part_log = "\n".join(p for p in (result.stdout, result.stderr) if p).strip()
                 if part_log:
@@ -565,6 +649,15 @@ def run_direct_montage_command(
                         ),
                     )
                     thread_store._conn.commit()
+                    _record_montage_outcome(
+                        thread_store,
+                        job_key=job_key,
+                        slug=slug,
+                        outcome="failure",
+                        stdout_log=truncated,
+                        exit_code=result.returncode,
+                        worker_python=worker_python,
+                    )
                     return
                 output = root / rel_output
                 last_slug = slug
@@ -609,16 +702,34 @@ def run_direct_montage_command(
                 ),
             )
             thread_store._conn.commit()
+            _record_montage_outcome(
+                thread_store,
+                job_key=job_key,
+                slug=str(last_slug or plan.get("slug") or ""),
+                outcome="success",
+                stdout_log=truncated,
+                worker_python=worker_python,
+            )
         except Exception as exc:
+            err = str(exc)[:500]
             thread_store._conn.execute(
                 """
                 UPDATE cursor_command_jobs
                 SET status = 'failed', error_message = ?, completed_at = ?
                 WHERE job_key = ?
                 """,
-                (str(exc), _now_iso(), job_key),
+                (err, _now_iso(), job_key),
             )
             thread_store._conn.commit()
+            _record_montage_outcome(
+                thread_store,
+                job_key=job_key,
+                slug=str(last_slug or (plan or {}).get("slug") or ""),
+                outcome="failure",
+                stderr_log=err,
+                worker_crashed=True,
+                worker_python=worker_python,
+            )
         finally:
             try:
                 thread_store._conn.execute(

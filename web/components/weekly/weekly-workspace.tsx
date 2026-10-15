@@ -540,6 +540,23 @@ export function WeeklyWorkspace() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
+      {health?.active_incident && health.incident_message ? (
+        <div className="rounded-xl border border-amber-700/60 bg-amber-950/40 px-4 py-3 text-sm text-amber-100">
+          <p className="font-medium">{health.incident_message}</p>
+          <p className="mt-1 text-xs text-amber-200/80">
+            Engineering incident — runtime auto-heal will not change quality gates or source code.
+            {health.incident_path ? (
+              <>
+                {" "}
+                Diagnostics:{" "}
+                <code className="text-[11px]">{health.incident_path.replace(/^.*[/\\]data[/\\]/, "data/")}</code>
+                {" · "}
+                Also open <code className="text-[11px]">data/incidents/CURSOR_FAILURE_BRIEF.md</code> in Cursor.
+              </>
+            ) : null}
+          </p>
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-center gap-3">
         {(["chris", "stephen"] as const).map((o) => (
           <button

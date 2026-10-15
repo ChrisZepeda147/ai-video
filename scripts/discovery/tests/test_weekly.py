@@ -138,7 +138,12 @@ class TestWeekly(unittest.TestCase):
 
     def test_requeue_preserves_acquire_sidecars(self) -> None:
         from discovery.config import project_root
-        from discovery.motivation_paths import default_job_date, job_dir_for, motivation_jobs_root
+        from discovery.motivation_paths import (
+            default_job_date,
+            job_dir_for,
+            motivation_jobs_root,
+            resolve_job_dir,
+        )
 
         weekly.save_slots(
             self.store,
@@ -149,10 +154,10 @@ class TestWeekly(unittest.TestCase):
         slot = weekly.due_slots(self.store, day="2026-10-12", owner="chris")[0]
         slot_id = int(slot["id"])
         root = project_root()
-        job_dir = job_dir_for(
-            "weekly-chris-2026-10-12-mon-1",
-            motivation_jobs_root(root),
-            job_date=default_job_date(),
+        slug = "weekly-chris-2026-10-12-mon-1"
+        jobs_root = motivation_jobs_root(root)
+        job_dir = resolve_job_dir(slug, jobs_root) or job_dir_for(
+            slug, jobs_root, job_date=default_job_date()
         )
         job_dir.mkdir(parents=True, exist_ok=True)
         sidecar = job_dir / "broll_acquire.json"
