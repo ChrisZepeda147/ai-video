@@ -269,7 +269,7 @@ def _start_weekly_morning_catchup() -> None:
     import time
 
     from discovery.config import default_db_path
-    from discovery.weekly import ensure_weekly_automation_started, weekly_reconcile_pipeline
+    from discovery.weekly import weekly_api_startup_recover
 
     def _run() -> None:
         log = logging.getLogger("uvicorn.error")
@@ -280,16 +280,18 @@ def _start_weekly_morning_catchup() -> None:
             return
         store = DiscoveryStore(db)
         try:
-            pipe = weekly_reconcile_pipeline(store)
-            if pipe.get("stale", {}).get("stale_failed"):
-                log.info("Weekly reconcile: stale jobs failed=%s", pipe["stale"])
-            result = ensure_weekly_automation_started()
+            result = weekly_api_startup_recover(store)
+            stale = (result.get("reconcile") or {}).get("stale") or {}
+            if stale.get("stale_failed"):
+                log.info("Weekly reconcile: stale jobs failed=%s", stale)
         except Exception as exc:
             log.warning("Weekly automation start failed: %s", exc)
             return
         finally:
             store.close()
-        log.info("Weekly automation: %s", result)
+        log.info("Weekly automation: %s", result.get("automation"))
+        if result.get("backlog_days"):
+            log.info("Weekly backlog: %s kicked=%s", result["backlog_days"], result.get("kicked"))
 
     threading.Thread(target=_run, name="weekly-automation-start", daemon=True).start()
 
@@ -1852,7 +1854,7 @@ def weekly_retry_slot_endpoint(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if result.get("error"):
         raise HTTPException(status_code=422, detail=str(result["error"]))
-    return {"slot_id": slot_id, "status": "rerunning", "batch": result}
+    return {"slot_id": slot_id, "status": "retry_pending", "automation": result}
 
 
 @app.post("/api/production/pause")
@@ -1880,7 +1882,7 @@ def weekly_restart_day_endpoint(
     owner = body.get("owner")
     if not day or not owner:
         raise HTTPException(status_code=422, detail="day and owner are required")
-    run_after = body.get("run_after", True)
+    run_after = body.get("run_after", False)
     if isinstance(run_after, str):
         run_after = run_after.strip().lower() not in {"0", "false", "no"}
     kill_workers = body.get("kill_workers", True)
@@ -1911,42 +1913,49 @@ def weekly_run_due_endpoint(
     store: Annotated[DiscoveryStore, Depends(get_store)],
     _: Annotated[None, Depends(require_internal_key)],
 ):
-    from discovery.weekly import run_weekly_due_batch
+    from discovery.weekly import kickoff_weekly_automation, run_weekly_due_batch
 
     day = str(body.get("day") or "")
     owner = body.get("owner") or None
-    limit = max(1, min(int(body.get("limit") or 3), 12))
-    serial = body.get("serial", True)
-    if isinstance(serial, str):
-        serial = serial.strip().lower() not in {"0", "false", "no"}
-    wait_complete = body.get("wait_complete", True)
-    if isinstance(wait_complete, str):
-        wait_complete = wait_complete.strip().lower() not in {"0", "false", "no"}
-    fill_day = body.get("fill_day", True)
-    if isinstance(fill_day, str):
-        fill_day = fill_day.strip().lower() not in {"0", "false", "no"}
+    manual_batch = body.get("manual_batch", False)
+    if isinstance(manual_batch, str):
+        manual_batch = manual_batch.strip().lower() in {"1", "true", "yes"}
+    retry_failed = body.get("retry_failed", False)
+    if isinstance(retry_failed, str):
+        retry_failed = retry_failed.strip().lower() not in {"0", "false", "no"}
     try:
-        if fill_day:
-            from discovery.weekly import kickoff_daily_fill_async
-
-            day_iso = day or __import__("datetime").date.today().isoformat()
-            return kickoff_daily_fill_async(day=day_iso, owner=owner)
-        return run_weekly_due_batch(
+        day_iso = day or __import__("datetime").date.today().isoformat()
+        if manual_batch:
+            limit = max(1, min(int(body.get("limit") or 3), 12))
+            serial = body.get("serial", True)
+            if isinstance(serial, str):
+                serial = serial.strip().lower() not in {"0", "false", "no"}
+            wait_complete = body.get("wait_complete", True)
+            if isinstance(wait_complete, str):
+                wait_complete = wait_complete.strip().lower() not in {"0", "false", "no"}
+            return run_weekly_due_batch(
+                store,
+                day=day_iso,
+                owner=owner,
+                limit=limit,
+                dry_run=False,
+                serial=bool(serial),
+                wait_complete=bool(wait_complete),
+                wait_timeout_sec=max(
+                    60,
+                    int(body.get("wait_timeout_minutes") or 0) * 60
+                    or __import__(
+                        "discovery.config", fromlist=["montage_job_timeout_sec"]
+                    ).montage_job_timeout_sec(),
+                ),
+                retry_failed=bool(retry_failed),
+                allow_manual=True,
+            )
+        return kickoff_weekly_automation(
             store,
-            day=day,
+            day=day_iso,
             owner=owner,
-            limit=limit,
-            dry_run=False,
-            serial=bool(serial),
-            wait_complete=bool(wait_complete),
-            wait_timeout_sec=max(
-                60,
-                int(body.get("wait_timeout_minutes") or 0) * 60
-                or __import__(
-                    "discovery.config", fromlist=["montage_job_timeout_sec"]
-                ).montage_job_timeout_sec(),
-            ),
-            retry_failed=bool(body.get("retry_failed")),
+            retry_failed=bool(retry_failed),
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

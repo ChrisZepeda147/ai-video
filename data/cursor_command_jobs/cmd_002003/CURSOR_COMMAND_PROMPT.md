@@ -1,0 +1,22 @@
+Make a new 9:16 motivational Short using the luxury-clips-montage workflow.
+Run `python scripts/build_motivation_job.py` with appropriate flags — do not reimplement FFmpeg or download logic.
+Owner account: chris — record combination usage for this owner when done.
+
+Before picking audio or visuals:
+- Query production library: `python scripts/production_library_cli.py list`
+- Check combinations catalog / existing transcripts — skip the same excerpt unless Extra instructions allow a remake.
+- Set speaker from actual clip title/channel (not search query). If search was Goggins but clip is Jocko, register as Jocko Willink.
+- Reuse of prior sources is allowed by default. Unused-only only if Extra instructions say unused / never used.
+
+Use job slug: `weekly-chris-2026-10-12-fri-2` for downloads under downloads/motivational/.
+
+Requested speaker: Tyson
+
+Search for audio (any type — speech, podcast clip, interview, etc.): Tyson motivational speech
+Visual / B-roll search: Lightning over red desert mountains
+Pipeline: download speech from YouTube, scrape captions for the clip, search B-roll for the visual line, grade + one-word captions (centered), register in production library. No background music on B-roll unless the brief asks for it.
+Default target length: 30–90 seconds unless extra instructions override.
+- View / scenery B-roll: no people in frame; use exclude-people / view-only search; 50fps+ clips only.
+
+Before downloading audio, query the production library and check existing transcripts — skip the same excerpt unless Extra instructions allow a remake.
+Register the finished video in the production library when done.
