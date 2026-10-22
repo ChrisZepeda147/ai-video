@@ -75,7 +75,7 @@ function Install-WeeklyTask {
   $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
   Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
   Write-Host "installed $TaskName daily $Time (StartWhenAvailable; silent launcher: $vbs)"
-  Write-Host "Morning batch: fill-day until 3/3 per owner (log: $LogPath)"
+  Write-Host "Morning batch: serial direct montage 3/day per owner, no localhost (log: $LogPath)"
 
   if (-not $SkipLogon -and (Test-Path $LogonPs1)) {
     $logonVbs = Join-Path $SilentVbsDir "weekly_logon_silent.vbs"

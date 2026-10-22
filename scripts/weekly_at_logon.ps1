@@ -24,7 +24,8 @@ $env:WEEKLY_MONTAGE_INLINE = "1"
 $stamp = Get-Date -Format "o"
 Add-Content -Path $LogPath -Value "`n$stamp  weekly_at_logon start python=$Python" -Encoding UTF8
 
-& $Python $Runner --fill-day --all-owners 2>&1 |
+# Catch-up after logon if PC missed 7am (same as morning batch; no API required).
+& $Python $Runner --all-owners --serial --wait-complete --retry-failed --limit 3 2>&1 |
     ForEach-Object { Add-Content -Path $LogPath -Value $_ -Encoding UTF8 }
 
 $code = $LASTEXITCODE

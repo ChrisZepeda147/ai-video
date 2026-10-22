@@ -24,7 +24,8 @@ $env:WEEKLY_MONTAGE_INLINE = "1"
 $stamp = Get-Date -Format "o"
 Add-Content -Path $LogPath -Value "`n$stamp  weekly_7am start python=$Python" -Encoding UTF8
 
-& $Python $Runner --fill-day --all-owners 2>&1 |
+# Standalone serial batch (no Discovery API / npm required).
+& $Python $Runner --all-owners --serial --wait-complete --retry-failed --limit 3 2>&1 |
     ForEach-Object { Add-Content -Path $LogPath -Value $_ -Encoding UTF8 }
 
 $code = $LASTEXITCODE
